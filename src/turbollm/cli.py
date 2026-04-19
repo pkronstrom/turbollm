@@ -184,7 +184,7 @@ def serve(model, port):
     console.print(f"Serving [bold]{m['name']}[/bold] on port {port}...")
     console.print(f"  [dim]{local}[/dim]\n")
     subprocess.run(
-        [sys.executable, "-m", "mlx_lm.server", "--model", str(local), "--port", str(port)],
+        [sys.executable, "-m", "mlx_lm", "server", "--model", str(local), "--port", str(port)],
     )
 
 
@@ -264,7 +264,7 @@ def opencode(model, port):
     local = model_path(repo)
     console.print(f"Starting [bold]{m['name']}[/bold] on port {port}...")
     server = subprocess.Popen(
-        [sys.executable, "-m", "mlx_lm.server", "--model", str(local), "--port", str(port)],
+        [sys.executable, "-m", "mlx_lm", "server", "--model", str(local), "--port", str(port)],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.PIPE,
     )
