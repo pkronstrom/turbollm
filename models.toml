@@ -1,0 +1,25 @@
+[defaults]
+port = 8899
+max_kv_size = 4096
+
+[defaults.opencode]
+context_length = 32768
+output_length = 8192
+
+[models.qwen36-35b-tq4]
+name = "Qwen3.6 35B-A3B TurboQuant 4bit"
+hf_repo = "majentik/Qwen3.6-35B-A3B-TurboQuant-MLX-4bit"
+size_gb = 18
+min_memory_gb = 24
+tool_use = true
+can_reason = true
+tags = ["coding", "moe", "turboquant"]
+
+[models.qwen36-35b-4bit]
+name = "Qwen3.6 35B-A3B MLX 4bit"
+hf_repo = "mlx-community/Qwen3.6-35B-A3B-4bit"
+size_gb = 20
+min_memory_gb = 24
+tool_use = true
+can_reason = true
+tags = ["coding", "moe"]

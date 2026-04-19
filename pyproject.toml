@@ -1,0 +1,20 @@
+[project]
+name = "turbollm"
+version = "0.1.0"
+description = "Ollama-like CLI for MLX TurboQuant models on Apple Silicon"
+requires-python = ">=3.11"
+dependencies = [
+    "click>=8.0",
+    "huggingface-hub>=0.20",
+    "rich>=13.0",
+]
+
+[project.optional-dependencies]
+serve = ["mlx-lm>=0.20"]
+
+[project.scripts]
+turbo = "turbollm.cli:cli"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
