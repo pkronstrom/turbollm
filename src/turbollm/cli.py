@@ -228,6 +228,8 @@ def serve(model, port):
 def _build_opencode_config(m: dict, port: int) -> dict:
     oc = get_defaults().get("opencode", {})
     repo = m["hf_repo"]
+    local = str(model_path(repo))
+    # Use local path as model ID so mlx-lm server doesn't re-download
     return {
         "provider": {
             "turbo": {
@@ -235,7 +237,7 @@ def _build_opencode_config(m: dict, port: int) -> dict:
                 "name": f"TurboLLM ({m['name']})",
                 "options": {"baseURL": f"http://127.0.0.1:{port}/v1"},
                 "models": {
-                    repo: {
+                    local: {
                         "name": m["name"],
                         "tool_use": m.get("tool_use", False),
                         "can_reason": m.get("can_reason", False),
