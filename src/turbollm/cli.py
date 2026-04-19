@@ -8,6 +8,15 @@ import urllib.request
 
 import click
 from rich.console import Console
+from rich.progress import (
+    BarColumn,
+    DownloadColumn,
+    Progress,
+    SpinnerColumn,
+    TextColumn,
+    TimeRemainingColumn,
+    TransferSpeedColumn,
+)
 from rich.table import Table
 
 from turbollm.registry import (
@@ -41,17 +50,39 @@ def pull(model):
         return
 
     size = f" ({m['size_gb']}GB)" if m.get("size_gb") else ""
-    console.print(f"Pulling [bold]{m['name']}[/bold]{size} from {repo}...")
+    console.print(f"\n  [bold]{m['name']}[/bold]{size}")
+    console.print(f"  [dim]{repo}[/dim]\n")
     MODELS_DIR.mkdir(parents=True, exist_ok=True)
 
-    from huggingface_hub import snapshot_download
+    from huggingface_hub import hf_hub_download, list_repo_files
 
-    snapshot_download(
-        repo_id=repo,
-        local_dir=str(dest),
-        local_dir_use_symlinks=False,
-    )
-    console.print(f"[green]Done:[/green] {dest}")
+    files = list_repo_files(repo_id=repo)
+    # Filter to model files (safetensors, json configs, tokenizer)
+    model_files = [f for f in files if not f.startswith(".")]
+
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[bold blue]{task.fields[filename]}"),
+        BarColumn(bar_width=30),
+        DownloadColumn(),
+        TransferSpeedColumn(),
+        TimeRemainingColumn(),
+        console=console,
+    ) as progress:
+        overall = progress.add_task("Downloading", total=len(model_files), filename="overall")
+        for f in model_files:
+            progress.update(overall, filename=f.split("/")[-1])
+            hf_hub_download(
+                repo_id=repo,
+                filename=f,
+                local_dir=str(dest),
+                local_dir_use_symlinks=False,
+            )
+            progress.advance(overall)
+        progress.update(overall, filename="done")
+
+    total_size = sum(f.stat().st_size for f in dest.rglob("*") if f.is_file()) / 1e9
+    console.print(f"\n  [green]Done![/green] {total_size:.1f}GB saved to {dest}\n")
 
 
 @cli.command(name="ls")
