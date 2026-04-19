@@ -218,27 +218,10 @@ def serve(model, port):
     )
 
 
-@cli.command()
-@click.argument("model", required=False)
-@click.option("--port", "-p", default=None, type=int, help="Port (default: 8899)")
-def opencode(model, port):
-    """Start model server + launch opencode."""
-    if model:
-        m = resolve_model(model)
-    else:
-        _, m = pick_model()
+def _build_opencode_config(m: dict, port: int) -> dict:
+    oc = get_defaults().get("opencode", {})
     repo = m["hf_repo"]
-    defaults = get_defaults()
-    oc = defaults.get("opencode", {})
-
-    if not is_downloaded(repo):
-        console.print(f"[yellow]Model not downloaded.[/yellow] Run: [bold]turbo pull {model}[/bold]")
-        raise SystemExit(1)
-
-    port = port or defaults.get("port", 8899)
-    local = model_path(repo)
-
-    config = {
+    return {
         "provider": {
             "turbo": {
                 "npm": "@ai-sdk/openai-compatible",
@@ -259,6 +242,46 @@ def opencode(model, port):
         }
     }
 
+
+def _server_is_running(port: int) -> bool:
+    try:
+        urllib.request.urlopen(f"http://127.0.0.1:{port}/v1/models", timeout=2)
+        return True
+    except Exception:
+        return False
+
+
+def _launch_opencode(m: dict, port: int):
+    config = _build_opencode_config(m, port)
+    env = os.environ.copy()
+    env["OPENCODE_CONFIG_CONTENT"] = json.dumps(config)
+    subprocess.run(["opencode"], env=env)
+
+
+@cli.command()
+@click.argument("model", required=False)
+@click.option("--port", "-p", default=None, type=int, help="Port (default: 8899)")
+def opencode(model, port):
+    """Start model server + launch opencode."""
+    if model:
+        m = resolve_model(model)
+    else:
+        _, m = pick_model()
+    repo = m["hf_repo"]
+    defaults = get_defaults()
+
+    if not is_downloaded(repo):
+        console.print(f"[yellow]Model not downloaded.[/yellow] Run: [bold]turbo pull {model}[/bold]")
+        raise SystemExit(1)
+
+    port = port or defaults.get("port", 8899)
+    local = model_path(repo)
+
+    if _server_is_running(port):
+        console.print(f"[green]Server already running on port {port}.[/green] Launching opencode...")
+        _launch_opencode(m, port)
+        return
+
     console.print(f"Starting [bold]{m['name']}[/bold] on port {port}...")
     server = subprocess.Popen(
         [sys.executable, "-m", "mlx_lm.server", "--model", str(local), "--port", str(port)],
@@ -267,11 +290,9 @@ def opencode(model, port):
     )
 
     for _ in range(60):
-        try:
-            urllib.request.urlopen(f"http://127.0.0.1:{port}/v1/models")
+        if _server_is_running(port):
             break
-        except Exception:
-            time.sleep(1)
+        time.sleep(1)
     else:
         console.print("[red]Server failed to start.[/red]")
         server.terminate()
@@ -280,9 +301,7 @@ def opencode(model, port):
     console.print("[green]Server ready.[/green] Launching opencode...")
 
     try:
-        env = os.environ.copy()
-        env["OPENCODE_CONFIG_CONTENT"] = json.dumps(config)
-        subprocess.run(["opencode"], env=env)
+        _launch_opencode(m, port)
     except KeyboardInterrupt:
         pass
     finally:
