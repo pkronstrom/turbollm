@@ -5,8 +5,24 @@ import subprocess
 import sys
 import time
 import urllib.request
+from pathlib import Path
 
 import click
+
+
+def _load_env():
+    """Load .env from package root or ~/.turbollm/.env."""
+    for p in [Path(__file__).parent.parent.parent / ".env", Path.home() / ".turbollm" / ".env"]:
+        if p.exists():
+            for line in p.read_text().splitlines():
+                line = line.strip()
+                if line and not line.startswith("#") and "=" in line:
+                    k, v = line.split("=", 1)
+                    os.environ.setdefault(k.strip(), v.strip())
+            return
+
+
+_load_env()
 from rich.console import Console
 from rich.progress import (
     BarColumn,
