@@ -190,7 +190,7 @@ def serve(model, port):
 
 def _build_opencode_config(m: dict, port: int) -> dict:
     oc = get_defaults().get("opencode", {})
-    local = str(model_path(m["hf_repo"]))
+    # Use "default_model" — mlx-lm maps this to whatever --model was passed
     return {
         "provider": {
             "turbo": {
@@ -198,7 +198,7 @@ def _build_opencode_config(m: dict, port: int) -> dict:
                 "name": f"TurboLLM ({m['name']})",
                 "options": {"baseURL": f"http://127.0.0.1:{port}/v1"},
                 "models": {
-                    local: {
+                    "default_model": {
                         "name": m["name"],
                         "tool_use": m.get("tool_use", False),
                         "can_reason": m.get("can_reason", False),
