@@ -62,3 +62,32 @@ def model_path(hf_repo: str) -> Path:
 def is_downloaded(hf_repo: str) -> bool:
     p = model_path(hf_repo)
     return p.exists() and any(p.glob("*.safetensors"))
+
+
+def list_downloaded() -> list[tuple[str, dict]]:
+    """Return list of (alias_or_repo, model_dict) for all downloaded models."""
+    reg = load_registry()
+    models = reg.get("models", {})
+    result = []
+
+    for alias, m in models.items():
+        if is_downloaded(m["hf_repo"]):
+            result.append((alias, m))
+
+    # Ad-hoc downloads not in registry
+    if MODELS_DIR.exists():
+        known_repos = {m["hf_repo"] for m in models.values()}
+        for d in MODELS_DIR.iterdir():
+            if not d.is_dir():
+                continue
+            repo = d.name.replace("--", "/")
+            if repo not in known_repos and any(d.glob("*.safetensors")):
+                result.append((repo, {
+                    "name": repo.split("/")[-1],
+                    "hf_repo": repo,
+                    "size_gb": None,
+                    "tool_use": True,
+                    "can_reason": True,
+                }))
+
+    return result

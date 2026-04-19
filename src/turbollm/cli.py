@@ -39,12 +39,33 @@ from turbollm.registry import (
     MODELS_DIR,
     get_defaults,
     is_downloaded,
+    list_downloaded,
     load_registry,
     model_path,
     resolve_model,
 )
 
 console = Console()
+
+
+def pick_model() -> tuple[str, dict]:
+    """Interactive picker for downloaded models."""
+    downloaded = list_downloaded()
+    if not downloaded:
+        console.print("[yellow]No models downloaded.[/yellow] Run [bold]turbo pull <model>[/bold] first.")
+        raise SystemExit(1)
+    if len(downloaded) == 1:
+        alias, m = downloaded[0]
+        console.print(f"Using [bold]{m['name']}[/bold]")
+        return alias, m
+
+    console.print("\n  [bold]Select a model:[/bold]\n")
+    for i, (alias, m) in enumerate(downloaded, 1):
+        console.print(f"  [bold cyan]{i}[/bold cyan]) {m['name']}  [dim]({alias})[/dim]")
+    console.print()
+
+    choice = click.prompt("  Choice", type=click.IntRange(1, len(downloaded)))
+    return downloaded[choice - 1]
 
 
 @click.group()
@@ -173,11 +194,14 @@ def rm(model, yes):
 
 
 @cli.command()
-@click.argument("model")
+@click.argument("model", required=False)
 @click.option("--port", "-p", default=None, type=int, help="Port (default: 8899)")
 def serve(model, port):
     """Start MLX model server."""
-    m = resolve_model(model)
+    if model:
+        m = resolve_model(model)
+    else:
+        _, m = pick_model()
     repo = m["hf_repo"]
     defaults = get_defaults()
 
@@ -195,11 +219,14 @@ def serve(model, port):
 
 
 @cli.command()
-@click.argument("model")
+@click.argument("model", required=False)
 @click.option("--port", "-p", default=None, type=int, help="Port (default: 8899)")
 def opencode(model, port):
     """Start model server + launch opencode."""
-    m = resolve_model(model)
+    if model:
+        m = resolve_model(model)
+    else:
+        _, m = pick_model()
     repo = m["hf_repo"]
     defaults = get_defaults()
     oc = defaults.get("opencode", {})
