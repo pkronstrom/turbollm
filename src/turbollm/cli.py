@@ -91,10 +91,16 @@ def pull(model):
     console.print(f"  [dim]{repo}[/dim]\n")
     MODELS_DIR.mkdir(parents=True, exist_ok=True)
 
+    import logging
+
     from huggingface_hub import hf_hub_download, list_repo_files
 
+    # Suppress noisy HTTP logs from huggingface_hub / httpx
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("huggingface_hub").setLevel(logging.WARNING)
+    os.environ["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"
+
     files = list_repo_files(repo_id=repo)
-    # Filter to model files (safetensors, json configs, tokenizer)
     model_files = [f for f in files if not f.startswith(".")]
 
     with Progress(
