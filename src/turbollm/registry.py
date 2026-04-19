@@ -3,7 +3,8 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 BUNDLED_TOML = Path(__file__).parent.parent.parent / "models.toml"
-MODELS_DIR = Path.home() / ".turbollm" / "models"
+HF_CACHE = Path.home() / ".cache" / "huggingface" / "hub"
+LEGACY_DIR = Path.home() / ".turbollm" / "models"
 
 
 def load_registry() -> dict:
@@ -17,13 +18,12 @@ def parse_model_input(raw: str) -> str:
     """Accept alias, hf_repo, or full HF URL. Returns hf_repo string."""
     parsed = urlparse(raw)
     if parsed.scheme in ("http", "https") and "huggingface.co" in parsed.netloc:
-        # https://huggingface.co/owner/repo -> owner/repo
         parts = parsed.path.strip("/").split("/")
         if len(parts) >= 2:
             return f"{parts[0]}/{parts[1]}"
     if "/" in raw:
-        return raw  # already owner/repo
-    return raw  # alias
+        return raw
+    return raw
 
 
 def resolve_model(raw: str) -> dict:
@@ -32,16 +32,13 @@ def resolve_model(raw: str) -> dict:
     reg = load_registry()
     models = reg.get("models", {})
 
-    # Try alias match
     if repo_or_alias in models:
         return models[repo_or_alias]
 
-    # Try hf_repo match
     for m in models.values():
         if m["hf_repo"] == repo_or_alias:
             return m
 
-    # Unknown model — create an ad-hoc entry
     return {
         "name": repo_or_alias.split("/")[-1],
         "hf_repo": repo_or_alias,
@@ -55,13 +52,44 @@ def get_defaults() -> dict:
     return load_registry().get("defaults", {})
 
 
-def model_path(hf_repo: str) -> Path:
-    return MODELS_DIR / hf_repo.replace("/", "--")
+def _hf_cache_path(hf_repo: str) -> Path:
+    """Return the HF cache dir for a repo: ~/.cache/huggingface/hub/models--owner--repo"""
+    return HF_CACHE / f"models--{hf_repo.replace('/', '--')}"
+
+
+def _hf_snapshot_path(hf_repo: str) -> Path | None:
+    """Return the latest snapshot path in HF cache, or None."""
+    cache_dir = _hf_cache_path(hf_repo)
+    snapshots = cache_dir / "snapshots"
+    if not snapshots.exists():
+        return None
+    # Get the latest snapshot (usually only one)
+    dirs = sorted(snapshots.iterdir(), key=lambda d: d.stat().st_mtime, reverse=True)
+    return dirs[0] if dirs else None
+
+
+def _legacy_path(hf_repo: str) -> Path:
+    """Old ~/.turbollm/models/ location."""
+    return LEGACY_DIR / hf_repo.replace("/", "--")
+
+
+def model_path(hf_repo: str) -> Path | None:
+    """Return the local path to a downloaded model. Checks HF cache then legacy dir."""
+    # Check HF cache first
+    snap = _hf_snapshot_path(hf_repo)
+    if snap and any(snap.glob("*.safetensors")):
+        return snap
+
+    # Check legacy ~/.turbollm/models/ dir
+    legacy = _legacy_path(hf_repo)
+    if legacy.exists() and any(legacy.glob("*.safetensors")):
+        return legacy
+
+    return None
 
 
 def is_downloaded(hf_repo: str) -> bool:
-    p = model_path(hf_repo)
-    return p.exists() and any(p.glob("*.safetensors"))
+    return model_path(hf_repo) is not None
 
 
 def list_downloaded() -> list[tuple[str, dict]]:
@@ -73,21 +101,5 @@ def list_downloaded() -> list[tuple[str, dict]]:
     for alias, m in models.items():
         if is_downloaded(m["hf_repo"]):
             result.append((alias, m))
-
-    # Ad-hoc downloads not in registry
-    if MODELS_DIR.exists():
-        known_repos = {m["hf_repo"] for m in models.values()}
-        for d in MODELS_DIR.iterdir():
-            if not d.is_dir():
-                continue
-            repo = d.name.replace("--", "/")
-            if repo not in known_repos and any(d.glob("*.safetensors")):
-                result.append((repo, {
-                    "name": repo.split("/")[-1],
-                    "hf_repo": repo,
-                    "size_gb": None,
-                    "tool_use": True,
-                    "can_reason": True,
-                }))
 
     return result

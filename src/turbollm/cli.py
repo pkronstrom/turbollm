@@ -36,7 +36,6 @@ from rich.progress import (
 from rich.table import Table
 
 from turbollm.registry import (
-    MODELS_DIR,
     get_defaults,
     is_downloaded,
     list_downloaded,
@@ -89,43 +88,20 @@ def pull(model):
     size = f" ({m['size_gb']}GB)" if m.get("size_gb") else ""
     console.print(f"\n  [bold]{m['name']}[/bold]{size}")
     console.print(f"  [dim]{repo}[/dim]\n")
-    MODELS_DIR.mkdir(parents=True, exist_ok=True)
 
     import logging
 
-    from huggingface_hub import hf_hub_download, list_repo_files
+    from huggingface_hub import snapshot_download
 
     # Suppress noisy HTTP logs from huggingface_hub / httpx
     logging.getLogger("httpx").setLevel(logging.WARNING)
     logging.getLogger("huggingface_hub").setLevel(logging.WARNING)
-    os.environ["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"
 
-    files = list_repo_files(repo_id=repo)
-    model_files = [f for f in files if not f.startswith(".")]
-
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[bold blue]{task.fields[filename]}"),
-        BarColumn(bar_width=30),
-        DownloadColumn(),
-        TransferSpeedColumn(),
-        TimeRemainingColumn(),
-        console=console,
-    ) as progress:
-        overall = progress.add_task("Downloading", total=len(model_files), filename="overall")
-        for f in model_files:
-            progress.update(overall, filename=f.split("/")[-1])
-            hf_hub_download(
-                repo_id=repo,
-                filename=f,
-                local_dir=str(dest),
-                local_dir_use_symlinks=False,
-            )
-            progress.advance(overall)
-        progress.update(overall, filename="done")
-
-    total_size = sum(f.stat().st_size for f in dest.rglob("*") if f.is_file()) / 1e9
-    console.print(f"\n  [green]Done![/green] {total_size:.1f}GB saved to {dest}\n")
+    # Download to HF's default cache — mlx-lm uses this natively
+    console.print("  Downloading...")
+    local = snapshot_download(repo_id=repo)
+    total_size = sum(f.stat().st_size for f in Path(local).rglob("*") if f.is_file()) / 1e9
+    console.print(f"\n  [green]Done![/green] {total_size:.1f}GB cached at {local}\n")
 
 
 @cli.command(name="ls")
@@ -148,29 +124,14 @@ def ls_cmd(available):
         console.print(table)
         return
 
-    if not MODELS_DIR.exists():
-        console.print("No models downloaded. Run [bold]turbo ls -a[/bold] to see available.")
-        return
-
     found = False
     for alias, m in models.items():
         if is_downloaded(m["hf_repo"]):
             dest = model_path(m["hf_repo"])
-            size = sum(f.stat().st_size for f in dest.rglob("*") if f.is_file()) / 1e9
-            table.add_row(alias, f"{size:.1f}GB", "[green]downloaded[/green]", m["hf_repo"])
-            found = True
-
-    # Check for ad-hoc downloads not in registry
-    if MODELS_DIR.exists():
-        for d in MODELS_DIR.iterdir():
-            if not d.is_dir():
-                continue
-            repo = d.name.replace("--", "/")
-            if not any(m["hf_repo"] == repo for m in models.values()):
-                if any(d.glob("*.safetensors")):
-                    size = sum(f.stat().st_size for f in d.rglob("*") if f.is_file()) / 1e9
-                    table.add_row("-", f"{size:.1f}GB", "[green]downloaded[/green]", repo)
-                    found = True
+            if dest:
+                size = sum(f.stat().st_size for f in dest.rglob("*") if f.is_file()) / 1e9
+                table.add_row(alias, f"{size:.1f}GB", "[green]downloaded[/green]", m["hf_repo"])
+                found = True
 
     if found:
         console.print(table)
@@ -185,17 +146,19 @@ def rm(model, yes):
     """Remove a downloaded model."""
     m = resolve_model(model)
     repo = m["hf_repo"]
-    dest = model_path(repo)
 
-    if not dest.exists():
+    if not is_downloaded(repo):
         console.print(f"[yellow]Not downloaded:[/yellow] {model}")
         return
 
-    size = sum(f.stat().st_size for f in dest.rglob("*") if f.is_file()) / 1e9
+    from turbollm.registry import _hf_cache_path
+
+    cache_dir = _hf_cache_path(repo)
+    size = sum(f.stat().st_size for f in cache_dir.rglob("*") if f.is_file()) / 1e9
     if not yes:
         click.confirm(f"Remove {m['name']} ({size:.1f}GB)?", abort=True)
 
-    shutil.rmtree(dest)
+    shutil.rmtree(cache_dir)
     console.print(f"[green]Removed[/green] {model}")
 
 
@@ -227,9 +190,7 @@ def serve(model, port):
 
 def _build_opencode_config(m: dict, port: int) -> dict:
     oc = get_defaults().get("opencode", {})
-    repo = m["hf_repo"]
-    local = str(model_path(repo))
-    # Use local path as model ID so mlx-lm server doesn't re-download
+    local = str(model_path(m["hf_repo"]))
     return {
         "provider": {
             "turbo": {
@@ -294,13 +255,13 @@ def opencode(model, port):
         raise SystemExit(1)
 
     port = port or defaults.get("port", 8899)
-    local = model_path(repo)
 
     if _server_is_running(port):
         console.print(f"[green]Server already running on port {port}.[/green] Launching opencode...")
         _launch_opencode(m, port)
         return
 
+    local = model_path(repo)
     console.print(f"Starting [bold]{m['name']}[/bold] on port {port}...")
     server = subprocess.Popen(
         [sys.executable, "-m", "mlx_lm.server", "--model", str(local), "--port", str(port)],
