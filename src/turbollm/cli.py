@@ -220,12 +220,8 @@ def serve(model, port):
 
     console.print(f"Serving [bold]{m['name']}[/bold] on port {port}...")
     console.print(f"  [dim]{local}[/dim]\n")
-    env = os.environ.copy()
-    env["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"
-    env["HF_HUB_OFFLINE"] = "1"  # prevent mlx-lm from re-downloading
     subprocess.run(
         [sys.executable, "-m", "mlx_lm.server", "--model", str(local), "--port", str(port)],
-        env=env,
     )
 
 
@@ -294,12 +290,8 @@ def opencode(model, port):
         return
 
     console.print(f"Starting [bold]{m['name']}[/bold] on port {port}...")
-    srv_env = os.environ.copy()
-    srv_env["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"
-    srv_env["HF_HUB_OFFLINE"] = "1"
     server = subprocess.Popen(
         [sys.executable, "-m", "mlx_lm.server", "--model", str(local), "--port", str(port)],
-        env=srv_env,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.PIPE,
     )
