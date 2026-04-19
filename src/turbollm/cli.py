@@ -259,7 +259,17 @@ def _server_is_running(port: int) -> bool:
 
 
 def _launch_opencode(m: dict, port: int):
-    config = _build_opencode_config(m, port)
+    turbo_config = _build_opencode_config(m, port)
+
+    # Read existing opencode config and merge turbo provider into it
+    oc_path = Path.home() / ".config" / "opencode" / "opencode.json"
+    if oc_path.exists():
+        existing = json.loads(oc_path.read_text())
+        existing.setdefault("provider", {}).update(turbo_config["provider"])
+        config = existing
+    else:
+        config = turbo_config
+
     env = os.environ.copy()
     env["OPENCODE_CONFIG_CONTENT"] = json.dumps(config)
     subprocess.run(["opencode"], env=env)
