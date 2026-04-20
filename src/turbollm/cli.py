@@ -188,6 +188,13 @@ def _build_opencode_config(m: dict, port: int) -> dict:
     ctx = model_oc.get("context_length", defaults_oc.get("context_length", 32768))
     out = model_oc.get("output_length", defaults_oc.get("output_length", 8192))
 
+    # Get the model ID that the server will report
+    provider = _get_provider_for(m)
+    if hasattr(provider, '_model_path'):
+        model_id = str(provider._model_path(m))
+    else:
+        model_id = m["hf_repo"]
+
     return {
         "provider": {
             "turbo": {
@@ -195,7 +202,7 @@ def _build_opencode_config(m: dict, port: int) -> dict:
                 "name": f"TurboLLM ({m['name']})",
                 "options": {"baseURL": f"http://127.0.0.1:{port}/v1"},
                 "models": {
-                    "default_model": {
+                    model_id: {
                         "name": m["name"],
                         "tool_use": m.get("tool_use", False),
                         "can_reason": m.get("can_reason", False),
