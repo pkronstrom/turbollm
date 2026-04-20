@@ -66,8 +66,9 @@ class VllmMlxProvider:
         if model.get("tool_use", False):
             tool_parser = model.get("tool_call_parser", "hermes")
             cmd += ["--enable-auto-tool-choice", "--tool-call-parser", tool_parser]
-        if model.get("can_reason", False):
-            cmd += ["--reasoning-parser", "qwen3"]
+        reasoning_parser = model.get("reasoning_parser")
+        if reasoning_parser:
+            cmd += ["--reasoning-parser", reasoning_parser]
 
         # SpecPrefill: draft model speeds up prefill (time to first token)
         draft_repo = model.get("draft_hf_repo")
