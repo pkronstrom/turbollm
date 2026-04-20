@@ -28,12 +28,12 @@ tags = ["coding", "moe"]
 continuous_batching = true
 paged_cache = true
 cache_memory_percent = 0.40   # 40% of 128GB = ~51GB for KV cache
-max_tokens = 32768
+max_tokens = 131072
 timeout = 600                 # 10min for long agentic tasks
 
 [models.qwen36-35b-mlx-4bit.opencode]
 context_length = 131072
-output_length = 16384
+output_length = 32768
 
 # --- GGUF models ---
 
@@ -52,7 +52,7 @@ tags = ["coding", "moe"]
 
 [models.qwen36-35b-gguf-q4km.opencode]
 context_length = 131072
-output_length = 16384
+output_length = 32768
 
 [models.qwen36-35b-gguf-q4km.server]
 ngl = 999
