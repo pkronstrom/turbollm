@@ -63,7 +63,6 @@ def _hf_snapshot_path(hf_repo: str) -> Path | None:
     snapshots = cache_dir / "snapshots"
     if not snapshots.exists():
         return None
-    # Get the latest snapshot (usually only one)
     dirs = sorted(snapshots.iterdir(), key=lambda d: d.stat().st_mtime, reverse=True)
     return dirs[0] if dirs else None
 
@@ -75,20 +74,33 @@ def _legacy_path(hf_repo: str) -> Path:
 
 def model_path(hf_repo: str) -> Path | None:
     """Return the local path to a downloaded model. Checks HF cache then legacy dir."""
-    # Check HF cache first
     snap = _hf_snapshot_path(hf_repo)
-    if snap and any(snap.glob("*.safetensors")):
-        return snap
+    if snap:
+        # Check for safetensors (MLX) or gguf files
+        if any(snap.glob("*.safetensors")) or any(snap.glob("*.gguf")):
+            return snap
 
-    # Check legacy ~/.turbollm/models/ dir
     legacy = _legacy_path(hf_repo)
-    if legacy.exists() and any(legacy.glob("*.safetensors")):
-        return legacy
+    if legacy.exists():
+        if any(legacy.glob("*.safetensors")) or any(legacy.glob("*.gguf")):
+            return legacy
 
     return None
 
 
-def is_downloaded(hf_repo: str) -> bool:
+def is_downloaded(hf_repo: str, hf_file: str | None = None) -> bool:
+    """Check if a model is downloaded. For GGUF, checks specific file."""
+    if hf_file:
+        # GGUF single-file: check if that specific file exists in HF cache
+        snap = _hf_snapshot_path(hf_repo)
+        if snap and (snap / hf_file).exists():
+            return True
+        # Also check blobs (HF may symlink)
+        cache = _hf_cache_path(hf_repo)
+        if cache.exists():
+            for f in cache.rglob(hf_file):
+                return True
+        return False
     return model_path(hf_repo) is not None
 
 
@@ -99,7 +111,7 @@ def list_downloaded() -> list[tuple[str, dict]]:
     result = []
 
     for alias, m in models.items():
-        if is_downloaded(m["hf_repo"]):
+        if is_downloaded(m["hf_repo"], m.get("hf_file")):
             result.append((alias, m))
 
     return result

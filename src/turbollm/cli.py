@@ -51,16 +51,104 @@ def pick_model() -> tuple[str, dict]:
 
     console.print("\n  [bold]Select a model:[/bold]\n")
     for i, (alias, m) in enumerate(downloaded, 1):
-        console.print(f"  [bold cyan]{i}[/bold cyan]) {m['name']}  [dim]({alias})[/dim]")
+        backend = m.get("backend", "mlx")
+        console.print(f"  [bold cyan]{i}[/bold cyan]) {m['name']}  [dim]({alias}) [{backend}][/dim]")
     console.print()
 
     choice = click.prompt("  Choice", type=click.IntRange(1, len(downloaded)))
     return downloaded[choice - 1]
 
 
+# --- Backend: build server commands ---
+
+def _check_llama_server() -> str:
+    """Find llama-server binary or raise."""
+    for name in ["llama-server", "llama.cpp-server"]:
+        result = shutil.which(name)
+        if result:
+            return result
+    console.print("[red]llama-server not found.[/red] Install with: [bold]brew install llama.cpp[/bold]")
+    raise SystemExit(1)
+
+
+def _build_gguf_cmd(m: dict, port: int) -> list[str]:
+    """Build llama-server command from model config."""
+    binary = _check_llama_server()
+    local = model_path(m["hf_repo"])
+    srv = m.get("server", {})
+
+    # Find the .gguf file
+    hf_file = m.get("hf_file")
+    if hf_file and local:
+        gguf_path = local / hf_file
+        if not gguf_path.exists():
+            # Try finding any gguf
+            ggufs = list(local.glob("*.gguf"))
+            gguf_path = ggufs[0] if ggufs else local / hf_file
+    elif local:
+        ggufs = list(local.glob("*.gguf"))
+        if not ggufs:
+            console.print(f"[red]No .gguf file found in {local}[/red]")
+            raise SystemExit(1)
+        gguf_path = ggufs[0]
+    else:
+        console.print("[red]Model not downloaded.[/red]")
+        raise SystemExit(1)
+
+    cmd = [binary, "-m", str(gguf_path), "--port", str(port)]
+
+    # Map server config to flags
+    if srv.get("ngl"):
+        cmd += ["-ngl", str(srv["ngl"])]
+    if srv.get("threads"):
+        cmd += ["-t", str(srv["threads"])]
+    if srv.get("context"):
+        cmd += ["-c", str(srv["context"])]
+    if srv.get("batch"):
+        cmd += ["-b", str(srv["batch"])]
+    if srv.get("ubatch"):
+        cmd += ["-ub", str(srv["ubatch"])]
+    if srv.get("parallel"):
+        cmd += ["--parallel", str(srv["parallel"])]
+    if srv.get("flash_attention"):
+        cmd += ["-fa"]
+    if srv.get("cache_type_k"):
+        cmd += ["--cache-type-k", srv["cache_type_k"]]
+    if srv.get("cache_type_v"):
+        cmd += ["--cache-type-v", srv["cache_type_v"]]
+    if srv.get("swa_full"):
+        cmd += ["--swa-full"]
+    if srv.get("no_context_shift"):
+        cmd += ["--no-context-shift"]
+    if srv.get("keep"):
+        cmd += ["--keep", str(srv["keep"])]
+    if srv.get("jinja"):
+        cmd += ["--jinja"]
+    if srv.get("mlock"):
+        cmd += ["--mlock"]
+    if srv.get("enable_thinking") is False:
+        cmd += ["--chat-template-kwargs", '{"enable_thinking": false}']
+
+    return cmd
+
+
+def _build_mlx_cmd(m: dict, port: int) -> list[str]:
+    """Build mlx_lm server command."""
+    local = model_path(m["hf_repo"])
+    return [sys.executable, "-m", "mlx_lm", "server", "--model", str(local), "--port", str(port)]
+
+
+def _build_serve_cmd(m: dict, port: int) -> list[str]:
+    """Build the right server command based on backend."""
+    backend = m.get("backend", "mlx")
+    if backend == "gguf":
+        return _build_gguf_cmd(m, port)
+    return _build_mlx_cmd(m, port)
+
+
 @click.group()
 def cli():
-    """Ollama-like CLI for MLX TurboQuant models on Apple Silicon."""
+    """Ollama-like CLI for MLX and GGUF models on Apple Silicon."""
     pass
 
 
@@ -70,9 +158,8 @@ def pull(model):
     """Download a model. Accepts alias, owner/repo, or HuggingFace URL."""
     m = resolve_model(model)
     repo = m["hf_repo"]
-    dest = model_path(repo)
 
-    if is_downloaded(repo):
+    if is_downloaded(repo, m.get("hf_file")):
         console.print(f"[green]Already downloaded:[/green] {repo}")
         return
 
@@ -82,59 +169,57 @@ def pull(model):
 
     import logging
 
-    from huggingface_hub import hf_hub_download, list_repo_files
-    from rich.progress import (
-        BarColumn,
-        DownloadColumn,
-        Progress,
-        SpinnerColumn,
-        TextColumn,
-        TimeRemainingColumn,
-        TransferSpeedColumn,
-    )
+    from huggingface_hub import hf_hub_download
 
-    # Suppress all HF logging and progress
     logging.getLogger("httpx").setLevel(logging.WARNING)
     logging.getLogger("huggingface_hub").setLevel(logging.WARNING)
-    os.environ["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"
-    os.environ["HF_HUB_DISABLE_TELEMETRY"] = "1"
 
-    files = list_repo_files(repo_id=repo)
-    model_files = [f for f in files if not f.startswith(".")]
-    safetensor_files = [f for f in model_files if f.endswith(".safetensors")]
-    other_files = [f for f in model_files if not f.endswith(".safetensors")]
+    hf_file = m.get("hf_file")
+    if hf_file:
+        # GGUF: download single file
+        console.print(f"  Downloading {hf_file}...")
+        local_file = hf_hub_download(repo_id=repo, filename=hf_file)
+        fsize = Path(local_file).stat().st_size / 1e9
+        console.print(f"\n  [green]Done![/green] {fsize:.1f}GB cached\n")
+    else:
+        # MLX: download full repo
+        from huggingface_hub import list_repo_files, snapshot_download
 
-    # Download small files first (configs, tokenizer) quietly
-    for f in other_files:
-        hf_hub_download(repo_id=repo, filename=f)
+        os.environ["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"
+        os.environ["HF_HUB_DISABLE_TELEMETRY"] = "1"
 
-    # Download safetensors with per-file progress
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[bold blue]{task.fields[filename]}"),
-        BarColumn(bar_width=30),
-        DownloadColumn(),
-        TransferSpeedColumn(),
-        TimeRemainingColumn(),
-        console=console,
-        transient=True,
-    ) as progress:
-        for f in safetensor_files:
-            fname = f.split("/")[-1]
-            task = progress.add_task("dl", filename=fname, total=None, start=True)
+        files = list_repo_files(repo_id=repo)
+        model_files = [f for f in files if not f.startswith(".")]
+        safetensor_files = [f for f in model_files if f.endswith(".safetensors")]
+        other_files = [f for f in model_files if not f.endswith(".safetensors")]
 
-            # Download the file — HF caches it
-            local_file = hf_hub_download(repo_id=repo, filename=f)
-            fsize = Path(local_file).stat().st_size
-            progress.update(task, completed=fsize, total=fsize)
-            progress.remove_task(task)
-            console.print(f"  [green]done[/green] {fname} ({fsize / 1e9:.1f}GB)")
+        for f in other_files:
+            hf_hub_download(repo_id=repo, filename=f)
 
-    # Resolve final snapshot path
-    from huggingface_hub import snapshot_download
-    local = snapshot_download(repo_id=repo)
-    total_size = sum(f.stat().st_size for f in Path(local).rglob("*") if f.is_file()) / 1e9
-    console.print(f"\n  [green]Done![/green] {total_size:.1f}GB total\n")
+        from rich.progress import (
+            BarColumn, DownloadColumn, Progress, SpinnerColumn,
+            TextColumn, TimeRemainingColumn, TransferSpeedColumn,
+        )
+
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[bold blue]{task.fields[filename]}"),
+            BarColumn(bar_width=30), DownloadColumn(),
+            TransferSpeedColumn(), TimeRemainingColumn(),
+            console=console, transient=True,
+        ) as progress:
+            for f in safetensor_files:
+                fname = f.split("/")[-1]
+                task = progress.add_task("dl", filename=fname, total=None, start=True)
+                local_file = hf_hub_download(repo_id=repo, filename=f)
+                fsize = Path(local_file).stat().st_size
+                progress.update(task, completed=fsize, total=fsize)
+                progress.remove_task(task)
+                console.print(f"  [green]done[/green] {fname} ({fsize / 1e9:.1f}GB)")
+
+        local = snapshot_download(repo_id=repo)
+        total_size = sum(f.stat().st_size for f in Path(local).rglob("*") if f.is_file()) / 1e9
+        console.print(f"\n  [green]Done![/green] {total_size:.1f}GB total\n")
 
 
 @cli.command(name="ls")
@@ -146,24 +231,27 @@ def ls_cmd(available):
 
     table = Table(show_header=True)
     table.add_column("Alias", style="bold")
+    table.add_column("Backend")
     table.add_column("Size", justify="right")
     table.add_column("Status")
     table.add_column("HF Repo", style="dim")
 
     if available:
         for alias, m in models.items():
-            status = "[green]downloaded[/green]" if is_downloaded(m["hf_repo"]) else "[dim]not pulled[/dim]"
-            table.add_row(alias, f"{m['size_gb']}GB", status, m["hf_repo"])
+            backend = m.get("backend", "mlx")
+            status = "[green]downloaded[/green]" if is_downloaded(m["hf_repo"], m.get("hf_file")) else "[dim]not pulled[/dim]"
+            table.add_row(alias, backend, f"{m['size_gb']}GB", status, m["hf_repo"])
         console.print(table)
         return
 
     found = False
     for alias, m in models.items():
-        if is_downloaded(m["hf_repo"]):
+        if is_downloaded(m["hf_repo"], m.get("hf_file")):
+            backend = m.get("backend", "mlx")
             dest = model_path(m["hf_repo"])
             if dest:
                 size = sum(f.stat().st_size for f in dest.rglob("*") if f.is_file()) / 1e9
-                table.add_row(alias, f"{size:.1f}GB", "[green]downloaded[/green]", m["hf_repo"])
+                table.add_row(alias, backend, f"{size:.1f}GB", "[green]downloaded[/green]", m["hf_repo"])
                 found = True
 
     if found:
@@ -180,7 +268,7 @@ def rm(model, yes):
     m = resolve_model(model)
     repo = m["hf_repo"]
 
-    if not is_downloaded(repo):
+    if not is_downloaded(repo, m.get("hf_file")):
         console.print(f"[yellow]Not downloaded:[/yellow] {model}")
         return
 
@@ -202,31 +290,35 @@ def rm(model, yes):
 @click.argument("model", required=False)
 @click.option("--port", "-p", default=None, type=int, help="Port (default: 8899)")
 def serve(model, port):
-    """Start MLX model server."""
+    """Start model server (auto-detects MLX or GGUF backend)."""
     if model:
         m = resolve_model(model)
     else:
         _, m = pick_model()
     repo = m["hf_repo"]
     defaults = get_defaults()
+    backend = m.get("backend", "mlx")
 
-    if not is_downloaded(repo):
+    if not is_downloaded(repo, m.get("hf_file")):
         console.print(f"[yellow]Model not downloaded.[/yellow] Run: [bold]turbo pull {model}[/bold]")
         raise SystemExit(1)
 
     port = port or defaults.get("port", 8899)
-    local = model_path(repo)
+    cmd = _build_serve_cmd(m, port)
 
-    console.print(f"Serving [bold]{m['name']}[/bold] on port {port}...")
-    console.print(f"  [dim]{local}[/dim]\n")
-    subprocess.run(
-        [sys.executable, "-m", "mlx_lm", "server", "--model", str(local), "--port", str(port)],
-    )
+    console.print(f"Serving [bold]{m['name']}[/bold] on port {port}")
+    console.print(f"  [dim]backend: {backend}[/dim]")
+    console.print(f"  [dim]{' '.join(cmd)}[/dim]\n")
+    subprocess.run(cmd)
 
 
 def _build_opencode_config(m: dict, port: int) -> dict:
-    oc = get_defaults().get("opencode", {})
-    # Use "default_model" — mlx-lm maps this to whatever --model was passed
+    defaults_oc = get_defaults().get("opencode", {})
+    model_oc = m.get("opencode", {})
+    # Model-specific overrides > defaults
+    ctx = model_oc.get("context_length", defaults_oc.get("context_length", 32768))
+    out = model_oc.get("output_length", defaults_oc.get("output_length", 8192))
+
     return {
         "provider": {
             "turbo": {
@@ -239,8 +331,8 @@ def _build_opencode_config(m: dict, port: int) -> dict:
                         "tool_use": m.get("tool_use", False),
                         "can_reason": m.get("can_reason", False),
                         "limit": {
-                            "context": oc.get("context_length", 32768),
-                            "output": oc.get("output_length", 8192),
+                            "context": ctx,
+                            "output": out,
                         },
                     }
                 },
@@ -260,7 +352,6 @@ def _server_is_running(port: int) -> bool:
 def _launch_opencode(m: dict, port: int):
     turbo_config = _build_opencode_config(m, port)
 
-    # Read existing opencode config and merge turbo provider into it
     oc_path = Path.home() / ".config" / "opencode" / "opencode.json"
     if oc_path.exists():
         existing = json.loads(oc_path.read_text())
@@ -286,7 +377,7 @@ def opencode(model, port):
     repo = m["hf_repo"]
     defaults = get_defaults()
 
-    if not is_downloaded(repo):
+    if not is_downloaded(repo, m.get("hf_file")):
         console.print(f"[yellow]Model not downloaded.[/yellow] Run: [bold]turbo pull {model}[/bold]")
         raise SystemExit(1)
 
@@ -297,15 +388,12 @@ def opencode(model, port):
         _launch_opencode(m, port)
         return
 
-    local = model_path(repo)
-    console.print(f"Starting [bold]{m['name']}[/bold] on port {port}...")
-    server = subprocess.Popen(
-        [sys.executable, "-m", "mlx_lm", "server", "--model", str(local), "--port", str(port)],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.PIPE,
-    )
+    cmd = _build_serve_cmd(m, port)
+    backend = m.get("backend", "mlx")
+    console.print(f"Starting [bold]{m['name']}[/bold] on port {port} [{backend}]...")
+    server = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
 
-    for _ in range(60):
+    for _ in range(120):
         if _server_is_running(port):
             break
         time.sleep(1)
