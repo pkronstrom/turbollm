@@ -60,34 +60,3 @@ enable_thinking = false
 jinja = true
 mlock = true
 
-[models.qwen36-35b-gguf-q8]
-name = "Qwen3.6 35B-A3B GGUF Q8_0"
-backend = "gguf"
-hf_repo = "unsloth/Qwen3.6-35B-A3B-GGUF"
-hf_file = "Qwen3.6-35B-A3B-Q8_0.gguf"
-size_gb = 36
-min_memory_gb = 48
-tool_use = true
-can_reason = true
-tags = ["coding", "moe"]
-
-[models.qwen36-35b-gguf-q8.opencode]
-context_length = 131072
-output_length = 16384
-
-[models.qwen36-35b-gguf-q8.server]
-ngl = 999
-threads = 8
-context = 131072
-batch = 512
-ubatch = 1024
-flash_attention = true
-cache_type_k = "q8_0"
-cache_type_v = "q8_0"
-swa_full = true
-no_context_shift = true
-keep = 1024
-parallel = 1
-enable_thinking = false
-jinja = true
-mlock = true
