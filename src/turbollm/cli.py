@@ -210,7 +210,10 @@ def _build_opencode_config(m: dict, port: int) -> dict:
                     }
                 },
             }
-        }
+        },
+        "model": {
+            "chat": f"turbo/{model_id}",
+        },
     }
 
 
