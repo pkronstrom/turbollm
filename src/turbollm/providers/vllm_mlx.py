@@ -12,7 +12,7 @@ console = Console()
 
 class VllmMlxProvider:
     name = "vllm-mlx"
-    install_hint = "pip install git+https://github.com/waybarrios/vllm-mlx.git"
+    install_hint = "uv tool install git+https://github.com/waybarrios/vllm-mlx.git"
 
     def is_available(self) -> bool:
         return shutil.which("vllm-mlx") is not None
