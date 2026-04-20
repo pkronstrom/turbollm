@@ -27,7 +27,9 @@ can_reason = true
 tags = ["coding", "moe"]
 tool_call_parser = "hermes"
 
-# Round 1: baseline — no server flags
+# continuous_batching breaks Qwen3.6 (!!!)
+# paged_cache, kv_cache_quantization, chunked_prefill, specprefill all break too
+# Qwen3.6 linear attention is incompatible with most cache/batch optimizations
 [models.qwen36-35b-mlx-4bit.server]
 timeout = 600
 
