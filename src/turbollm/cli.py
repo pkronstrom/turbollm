@@ -288,7 +288,11 @@ def chat(port):
                             except json.JSONDecodeError:
                                 continue
                             delta = chunk.get("choices", [{}])[0].get("delta", {})
-                            content = delta.get("content", "")
+                            # Show reasoning (thinking) in dim
+                            reasoning = delta.get("reasoning_content") or ""
+                            if reasoning:
+                                print(f"\033[2m{reasoning}\033[0m", end="", flush=True)
+                            content = delta.get("content") or ""
                             if content:
                                 print(content, end="", flush=True)
                                 assistant_msg.append(content)
