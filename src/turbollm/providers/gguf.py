@@ -26,7 +26,8 @@ class GgufProvider:
         gguf_path = self._gguf_file(model)
         srv = model.get("server", {})
 
-        cmd = [binary, "-m", str(gguf_path), "--port", str(port)]
+        cmd = [binary, "-m", str(gguf_path), "--port", str(port),
+               "-a", model["hf_repo"]]
 
         flag_map = {
             "ngl": "-ngl",

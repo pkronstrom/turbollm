@@ -35,6 +35,11 @@ def _get_provider_for(m: dict):
     return get_provider(backend)
 
 
+def _get_model_id(m: dict) -> str:
+    """Get the model ID that the server will report (matches --served-model-name / -a)."""
+    return m["hf_repo"]
+
+
 def pick_model() -> tuple[str, dict]:
     """Interactive picker for downloaded models."""
     reg = load_registry()
@@ -63,11 +68,39 @@ def pick_model() -> tuple[str, dict]:
     return downloaded[choice - 1]
 
 
-@click.group()
+# ---------------------------------------------------------------------------
+# Dynamic CLI group — discovers harness commands from models.toml
+# ---------------------------------------------------------------------------
+
+class TurboGroup(click.Group):
+    """Click group that auto-discovers harness commands from [harnesses.*] in TOML."""
+
+    def get_command(self, ctx, cmd_name):
+        # Built-in commands always take priority
+        rv = click.Group.get_command(self, ctx, cmd_name)
+        if rv is not None:
+            return rv
+        reg = load_registry()
+        if cmd_name in reg.get("harnesses", {}):
+            return _make_harness_command(cmd_name)
+        return None
+
+    def list_commands(self, ctx):
+        builtin = set(click.Group.list_commands(self, ctx))
+        reg = load_registry()
+        harnesses = set(reg.get("harnesses", {}).keys())
+        return sorted(builtin | harnesses)
+
+
+@click.group(cls=TurboGroup)
 def cli():
     """Ollama-like CLI for MLX and GGUF models on Apple Silicon."""
     pass
 
+
+# ---------------------------------------------------------------------------
+# Core commands
+# ---------------------------------------------------------------------------
 
 @cli.command()
 @click.argument("model")
@@ -210,7 +243,7 @@ def chat(port):
     messages = []
     while True:
         try:
-            user_input = input("[bold cyan]> [/bold cyan]" if False else "> ")
+            user_input = input("> ")
         except (EOFError, KeyboardInterrupt):
             console.print("\n[dim]Bye.[/dim]")
             break
@@ -258,12 +291,16 @@ def chat(port):
         messages.append({"role": "assistant", "content": "".join(assistant_msg)})
 
 
-def _get_model_id(m: dict) -> str:
-    """Get the model ID that the server will report."""
-    provider = _get_provider_for(m)
-    if hasattr(provider, '_model_path'):
-        return str(provider._model_path(m))
-    return m["hf_repo"]
+# ---------------------------------------------------------------------------
+# Server management
+# ---------------------------------------------------------------------------
+
+def _server_is_running(port: int) -> bool:
+    try:
+        urllib.request.urlopen(f"http://127.0.0.1:{port}/v1/models", timeout=2)
+        return True
+    except Exception:
+        return False
 
 
 def _run_with_server(m: dict, port: int, launch_fn):
@@ -275,7 +312,7 @@ def _run_with_server(m: dict, port: int, launch_fn):
     provider = _get_provider_for(m)
 
     if not provider.is_downloaded(m):
-        console.print(f"[yellow]Model not downloaded.[/yellow] Run: [bold]turbo pull ...[/bold]")
+        console.print("[yellow]Model not downloaded.[/yellow] Run: [bold]turbo pull ...[/bold]")
         raise SystemExit(1)
     if not provider.is_available():
         console.print(f"[red]{provider.name} not found.[/red] Install: [bold]{provider.install_hint}[/bold]")
@@ -310,122 +347,54 @@ def _run_with_server(m: dict, port: int, launch_fn):
         console.print("[dim]Server stopped.[/dim]")
 
 
-def _build_opencode_config(m: dict, port: int) -> dict:
-    defaults_oc = get_defaults().get("opencode", {})
-    model_oc = m.get("opencode", {})
-    ctx = model_oc.get("context_length", defaults_oc.get("context_length", 32768))
-    out = model_oc.get("output_length", defaults_oc.get("output_length", 8192))
+# ---------------------------------------------------------------------------
+# Harness integration
+# ---------------------------------------------------------------------------
 
-    # Get the model ID that the server will report
-    provider = _get_provider_for(m)
-    if hasattr(provider, '_model_path'):
-        model_id = str(provider._model_path(m))
-    else:
-        model_id = m["hf_repo"]
+def _run_harness(harness_name: str, m: dict, port: int):
+    """Load a harness by name, check availability, and run with server."""
+    from turbollm.harnesses import get_harness
 
-    return {
-        "provider": {
-            "turbo": {
-                "npm": "@ai-sdk/openai-compatible",
-                "name": f"TurboLLM ({m['name']})",
-                "options": {"baseURL": f"http://127.0.0.1:{port}/v1"},
-                "models": {
-                    model_id: {
-                        "name": m["name"],
-                        "tool_use": m.get("tool_use", False),
-                        "can_reason": m.get("can_reason", False),
-                        "limit": {"context": ctx, "output": out},
-                    }
-                },
-            }
-        },
-        "model": {
-            "chat": f"turbo/{model_id}",
-        },
-    }
+    reg = load_registry()
+    config = reg.get("harnesses", {}).get(harness_name, {})
+    harness = get_harness(harness_name, config)
 
+    if not harness.is_available():
+        console.print(f"[red]{harness_name} not found.[/red] Install: [bold]{harness.install_hint}[/bold]")
+        raise SystemExit(1)
 
-def _server_is_running(port: int) -> bool:
-    try:
-        urllib.request.urlopen(f"http://127.0.0.1:{port}/v1/models", timeout=2)
-        return True
-    except Exception:
-        return False
-
-
-def _launch_opencode(m: dict, port: int):
-    turbo_config = _build_opencode_config(m, port)
-
-    oc_path = Path.home() / ".config" / "opencode" / "opencode.json"
-    if oc_path.exists():
-        existing = json.loads(oc_path.read_text())
-        existing.setdefault("provider", {}).update(turbo_config["provider"])
-        config = existing
-    else:
-        config = turbo_config
-
-    env = os.environ.copy()
-    env["OPENCODE_CONFIG_CONTENT"] = json.dumps(config)
-    subprocess.run(["opencode"], env=env)
-
-
-@cli.command()
-@click.argument("model", required=False)
-@click.option("--port", "-p", default=None, type=int, help="Port (default: 8899)")
-def opencode(model, port):
-    """Start model server + launch opencode."""
-    if model:
-        m = resolve_model(model)
-    else:
-        _, m = pick_model()
-    port = port or get_defaults().get("port", 8899)
-    _run_with_server(m, port, _launch_opencode)
-
-
-def _launch_hermes(m: dict, port: int):
     model_id = _get_model_id(m)
-    env = os.environ.copy()
-    env["OPENAI_BASE_URL"] = f"http://127.0.0.1:{port}/v1"
-    env.setdefault("OPENAI_API_KEY", "not-needed")
-    console.print(f"  Launching hermes → [dim]{model_id}[/dim]")
-    subprocess.run(["hermes", "--model", model_id], env=env)
+    console.print(f"  Launching {harness_name} → [dim]{model_id}[/dim]")
+    _run_with_server(m, port, lambda _m, p: harness.launch(model_id, p, m))
 
 
-@cli.command()
+def _make_harness_command(harness_name: str):
+    """Create a click command for a TOML-defined harness."""
+    @click.command(name=harness_name, help=f"Start model server + launch {harness_name}.")
+    @click.argument("model", required=False)
+    @click.option("--port", "-p", default=None, type=int, help="Port (default: 8899)")
+    def cmd(model, port):
+        if model:
+            m = resolve_model(model)
+        else:
+            _, m = pick_model()
+        port = port or get_defaults().get("port", 8899)
+        _run_harness(harness_name, m, port)
+    return cmd
+
+
+@cli.command(name="run")
 @click.argument("model", required=False)
+@click.option("--harness", "-H", required=True, help="Harness to launch (e.g. goose, hermes)")
 @click.option("--port", "-p", default=None, type=int, help="Port (default: 8899)")
-def hermes(model, port):
-    """Start model server + launch hermes-agent."""
+def run_cmd(model, harness, port):
+    """Start model server + launch a harness by name."""
     if model:
         m = resolve_model(model)
     else:
         _, m = pick_model()
     port = port or get_defaults().get("port", 8899)
-    _run_with_server(m, port, _launch_hermes)
-
-
-def _launch_goose(m: dict, port: int):
-    model_id = _get_model_id(m)
-    env = os.environ.copy()
-    env["GOOSE_PROVIDER"] = "openai"
-    env["GOOSE_MODEL"] = model_id
-    env["OPENAI_BASE_URL"] = f"http://127.0.0.1:{port}/v1"
-    env.setdefault("OPENAI_API_KEY", "not-needed")
-    console.print(f"  Launching goose → [dim]{model_id}[/dim]")
-    subprocess.run(["goose"], env=env)
-
-
-@cli.command()
-@click.argument("model", required=False)
-@click.option("--port", "-p", default=None, type=int, help="Port (default: 8899)")
-def goose(model, port):
-    """Start model server + launch goose agent."""
-    if model:
-        m = resolve_model(model)
-    else:
-        _, m = pick_model()
-    port = port or get_defaults().get("port", 8899)
-    _run_with_server(m, port, _launch_goose)
+    _run_harness(harness, m, port)
 
 
 if __name__ == "__main__":

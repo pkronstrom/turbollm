@@ -2,6 +2,8 @@ import tomllib
 from pathlib import Path
 from urllib.parse import urlparse
 
+import click
+
 BUNDLED_TOML = Path(__file__).parent.parent.parent / "models.toml"
 HF_CACHE = Path.home() / ".cache" / "huggingface" / "hub"
 LEGACY_DIR = Path.home() / ".turbollm" / "models"
@@ -10,7 +12,10 @@ LEGACY_DIR = Path.home() / ".turbollm" / "models"
 def load_registry() -> dict:
     for path in [BUNDLED_TOML, Path.home() / ".turbollm" / "models.toml"]:
         if path.exists():
-            return tomllib.loads(path.read_text())
+            try:
+                return tomllib.loads(path.read_text())
+            except tomllib.TOMLDecodeError as e:
+                raise click.UsageError(f"Invalid TOML in {path}: {e}")
     return {"defaults": {}, "models": {}}
 
 
@@ -38,6 +43,12 @@ def resolve_model(raw: str) -> dict:
     for m in models.values():
         if m["hf_repo"] == repo_or_alias:
             return m
+
+    if "/" not in repo_or_alias:
+        available = ", ".join(models.keys())
+        raise click.UsageError(
+            f"Unknown model '{repo_or_alias}'. Available: {available}"
+        )
 
     return {
         "name": repo_or_alias.split("/")[-1],

@@ -17,24 +17,24 @@ output_length = 8192
 
 [harnesses.opencode]
 binary = "opencode"
-install = "go install github.com/opencode-ai/opencode@latest"
+install = "brew install opencode"
 # Uses custom launcher (JSON config generation)
 
 [harnesses.hermes]
 binary = "hermes"
-install = "pip install hermes-agent"
-cmd = ["hermes", "--model", "{model_id}"]
+install = "uv tool install git+https://github.com/NousResearch/hermes-agent.git"
+cmd = ["hermes", "chat", "-m", "{model_id}"]
 
 [harnesses.goose]
 binary = "goose"
-install = "brew install goose"
+install = "curl -fsSL https://github.com/aaif-goose/goose/releases/download/stable/download_cli.sh | bash"
 cmd = ["goose"]
 env = { GOOSE_PROVIDER = "openai", GOOSE_MODEL = "{model_id}" }
 
 [harnesses.codex]
 binary = "codex"
-install = "npm install -g @openai/codex"
-cmd = ["codex", "--model", "{model_id}"]
+install = "brew install --cask codex"
+cmd = ["codex", "-c", "model_provider=\"openai\"", "-m", "{model_id}"]
 
 [harnesses.aichat]
 binary = "aichat"
@@ -43,7 +43,7 @@ cmd = ["aichat", "-m", "openai:{model_id}"]
 
 [harnesses.qwen-code]
 binary = "qwen"
-install = "pip install qwen-code"
+install = "brew install qwen-code"
 cmd = ["qwen", "--model", "{model_id}"]
 
 # --- MLX models (served via vllm-mlx) ---

@@ -1,6 +1,6 @@
 # turbollm
 
-Ollama-like CLI for local LLM serving on Apple Silicon. Supports multiple backends (vllm-mlx, llama-server) with a unified interface.
+Ollama-like CLI for local LLM serving on Apple Silicon. Supports multiple backends (vllm-mlx, llama-server) and multiple agent harnesses (opencode, hermes, goose, codex, aichat, qwen-code) with a unified interface.
 
 ## Install
 
@@ -22,7 +22,7 @@ Install at least one backend:
 
 ```bash
 # MLX models (recommended for Apple Silicon)
-pip install git+https://github.com/waybarrios/vllm-mlx.git
+uv tool install git+https://github.com/waybarrios/vllm-mlx.git
 
 # GGUF models
 brew install llama.cpp
@@ -44,32 +44,42 @@ turbo ls
 # Serve a model (auto-detects backend)
 turbo serve qwen36-35b-mlx-4bit
 
-# Serve + launch opencode
-turbo opencode qwen36-35b-mlx-4bit
-
-# Serve + launch hermes-agent
-turbo hermes qwen36-35b-mlx-4bit
-
-# Serve + launch goose
-turbo goose qwen36-35b-mlx-4bit
-
 # Remove a model
 turbo rm qwen36-35b-mlx-4bit
 ```
 
-### Agent CLIs
+## Harnesses (agent CLIs)
 
-Install any supported agent CLI:
+Harnesses are agentic CLI tools that connect to the turbo server. Each gets `OPENAI_BASE_URL` and `OPENAI_API_KEY` set automatically.
 
 ```bash
-# hermes-agent (pip/uv)
-pip install hermes-agent
+# Launch by name — starts server + harness
+turbo opencode [model]     # OpenCode IDE
+turbo hermes [model]       # Hermes Agent
+turbo goose [model]        # Goose
+turbo codex [model]        # OpenAI Codex CLI
+turbo aichat [model]       # AIChat
+turbo qwen-code [model]    # Qwen Code
 
-# goose (brew or binary)
-brew install goose
+# Or use the generic run command
+turbo run [model] -H goose
 ```
 
-Then launch with `turbo hermes` or `turbo goose` — turbollm starts the server and configures the agent to use it automatically via OpenAI-compatible API environment variables.
+### Adding a harness
+
+Add to `models.toml`:
+
+```toml
+[harnesses.my-tool]
+binary = "my-tool"                          # binary to look for in PATH
+install = "pip install my-tool"             # install instructions
+cmd = ["my-tool", "--model", "{model_id}"]  # command template
+env = { MY_VAR = "{port}" }                 # extra env vars (optional)
+```
+
+Template variables: `{model_id}` (model name from server), `{port}` (server port).
+
+For harnesses needing custom logic beyond env + cmd (like opencode's JSON config generation), add a Python class in `src/turbollm/harnesses/` implementing the `Harness` protocol and register with `@register("name")`.
 
 ## Adding models
 

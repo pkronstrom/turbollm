@@ -15,7 +15,7 @@ class OpenCodeHarness:
     def __init__(self, config: dict):
         self.name = "opencode"
         self._binary = config.get("binary", "opencode")
-        self.install_hint = config.get("install", "go install github.com/opencode-ai/opencode@latest")
+        self.install_hint = config.get("install", "brew install opencode")
 
     def is_available(self) -> bool:
         return shutil.which(self._binary) is not None

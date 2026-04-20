@@ -24,7 +24,8 @@ class VllmMlxProvider:
             raise SystemExit(1)
         srv = model.get("server", {})
 
-        cmd = ["vllm-mlx", "serve", str(local), "--port", str(port)]
+        cmd = ["vllm-mlx", "serve", str(local), "--port", str(port),
+               "--served-model-name", model["hf_repo"]]
 
         # Performance: continuous batching + paged KV cache
         if srv.get("continuous_batching"):
@@ -74,6 +75,9 @@ class VllmMlxProvider:
             draft_path = self._draft_model_path(model)
             if draft_path:
                 cmd += ["--specprefill", "--specprefill-draft-model", str(draft_path)]
+            else:
+                console.print(f"  [yellow]Draft model {draft_repo} not found — skipping specprefill.[/yellow]")
+                console.print(f"  [yellow]Run: turbo pull <model> to download it.[/yellow]")
 
         return cmd
 
