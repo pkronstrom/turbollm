@@ -27,11 +27,14 @@ can_reason = true
 tags = ["coding", "moe"]
 tool_call_parser = "hermes"
 
-# continuous_batching breaks Qwen3.6 (!!!)
-# paged_cache, kv_cache_quantization, chunked_prefill, specprefill all break too
-# Qwen3.6 linear attention is incompatible with most cache/batch optimizations
 [models.qwen36-35b-mlx-4bit.server]
+paged_cache = true
+cache_memory_percent = 0.40
+max_tokens = 65536
+max_request_tokens = 65536
 timeout = 600
+# NOTE: continuous_batching, kv_cache_quantization, chunked_prefill, specprefill
+# all produce garbage (!!!) with Qwen3.6 linear attention layers
 
 [models.qwen36-35b-mlx-4bit.opencode]
 context_length = 65536

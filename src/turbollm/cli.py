@@ -258,6 +258,58 @@ def chat(port):
         messages.append({"role": "assistant", "content": "".join(assistant_msg)})
 
 
+def _get_model_id(m: dict) -> str:
+    """Get the model ID that the server will report."""
+    provider = _get_provider_for(m)
+    if hasattr(provider, '_model_path'):
+        return str(provider._model_path(m))
+    return m["hf_repo"]
+
+
+def _run_with_server(m: dict, port: int, launch_fn):
+    """Start turbo server (or reuse running one) and run launch_fn(m, port).
+
+    Handles server lifecycle: starts if needed, waits for ready,
+    stops on exit.  launch_fn should be a blocking call (e.g. subprocess.run).
+    """
+    provider = _get_provider_for(m)
+
+    if not provider.is_downloaded(m):
+        console.print(f"[yellow]Model not downloaded.[/yellow] Run: [bold]turbo pull ...[/bold]")
+        raise SystemExit(1)
+    if not provider.is_available():
+        console.print(f"[red]{provider.name} not found.[/red] Install: [bold]{provider.install_hint}[/bold]")
+        raise SystemExit(1)
+
+    if _server_is_running(port):
+        console.print(f"[green]Server already running on port {port}.[/green]")
+        launch_fn(m, port)
+        return
+
+    cmd = provider.build_serve_cmd(m, port)
+    console.print(f"Starting [bold]{m['name']}[/bold] on port {port} [{provider.name}]...")
+    server = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    for _ in range(120):
+        if _server_is_running(port):
+            break
+        time.sleep(1)
+    else:
+        console.print("[red]Server failed to start.[/red]")
+        server.terminate()
+        raise SystemExit(1)
+
+    console.print("[green]Server ready.[/green]")
+    try:
+        launch_fn(m, port)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        server.terminate()
+        server.wait()
+        console.print("[dim]Server stopped.[/dim]")
+
+
 def _build_opencode_config(m: dict, port: int) -> dict:
     defaults_oc = get_defaults().get("opencode", {})
     model_oc = m.get("opencode", {})
@@ -326,48 +378,54 @@ def opencode(model, port):
         m = resolve_model(model)
     else:
         _, m = pick_model()
+    port = port or get_defaults().get("port", 8899)
+    _run_with_server(m, port, _launch_opencode)
 
-    provider = _get_provider_for(m)
-    defaults = get_defaults()
 
-    if not provider.is_downloaded(m):
-        console.print(f"[yellow]Model not downloaded.[/yellow] Run: [bold]turbo pull {model}[/bold]")
-        raise SystemExit(1)
+def _launch_hermes(m: dict, port: int):
+    model_id = _get_model_id(m)
+    env = os.environ.copy()
+    env["OPENAI_BASE_URL"] = f"http://127.0.0.1:{port}/v1"
+    env.setdefault("OPENAI_API_KEY", "not-needed")
+    console.print(f"  Launching hermes → [dim]{model_id}[/dim]")
+    subprocess.run(["hermes", "--model", model_id], env=env)
 
-    if not provider.is_available():
-        console.print(f"[red]{provider.name} not found.[/red] Install: [bold]{provider.install_hint}[/bold]")
-        raise SystemExit(1)
 
-    port = port or defaults.get("port", 8899)
-
-    if _server_is_running(port):
-        console.print(f"[green]Server already running on port {port}.[/green] Launching opencode...")
-        _launch_opencode(m, port)
-        return
-
-    cmd = provider.build_serve_cmd(m, port)
-    console.print(f"Starting [bold]{m['name']}[/bold] on port {port} [{provider.name}]...")
-    server = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-
-    for _ in range(120):
-        if _server_is_running(port):
-            break
-        time.sleep(1)
+@cli.command()
+@click.argument("model", required=False)
+@click.option("--port", "-p", default=None, type=int, help="Port (default: 8899)")
+def hermes(model, port):
+    """Start model server + launch hermes-agent."""
+    if model:
+        m = resolve_model(model)
     else:
-        console.print("[red]Server failed to start.[/red]")
-        server.terminate()
-        raise SystemExit(1)
+        _, m = pick_model()
+    port = port or get_defaults().get("port", 8899)
+    _run_with_server(m, port, _launch_hermes)
 
-    console.print("[green]Server ready.[/green] Launching opencode...")
 
-    try:
-        _launch_opencode(m, port)
-    except KeyboardInterrupt:
-        pass
-    finally:
-        server.terminate()
-        server.wait()
-        console.print("[dim]Server stopped.[/dim]")
+def _launch_goose(m: dict, port: int):
+    model_id = _get_model_id(m)
+    env = os.environ.copy()
+    env["GOOSE_PROVIDER"] = "openai"
+    env["GOOSE_MODEL"] = model_id
+    env["OPENAI_BASE_URL"] = f"http://127.0.0.1:{port}/v1"
+    env.setdefault("OPENAI_API_KEY", "not-needed")
+    console.print(f"  Launching goose → [dim]{model_id}[/dim]")
+    subprocess.run(["goose"], env=env)
+
+
+@cli.command()
+@click.argument("model", required=False)
+@click.option("--port", "-p", default=None, type=int, help="Port (default: 8899)")
+def goose(model, port):
+    """Start model server + launch goose agent."""
+    if model:
+        m = resolve_model(model)
+    else:
+        _, m = pick_model()
+    port = port or get_defaults().get("port", 8899)
+    _run_with_server(m, port, _launch_goose)
 
 
 if __name__ == "__main__":

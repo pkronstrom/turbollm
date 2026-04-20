@@ -47,9 +47,29 @@ turbo serve qwen36-35b-mlx-4bit
 # Serve + launch opencode
 turbo opencode qwen36-35b-mlx-4bit
 
+# Serve + launch hermes-agent
+turbo hermes qwen36-35b-mlx-4bit
+
+# Serve + launch goose
+turbo goose qwen36-35b-mlx-4bit
+
 # Remove a model
 turbo rm qwen36-35b-mlx-4bit
 ```
+
+### Agent CLIs
+
+Install any supported agent CLI:
+
+```bash
+# hermes-agent (pip/uv)
+pip install hermes-agent
+
+# goose (brew or binary)
+brew install goose
+```
+
+Then launch with `turbo hermes` or `turbo goose` — turbollm starts the server and configures the agent to use it automatically via OpenAI-compatible API environment variables.
 
 ## Adding models
 
