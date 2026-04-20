@@ -53,12 +53,12 @@ class VllmMlxProvider:
         if model.get("can_reason", False):
             cmd += ["--reasoning-parser", "qwen3"]
 
-        # Speculative decoding with draft model
+        # SpecPrefill: draft model speeds up prefill (time to first token)
         draft_repo = model.get("draft_hf_repo")
         if draft_repo:
             draft_path = self._draft_model_path(model)
             if draft_path:
-                cmd += ["--speculative-model", str(draft_path)]
+                cmd += ["--specprefill", "--specprefill-draft-model", str(draft_path)]
 
         return cmd
 
