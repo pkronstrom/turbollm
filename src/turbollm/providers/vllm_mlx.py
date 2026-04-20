@@ -48,7 +48,8 @@ class VllmMlxProvider:
 
         # Enable tool calling and reasoning for agentic use
         if model.get("tool_use", False):
-            cmd += ["--enable-auto-tool-choice", "--tool-call-parser", "qwen3_coder"]
+            tool_parser = model.get("tool_call_parser", "hermes")
+            cmd += ["--enable-auto-tool-choice", "--tool-call-parser", tool_parser]
         if model.get("can_reason", False):
             cmd += ["--reasoning-parser", "qwen3"]
 
