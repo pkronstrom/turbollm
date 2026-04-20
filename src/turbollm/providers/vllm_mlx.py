@@ -21,6 +21,12 @@ class VllmMlxProvider:
         local = self._model_path(model)
         cmd = ["vllm-mlx", "serve", str(local), "--port", str(port)]
 
+        # Enable tool calling and reasoning for agentic use
+        if model.get("tool_use", False):
+            cmd += ["--enable-auto-tool-choice", "--tool-call-parser", "qwen3_coder"]
+        if model.get("can_reason", False):
+            cmd += ["--reasoning-parser", "qwen3"]
+
         # Speculative decoding with draft model
         draft_repo = model.get("draft_hf_repo")
         if draft_repo:
