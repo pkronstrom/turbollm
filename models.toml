@@ -27,15 +27,8 @@ can_reason = true
 tags = ["coding", "moe"]
 tool_call_parser = "hermes"
 
+# Round 1: baseline — no server flags
 [models.qwen36-35b-mlx-4bit.server]
-continuous_batching = true
-paged_cache = true
-cache_memory_percent = 0.40
-# kv_cache_quantization = true
-# NOTE: KV cache quantization causes !!! garbage with Qwen3.6 linear attention layers
-max_tokens = 65536
-max_request_tokens = 65536
-# chunked_prefill_tokens = 2048  # causes !!! with Qwen3.6
 timeout = 600
 
 [models.qwen36-35b-mlx-4bit.opencode]

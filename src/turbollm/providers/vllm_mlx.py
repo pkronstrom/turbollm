@@ -27,9 +27,9 @@ class VllmMlxProvider:
         cmd = ["vllm-mlx", "serve", str(local), "--port", str(port)]
 
         # Performance: continuous batching + paged KV cache
-        if srv.get("continuous_batching", True):
+        if srv.get("continuous_batching"):
             cmd += ["--continuous-batching"]
-        if srv.get("paged_cache", True):
+        if srv.get("paged_cache"):
             cmd += ["--use-paged-cache"]
 
         # Memory: allocate more RAM for KV cache (default 20% is conservative)
