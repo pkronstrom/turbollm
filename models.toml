@@ -23,7 +23,7 @@ install = "brew install opencode"
 [harnesses.hermes]
 binary = "hermes"
 install = "uv tool install git+https://github.com/NousResearch/hermes-agent.git"
-cmd = ["hermes", "chat", "-m", "{model_id}"]
+# Uses custom launcher (temp HERMES_HOME with config.yaml pointing at turbo server)
 
 [harnesses.goose]
 binary = "goose"
@@ -34,7 +34,14 @@ env = { GOOSE_PROVIDER = "openai", GOOSE_MODEL = "{model_id}" }
 [harnesses.codex]
 binary = "codex"
 install = "brew install --cask codex"
-cmd = ["codex", "-c", "model_provider=\"openai\"", "-m", "{model_id}"]
+cmd = [
+    "codex",
+    "-c", "model_provider=\"turbo\"",
+    "-c", "model_providers.turbo.name=\"TurboLLM\"",
+    "-c", "model_providers.turbo.base_url=\"http://127.0.0.1:{port}/v1\"",
+    "-c", "model_providers.turbo.env_key=\"OPENAI_API_KEY\"",
+    "-m", "{model_id}",
+]
 
 [harnesses.aichat]
 binary = "aichat"
@@ -61,6 +68,7 @@ tool_use = true
 can_reason = true
 tags = ["coding", "moe"]
 tool_call_parser = "hermes"
+reasoning_parser = "qwen3"
 
 [models.qwen36-35b-mlx-4bit.server]
 paged_cache = true

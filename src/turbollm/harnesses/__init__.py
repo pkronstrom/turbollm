@@ -39,7 +39,8 @@ class GenericHarness:
     def launch(self, model_id: str, port: int, model: dict) -> None:
         env = os.environ.copy()
         env["OPENAI_BASE_URL"] = f"http://127.0.0.1:{port}/v1"
-        env.setdefault("OPENAI_API_KEY", "not-needed")
+        if not env.get("OPENAI_API_KEY"):
+            env["OPENAI_API_KEY"] = "sk-local-no-auth-needed"
 
         ctx = {"model_id": model_id, "port": port}
         for k, v in self._env.items():
@@ -70,4 +71,5 @@ def get_harness(name: str, config: dict) -> Harness:
 
 
 # Import custom harnesses to trigger registration
+from turbollm.harnesses import hermes as _hermes  # noqa: F401, E402
 from turbollm.harnesses import opencode as _opencode  # noqa: F401, E402
