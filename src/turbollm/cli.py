@@ -278,7 +278,7 @@ def opencode(model, port):
 
     cmd = provider.build_serve_cmd(m, port)
     console.print(f"Starting [bold]{m['name']}[/bold] on port {port} [{provider.name}]...")
-    server = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+    server = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     for _ in range(120):
         if _server_is_running(port):

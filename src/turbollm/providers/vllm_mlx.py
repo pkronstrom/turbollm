@@ -19,6 +19,9 @@ class VllmMlxProvider:
 
     def build_serve_cmd(self, model: dict, port: int) -> list[str]:
         local = self._model_path(model)
+        if local is None:
+            console.print(f"[red]Model files not found for {model.get('name', '?')}[/red]")
+            raise SystemExit(1)
         srv = model.get("server", {})
 
         cmd = ["vllm-mlx", "serve", str(local), "--port", str(port)]

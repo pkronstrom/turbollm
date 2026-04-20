@@ -17,7 +17,9 @@ output_length = 8192
 name = "Qwen3.6 35B-A3B MLX 4bit"
 backend = "vllm-mlx"
 hf_repo = "mlx-community/Qwen3.6-35B-A3B-4bit"
-# draft_hf_repo = "mlx-community/Qwen3-0.6B-4bit"  # specprefill causes !!! output — needs matching architecture
+# draft_hf_repo = "mlx-community/Qwen3-0.6B-4bit"
+# NOTE: specprefill broken for Qwen3.5/3.6 MoE — mixed attention (full+SWA+linear) breaks
+# KV cache in speculative decoding. See vllm-project/vllm#36872. Waiting for upstream fix.
 size_gb = 20
 min_memory_gb = 24
 tool_use = true
