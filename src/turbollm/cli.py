@@ -189,6 +189,75 @@ def serve(model, port):
     subprocess.run(cmd)
 
 
+@cli.command()
+@click.option("--port", "-p", default=None, type=int, help="Port (default: 8899)")
+def chat(port):
+    """Quick chat with a running turbo server."""
+    defaults = get_defaults()
+    port = port or defaults.get("port", 8899)
+
+    if not _server_is_running(port):
+        console.print(f"[yellow]No server on port {port}.[/yellow] Run [bold]turbo serve[/bold] first.")
+        raise SystemExit(1)
+
+    # Get model info from server
+    resp = json.loads(urllib.request.urlopen(f"http://127.0.0.1:{port}/v1/models").read())
+    model_id = resp["data"][0]["id"] if resp.get("data") else "default"
+    console.print(f"[dim]Connected to {model_id} on port {port}[/dim]\n")
+
+    import readline  # noqa: F401 — enables line editing in input()
+
+    messages = []
+    while True:
+        try:
+            user_input = input("[bold cyan]> [/bold cyan]" if False else "> ")
+        except (EOFError, KeyboardInterrupt):
+            console.print("\n[dim]Bye.[/dim]")
+            break
+
+        if not user_input.strip():
+            continue
+        if user_input.strip() in ("/quit", "/exit", "/q"):
+            break
+
+        messages.append({"role": "user", "content": user_input})
+
+        req = json.dumps({
+            "model": model_id,
+            "messages": messages,
+            "stream": True,
+        }).encode()
+
+        request = urllib.request.Request(
+            f"http://127.0.0.1:{port}/v1/chat/completions",
+            data=req,
+            headers={"Content-Type": "application/json"},
+        )
+
+        assistant_msg = []
+        try:
+            with urllib.request.urlopen(request) as response:
+                for line in response:
+                    line = line.decode().strip()
+                    if not line.startswith("data: "):
+                        continue
+                    data = line[6:]
+                    if data == "[DONE]":
+                        break
+                    chunk = json.loads(data)
+                    delta = chunk.get("choices", [{}])[0].get("delta", {})
+                    content = delta.get("content", "")
+                    if content:
+                        print(content, end="", flush=True)
+                        assistant_msg.append(content)
+        except Exception as e:
+            console.print(f"\n[red]Error: {e}[/red]")
+            continue
+
+        print()
+        messages.append({"role": "assistant", "content": "".join(assistant_msg)})
+
+
 def _build_opencode_config(m: dict, port: int) -> dict:
     defaults_oc = get_defaults().get("opencode", {})
     model_oc = m.get("opencode", {})
