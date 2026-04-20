@@ -29,6 +29,7 @@ continuous_batching = true
 paged_cache = true
 cache_memory_percent = 0.40   # 40% of 128GB = ~51GB for KV cache
 max_tokens = 131072
+max_request_tokens = 131072
 timeout = 600                 # 10min for long agentic tasks
 
 [models.qwen36-35b-mlx-4bit.opencode]

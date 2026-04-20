@@ -38,6 +38,9 @@ class VllmMlxProvider:
         max_tokens = srv.get("max_tokens")
         if max_tokens:
             cmd += ["--max-tokens", str(max_tokens)]
+        max_req = srv.get("max_request_tokens")
+        if max_req:
+            cmd += ["--max-request-tokens", str(max_req)]
 
         # Timeout for long agentic tasks
         timeout = srv.get("timeout", 600)
