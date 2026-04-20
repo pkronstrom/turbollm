@@ -58,6 +58,11 @@ class GgufProvider:
         if srv.get("enable_thinking") is False:
             cmd += ["--chat-template-kwargs", '{"enable_thinking": false}']
 
+        # Speculative decoding with draft model
+        draft_file = self._draft_gguf_file(model)
+        if draft_file:
+            cmd += ["--model-draft", str(draft_file)]
+
         return cmd
 
     def pull(self, model: dict) -> None:
@@ -75,7 +80,17 @@ class GgufProvider:
         console.print(f"  Downloading {hf_file}...")
         local_file = hf_hub_download(repo_id=repo, filename=hf_file)
         fsize = Path(local_file).stat().st_size / 1e9
-        console.print(f"\n  [green]Done![/green] {fsize:.1f}GB cached\n")
+        console.print(f"  [green]done[/green] {hf_file} ({fsize:.1f}GB)")
+
+        # Pull draft model if configured
+        draft_repo = model.get("draft_hf_repo")
+        draft_file = model.get("draft_hf_file")
+        if draft_repo and draft_file:
+            console.print(f"  Downloading draft model {draft_file}...")
+            hf_hub_download(repo_id=draft_repo, filename=draft_file)
+            console.print(f"  [green]done[/green] {draft_file}")
+
+        console.print()
 
     def is_downloaded(self, model: dict) -> bool:
         hf_file = model.get("hf_file")
@@ -112,3 +127,13 @@ class GgufProvider:
 
         console.print(f"[red]GGUF file not found for {model.get('name', '?')}[/red]")
         raise SystemExit(1)
+
+    def _draft_gguf_file(self, model: dict) -> Path | None:
+        draft_repo = model.get("draft_hf_repo")
+        draft_file = model.get("draft_hf_file")
+        if not draft_repo or not draft_file:
+            return None
+        snap = _hf_snapshot_path(draft_repo)
+        if snap and (snap / draft_file).exists():
+            return snap / draft_file
+        return None

@@ -19,7 +19,16 @@ class VllmMlxProvider:
 
     def build_serve_cmd(self, model: dict, port: int) -> list[str]:
         local = self._model_path(model)
-        return ["vllm-mlx", "serve", str(local), "--port", str(port)]
+        cmd = ["vllm-mlx", "serve", str(local), "--port", str(port)]
+
+        # Speculative decoding with draft model
+        draft_repo = model.get("draft_hf_repo")
+        if draft_repo:
+            draft_path = self._draft_model_path(model)
+            if draft_path:
+                cmd += ["--speculative-model", str(draft_path)]
+
+        return cmd
 
     def pull(self, model: dict) -> None:
         from huggingface_hub import hf_hub_download, list_repo_files, snapshot_download
@@ -64,7 +73,14 @@ class VllmMlxProvider:
         # Ensure snapshot is resolved
         local = snapshot_download(repo_id=repo)
         total_size = sum(f.stat().st_size for f in Path(local).rglob("*") if f.is_file()) / 1e9
-        console.print(f"\n  [green]Done![/green] {total_size:.1f}GB total\n")
+        console.print(f"\n  [green]Done![/green] {total_size:.1f}GB total")
+
+        # Pull draft model if configured
+        draft_repo = model.get("draft_hf_repo")
+        if draft_repo:
+            console.print(f"\n  Pulling draft model: [dim]{draft_repo}[/dim]")
+            snapshot_download(repo_id=draft_repo)
+            console.print(f"  [green]Done![/green] Draft model cached\n")
 
     def is_downloaded(self, model: dict) -> bool:
         p = self._model_path(model)
@@ -72,12 +88,19 @@ class VllmMlxProvider:
 
     def _model_path(self, model: dict) -> Path | None:
         repo = model["hf_repo"]
-        # Check HF cache
         snap = _hf_snapshot_path(repo)
         if snap and any(snap.glob("*.safetensors")):
             return snap
-        # Check legacy dir
         legacy = _legacy_path(repo)
         if legacy.exists() and any(legacy.glob("*.safetensors")):
             return legacy
+        return None
+
+    def _draft_model_path(self, model: dict) -> Path | None:
+        draft_repo = model.get("draft_hf_repo")
+        if not draft_repo:
+            return None
+        snap = _hf_snapshot_path(draft_repo)
+        if snap and any(snap.glob("*.safetensors")):
+            return snap
         return None
