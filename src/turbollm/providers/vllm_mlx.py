@@ -19,7 +19,29 @@ class VllmMlxProvider:
 
     def build_serve_cmd(self, model: dict, port: int) -> list[str]:
         local = self._model_path(model)
+        srv = model.get("server", {})
+
         cmd = ["vllm-mlx", "serve", str(local), "--port", str(port)]
+
+        # Performance: continuous batching + paged KV cache
+        if srv.get("continuous_batching", True):
+            cmd += ["--continuous-batching"]
+        if srv.get("paged_cache", True):
+            cmd += ["--use-paged-cache"]
+
+        # Memory: allocate more RAM for KV cache (default 20% is conservative)
+        cache_pct = srv.get("cache_memory_percent")
+        if cache_pct:
+            cmd += ["--cache-memory-percent", str(cache_pct)]
+
+        # Token limits
+        max_tokens = srv.get("max_tokens")
+        if max_tokens:
+            cmd += ["--max-tokens", str(max_tokens)]
+
+        # Timeout for long agentic tasks
+        timeout = srv.get("timeout", 600)
+        cmd += ["--timeout", str(timeout)]
 
         # Enable tool calling and reasoning for agentic use
         if model.get("tool_use", False):

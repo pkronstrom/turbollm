@@ -24,6 +24,13 @@ tool_use = true
 can_reason = true
 tags = ["coding", "moe"]
 
+[models.qwen36-35b-mlx-4bit.server]
+continuous_batching = true
+paged_cache = true
+cache_memory_percent = 0.40   # 40% of 128GB = ~51GB for KV cache
+max_tokens = 32768
+timeout = 600                 # 10min for long agentic tasks
+
 [models.qwen36-35b-mlx-4bit.opencode]
 context_length = 131072
 output_length = 16384
