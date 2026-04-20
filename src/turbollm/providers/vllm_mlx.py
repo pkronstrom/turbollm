@@ -45,6 +45,18 @@ class VllmMlxProvider:
         if max_req:
             cmd += ["--max-request-tokens", str(max_req)]
 
+        # KV cache quantization — halves cache memory
+        if srv.get("kv_cache_quantization"):
+            cmd += ["--kv-cache-quantization"]
+            kv_bits = srv.get("kv_cache_quantization_bits")
+            if kv_bits:
+                cmd += ["--kv-cache-quantization-bits", str(kv_bits)]
+
+        # Chunked prefill for responsiveness during long prompts
+        chunked = srv.get("chunked_prefill_tokens")
+        if chunked:
+            cmd += ["--chunked-prefill-tokens", str(chunked)]
+
         # Timeout for long agentic tasks
         timeout = srv.get("timeout", 600)
         cmd += ["--timeout", str(timeout)]

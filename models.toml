@@ -30,14 +30,17 @@ tool_call_parser = "hermes"
 [models.qwen36-35b-mlx-4bit.server]
 continuous_batching = true
 paged_cache = true
-cache_memory_percent = 0.40   # 40% of 128GB = ~51GB for KV cache
-max_tokens = 131072
-max_request_tokens = 131072
-timeout = 600                 # 10min for long agentic tasks
+cache_memory_percent = 0.40
+kv_cache_quantization = true    # quantize KV cache to 8-bit, halves cache memory
+kv_cache_quantization_bits = 8
+max_tokens = 65536
+max_request_tokens = 65536
+chunked_prefill_tokens = 2048   # break prefill into chunks for responsiveness
+timeout = 600
 
 [models.qwen36-35b-mlx-4bit.opencode]
-context_length = 131072
-output_length = 32768
+context_length = 65536
+output_length = 16384
 
 # --- GGUF models ---
 
@@ -55,13 +58,13 @@ can_reason = true
 tags = ["coding", "moe"]
 
 [models.qwen36-35b-gguf-q4km.opencode]
-context_length = 131072
-output_length = 32768
+context_length = 65536
+output_length = 16384
 
 [models.qwen36-35b-gguf-q4km.server]
 ngl = 999
 threads = 8
-context = 131072
+context = 65536
 batch = 512
 ubatch = 1024
 flash_attention = true
