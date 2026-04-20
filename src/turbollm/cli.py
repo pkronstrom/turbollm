@@ -91,14 +91,54 @@ def pull(model):
 
     import logging
 
-    from huggingface_hub import snapshot_download
+    from huggingface_hub import hf_hub_download, list_repo_files, get_paths_info
 
-    # Suppress noisy HTTP logs from huggingface_hub / httpx
+    # Suppress noisy HTTP logs
     logging.getLogger("httpx").setLevel(logging.WARNING)
     logging.getLogger("huggingface_hub").setLevel(logging.WARNING)
+    os.environ["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"
 
-    # Download to HF's default cache — mlx-lm uses this natively
-    console.print("  Downloading...")
+    files = list_repo_files(repo_id=repo)
+    model_files = [f for f in files if not f.startswith(".")]
+
+    # Get file sizes for proper progress bars
+    file_sizes = {}
+    try:
+        for info in get_paths_info(repo, model_files):
+            if hasattr(info, "size") and info.size:
+                file_sizes[info.path] = info.size
+    except Exception:
+        pass
+
+    total_bytes = sum(file_sizes.values())
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[bold blue]{task.fields[filename]}", justify="right"),
+        BarColumn(bar_width=30),
+        DownloadColumn(),
+        TransferSpeedColumn(),
+        TimeRemainingColumn(),
+        console=console,
+    ) as progress:
+        overall = progress.add_task(
+            "Total", total=total_bytes or None, filename="starting..."
+        )
+
+        for f in model_files:
+            fname = f.split("/")[-1]
+            fsize = file_sizes.get(f, 0)
+            progress.update(overall, filename=fname)
+            hf_hub_download(
+                repo_id=repo,
+                filename=f,
+                resume_download=True,
+            )
+            progress.advance(overall, fsize)
+
+        progress.update(overall, filename="done")
+
+    # Resolve final path
+    from huggingface_hub import snapshot_download
     local = snapshot_download(repo_id=repo)
     total_size = sum(f.stat().st_size for f in Path(local).rglob("*") if f.is_file()) / 1e9
     console.print(f"\n  [green]Done![/green] {total_size:.1f}GB cached at {local}\n")
