@@ -21,7 +21,7 @@ draft_hf_repo = "mlx-community/Qwen3-0.6B-4bit"
 size_gb = 20
 min_memory_gb = 24
 tool_use = true
-can_reason = true
+can_reason = false
 tags = ["coding", "moe"]
 
 [models.qwen36-35b-mlx-4bit.server]
