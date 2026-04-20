@@ -270,19 +270,28 @@ def chat(port):
         assistant_msg = []
         try:
             with urllib.request.urlopen(request) as response:
-                for line in response:
-                    line = line.decode().strip()
-                    if not line.startswith("data: "):
-                        continue
-                    data = line[6:]
-                    if data == "[DONE]":
-                        break
-                    chunk = json.loads(data)
-                    delta = chunk.get("choices", [{}])[0].get("delta", {})
-                    content = delta.get("content", "")
-                    if content:
-                        print(content, end="", flush=True)
-                        assistant_msg.append(content)
+                buf = ""
+                for raw in response:
+                    buf += raw.decode()
+                    # SSE messages end with double newline
+                    while "\n\n" in buf:
+                        msg, buf = buf.split("\n\n", 1)
+                        for line in msg.split("\n"):
+                            line = line.strip()
+                            if not line.startswith("data: "):
+                                continue
+                            data = line[6:]
+                            if data == "[DONE]":
+                                break
+                            try:
+                                chunk = json.loads(data)
+                            except json.JSONDecodeError:
+                                continue
+                            delta = chunk.get("choices", [{}])[0].get("delta", {})
+                            content = delta.get("content", "")
+                            if content:
+                                print(content, end="", flush=True)
+                                assistant_msg.append(content)
         except Exception as e:
             console.print(f"\n[red]Error: {e}[/red]")
             continue
