@@ -78,13 +78,20 @@ def pull(model):
 
     if provider.is_downloaded(m):
         console.print(f"[green]Already downloaded:[/green] {m['hf_repo']}")
-        return
+    else:
+        size = f" ({m['size_gb']}GB)" if m.get("size_gb") else ""
+        console.print(f"\n  [bold]{m['name']}[/bold]{size}")
+        console.print(f"  [dim]{m['hf_repo']}[/dim]\n")
+        provider.pull(m)
 
-    size = f" ({m['size_gb']}GB)" if m.get("size_gb") else ""
-    console.print(f"\n  [bold]{m['name']}[/bold]{size}")
-    console.print(f"  [dim]{m['hf_repo']}[/dim]\n")
-
-    provider.pull(m)
+    # Ensure draft model is also pulled
+    draft_repo = m.get("draft_hf_repo")
+    if draft_repo and hasattr(provider, '_draft_model_path'):
+        if provider._draft_model_path(m) is None:
+            console.print(f"\n  Pulling draft model: [dim]{draft_repo}[/dim]")
+            from huggingface_hub import snapshot_download
+            snapshot_download(repo_id=draft_repo)
+            console.print(f"  [green]Done![/green] Draft model cached")
 
 
 @cli.command(name="ls")
