@@ -191,7 +191,10 @@ def rm(model, yes):
     if not yes:
         click.confirm(f"Remove {m['name']} ({size:.1f}GB)?", abort=True)
 
-    shutil.rmtree(cache_dir)
+    try:
+        shutil.rmtree(cache_dir)
+    except FileNotFoundError:
+        pass
     console.print(f"[green]Removed[/green] {model}")
 
 
