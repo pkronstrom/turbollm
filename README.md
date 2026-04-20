@@ -1,11 +1,11 @@
 # turbollm
 
-Ollama-like CLI for MLX TurboQuant models on Apple Silicon.
+Ollama-like CLI for local LLM serving on Apple Silicon. Supports multiple backends (vllm-mlx, llama-server) with a unified interface.
 
 ## Install
 
 ```bash
-uv tool install git+https://github.com/pkronstrom/turbollm.git[serve]
+uv tool install git+https://github.com/pkronstrom/turbollm.git
 ```
 
 Or from local checkout:
@@ -13,7 +13,19 @@ Or from local checkout:
 ```bash
 git clone https://github.com/pkronstrom/turbollm.git
 cd turbollm
-uv tool install -e ".[serve]"
+uv tool install -e .
+```
+
+### Backends
+
+Install at least one backend:
+
+```bash
+# MLX models (recommended for Apple Silicon)
+pip install git+https://github.com/waybarrios/vllm-mlx.git
+
+# GGUF models
+brew install llama.cpp
 ```
 
 ## Usage
@@ -23,41 +35,51 @@ uv tool install -e ".[serve]"
 turbo ls -a
 
 # Pull a model (alias, owner/repo, or HuggingFace URL)
-turbo pull qwen36-35b-tq4
-turbo pull majentik/Qwen3.6-35B-A3B-TurboQuant-MLX-4bit
-turbo pull https://huggingface.co/majentik/Qwen3.6-35B-A3B-TurboQuant-MLX-4bit
+turbo pull qwen36-35b-mlx-4bit
+turbo pull https://huggingface.co/mlx-community/Qwen3.6-35B-A3B-4bit
 
 # List downloaded models
 turbo ls
 
-# Serve a model (OpenAI-compatible API on port 8899)
-turbo serve qwen36-35b-tq4
+# Serve a model (auto-detects backend)
+turbo serve qwen36-35b-mlx-4bit
 
 # Serve + launch opencode
-turbo opencode qwen36-35b-tq4
+turbo opencode qwen36-35b-mlx-4bit
 
 # Remove a model
-turbo rm qwen36-35b-tq4
+turbo rm qwen36-35b-mlx-4bit
 ```
 
 ## Adding models
 
-Edit `models.toml` to add new models:
+Edit `models.toml`:
 
 ```toml
 [models.my-model]
 name = "My Model"
+backend = "vllm-mlx"           # or "gguf"
 hf_repo = "owner/repo-name"
 size_gb = 20
 tool_use = true
 can_reason = true
+
+# GGUF models need a specific file
+[models.my-gguf-model]
+backend = "gguf"
+hf_repo = "owner/repo-name"
+hf_file = "model-Q4_K_M.gguf"
+
+# Per-model server settings (GGUF only)
+[models.my-gguf-model.server]
+ngl = 999
+context = 131072
+flash_attention = true
 ```
 
-Or pull any HF repo directly without adding it to the registry:
+## Adding a new backend
 
-```bash
-turbo pull owner/repo-name
-```
+Create `src/turbollm/providers/my_backend.py` implementing the `Provider` protocol, register it in `providers/__init__.py`.
 
 ## Requirements
 

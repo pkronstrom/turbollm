@@ -1,16 +1,13 @@
 [project]
 name = "turbollm"
-version = "0.1.0"
-description = "Ollama-like CLI for MLX TurboQuant models on Apple Silicon"
+version = "0.2.0"
+description = "Ollama-like CLI for local LLM serving on Apple Silicon"
 requires-python = ">=3.11"
 dependencies = [
     "click>=8.0",
     "huggingface-hub>=0.20",
     "rich>=13.0",
 ]
-
-[project.optional-dependencies]
-serve = ["mlx-lm>=0.20,!=0.31.2"]
 
 [project.scripts]
 turbo = "turbollm.cli:cli"

@@ -52,13 +52,13 @@ def get_defaults() -> dict:
     return load_registry().get("defaults", {})
 
 
+# --- HF cache helpers (used by providers) ---
+
 def _hf_cache_path(hf_repo: str) -> Path:
-    """Return the HF cache dir for a repo: ~/.cache/huggingface/hub/models--owner--repo"""
     return HF_CACHE / f"models--{hf_repo.replace('/', '--')}"
 
 
 def _hf_snapshot_path(hf_repo: str) -> Path | None:
-    """Return the latest snapshot path in HF cache, or None."""
     cache_dir = _hf_cache_path(hf_repo)
     snapshots = cache_dir / "snapshots"
     if not snapshots.exists():
@@ -68,50 +68,4 @@ def _hf_snapshot_path(hf_repo: str) -> Path | None:
 
 
 def _legacy_path(hf_repo: str) -> Path:
-    """Old ~/.turbollm/models/ location."""
     return LEGACY_DIR / hf_repo.replace("/", "--")
-
-
-def model_path(hf_repo: str) -> Path | None:
-    """Return the local path to a downloaded model. Checks HF cache then legacy dir."""
-    snap = _hf_snapshot_path(hf_repo)
-    if snap:
-        # Check for safetensors (MLX) or gguf files
-        if any(snap.glob("*.safetensors")) or any(snap.glob("*.gguf")):
-            return snap
-
-    legacy = _legacy_path(hf_repo)
-    if legacy.exists():
-        if any(legacy.glob("*.safetensors")) or any(legacy.glob("*.gguf")):
-            return legacy
-
-    return None
-
-
-def is_downloaded(hf_repo: str, hf_file: str | None = None) -> bool:
-    """Check if a model is downloaded. For GGUF, checks specific file."""
-    if hf_file:
-        # GGUF single-file: check if that specific file exists in HF cache
-        snap = _hf_snapshot_path(hf_repo)
-        if snap and (snap / hf_file).exists():
-            return True
-        # Also check blobs (HF may symlink)
-        cache = _hf_cache_path(hf_repo)
-        if cache.exists():
-            for f in cache.rglob(hf_file):
-                return True
-        return False
-    return model_path(hf_repo) is not None
-
-
-def list_downloaded() -> list[tuple[str, dict]]:
-    """Return list of (alias_or_repo, model_dict) for all downloaded models."""
-    reg = load_registry()
-    models = reg.get("models", {})
-    result = []
-
-    for alias, m in models.items():
-        if is_downloaded(m["hf_repo"], m.get("hf_file")):
-            result.append((alias, m))
-
-    return result
