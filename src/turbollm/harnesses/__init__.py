@@ -71,5 +71,7 @@ def get_harness(name: str, config: dict) -> Harness:
 
 
 # Import custom harnesses to trigger registration
+from turbollm.harnesses import claude_code as _claude_code  # noqa: F401, E402
 from turbollm.harnesses import hermes as _hermes  # noqa: F401, E402
 from turbollm.harnesses import opencode as _opencode  # noqa: F401, E402
+from turbollm.harnesses import pi as _pi  # noqa: F401, E402

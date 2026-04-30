@@ -11,9 +11,21 @@ top_k = 20
 context_length = 32768
 output_length = 8192
 
+[defaults.omlx]
+model_dir = "~/.omlx/models"
+paged_ssd_cache_dir = "~/.omlx/cache"
+paged_ssd_cache_max_size = "100GB"
+hot_cache_max_size = "8GB"
+max_concurrent_requests = 8
+
 # --- Harnesses (agent CLIs) ---
 # Each harness auto-gets OPENAI_BASE_URL + OPENAI_API_KEY pointed at the turbo server.
 # Template vars in cmd/env: {model_id}, {port}
+
+[harnesses.claude]
+binary = "claude"
+install = "npm install -g @anthropic-ai/claude-code"
+# Uses custom launcher (ANTHROPIC_BASE_URL + ANTHROPIC_AUTH_TOKEN)
 
 [harnesses.opencode]
 binary = "opencode"
@@ -29,7 +41,8 @@ install = "uv tool install git+https://github.com/NousResearch/hermes-agent.git"
 binary = "goose"
 install = "curl -fsSL https://github.com/aaif-goose/goose/releases/download/stable/download_cli.sh | bash"
 cmd = ["goose"]
-env = { GOOSE_PROVIDER = "openai", GOOSE_MODEL = "{model_id}" }
+# goose reads OPENAI_HOST (not OPENAI_BASE_URL) for the OpenAI provider endpoint
+env = { GOOSE_PROVIDER = "openai", GOOSE_MODEL = "{model_id}", OPENAI_HOST = "http://127.0.0.1:{port}" }
 
 [harnesses.codex]
 binary = "codex"
@@ -53,10 +66,15 @@ binary = "qwen"
 install = "brew install qwen-code"
 cmd = ["qwen", "--model", "{model_id}"]
 
+[harnesses.pi]
+binary = "pi"
+install = "npm install -g @mariozechner/pi-coding-agent"
+# Uses custom launcher (models.json provider config pointing at turbo server)
+
 # --- MLX models (served via vllm-mlx) ---
 
-[models.qwen36-35b-mlx-4bit]
-name = "Qwen3.6 35B-A3B MLX 4bit"
+[models.qwen36-35b-4bit]
+name = "Qwen3.6 35B-A3B 4bit"
 backend = "vllm-mlx"
 hf_repo = "mlx-community/Qwen3.6-35B-A3B-4bit"
 # draft_hf_repo = "mlx-community/Qwen3-0.6B-4bit"
@@ -70,12 +88,14 @@ tags = ["coding", "moe"]
 tool_call_parser = "hermes"
 reasoning_parser = "qwen3"
 
-[models.qwen36-35b-mlx-4bit.server]
+[models.qwen36-35b-4bit.server]
 paged_cache = true
 cache_memory_percent = 0.40
-max_tokens = 65536
-max_request_tokens = 65536
+# Qwen guidance prefers >=128K context for thinking-capable 3.6 sessions.
+max_tokens = 131072
+max_request_tokens = 131072
 timeout = 600
+# M4 Pro 128GB default: 128K is safe here and reduces early degradation in long agent runs.
 # --- Broken flags for Qwen3.6 (all produce "!!!" garbage output) ---
 # Root cause: Qwen3.6 mixed attention (full + SWA + linear) is incompatible
 # with any vllm-mlx optimization that modifies KV cache or batch scheduling.
@@ -84,8 +104,56 @@ timeout = 600
 # chunked_prefill_tokens = 2048 # chunked prefill corrupts cross-chunk attention
 # specprefill = true            # draft model KV mismatch with target (vllm#36872)
 
-[models.qwen36-35b-mlx-4bit.opencode]
+[models.qwen36-35b-4bit.opencode]
+context_length = 131072
+output_length = 16384
+
+[models.qwen36-27b-6bit]
+name = "Qwen3.6 27B UD 6bit"
+backend = "vllm-mlx"
+hf_repo = "unsloth/Qwen3.6-27B-UD-MLX-6bit"
+size_gb = 30
+min_memory_gb = 36
+tool_use = true
+can_reason = true
+tags = ["coding", "dense", "vision"]
+tool_call_parser = "hermes"
+reasoning_parser = "qwen3"
+
+[models.qwen36-27b-6bit.server]
+paged_cache = true
+cache_memory_percent = 0.40
+# M4 Pro default: 27B is more reliable, but much slower than 35B-A3B at long context.
+max_tokens = 65536
+max_request_tokens = 65536
+timeout = 600
+
+[models.qwen36-27b-6bit.opencode]
 context_length = 65536
+output_length = 16384
+
+[models.qwen36-27b-6bit-longctx]
+name = "Qwen3.6 27B UD 6bit LongCtx"
+backend = "vllm-mlx"
+hf_repo = "unsloth/Qwen3.6-27B-UD-MLX-6bit"
+size_gb = 30
+min_memory_gb = 36
+tool_use = true
+can_reason = true
+tags = ["coding", "dense", "vision", "longctx"]
+tool_call_parser = "hermes"
+reasoning_parser = "qwen3"
+
+[models.qwen36-27b-6bit-longctx.server]
+paged_cache = true
+cache_memory_percent = 0.40
+# Long-context variant for 128GB machines; slower than the default 27B profile.
+max_tokens = 131072
+max_request_tokens = 131072
+timeout = 600
+
+[models.qwen36-27b-6bit-longctx.opencode]
+context_length = 131072
 output_length = 16384
 
 # --- GGUF models ---
@@ -125,4 +193,3 @@ parallel = 1
 enable_thinking = false
 jinja = true
 mlock = true
-

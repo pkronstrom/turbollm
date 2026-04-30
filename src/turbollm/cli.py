@@ -40,6 +40,18 @@ def _get_model_id(m: dict) -> str:
     return m["hf_repo"]
 
 
+def _picker_stats(m: dict) -> tuple[str, str, str, str]:
+    backend = m.get("backend", get_defaults().get("backend", "vllm-mlx"))
+    model_oc = m.get("opencode", {})
+    srv = m.get("server", {})
+    defaults_oc = get_defaults().get("opencode", {})
+    ctx = model_oc.get("context_length", srv.get("max_tokens", defaults_oc.get("context_length", 32768)))
+    out = model_oc.get("output_length", defaults_oc.get("output_length", 8192))
+    size_gb = m.get("size_gb")
+    size = f"{size_gb:g}GB" if isinstance(size_gb, int | float) else "?"
+    return backend, f"{int(ctx / 1024)}k", f"{int(out / 1024)}k", size
+
+
 def pick_model(requires_backend: list[str] | None = None) -> tuple[str, dict]:
     """Interactive picker for downloaded models.
 
@@ -84,12 +96,18 @@ def pick_model(requires_backend: list[str] | None = None) -> tuple[str, dict]:
     idx = 0
     for alias, m in compatible:
         idx += 1
-        backend = m.get("backend", "vllm-mlx")
-        console.print(f"  [bold cyan]{idx}[/bold cyan]) {m['name']}  [dim]({alias}) [{backend}][/dim]")
+        backend, ctx, out, size = _picker_stats(m)
+        console.print(
+            f"  [bold cyan]{idx}[/bold cyan]) {m['name']}  "
+            f"[dim]({alias}) [{backend}] ctx {ctx} out {out} size {size}[/dim]"
+        )
         selectable.append((alias, m))
     for alias, m in incompatible:
-        backend = m.get("backend", "vllm-mlx")
-        console.print(f"  [dim]  ) {m['name']}  ({alias}) [{backend}] — incompatible backend[/dim]")
+        backend, ctx, out, size = _picker_stats(m)
+        console.print(
+            f"  [dim]  ) {m['name']}  ({alias}) [{backend}] "
+            f"ctx {ctx} out {out} size {size} — incompatible backend[/dim]"
+        )
     console.print()
 
     choice = click.prompt("  Choice", type=click.IntRange(1, len(selectable)))
