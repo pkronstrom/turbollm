@@ -9,8 +9,8 @@ import click
 
 
 def _load_env():
-    """Load .env from package root or ~/.turbollm/.env."""
-    for p in [Path(__file__).parent.parent.parent / ".env", Path.home() / ".turbollm" / ".env"]:
+    """Load .env from ~/.turbollm first, then fall back to package root."""
+    for p in [Path.home() / ".turbollm" / ".env", Path(__file__).parent.parent.parent / ".env"]:
         if p.exists():
             for line in p.read_text().splitlines():
                 line = line.strip()
@@ -40,8 +40,12 @@ def _get_model_id(m: dict) -> str:
     return m["hf_repo"]
 
 
-def pick_model() -> tuple[str, dict]:
-    """Interactive picker for downloaded models."""
+def pick_model(requires_backend: list[str] | None = None) -> tuple[str, dict]:
+    """Interactive picker for downloaded models.
+
+    If requires_backend is set, incompatible models are shown greyed out
+    and cannot be selected.
+    """
     reg = load_registry()
     models = reg.get("models", {})
     downloaded = []
@@ -53,19 +57,43 @@ def pick_model() -> tuple[str, dict]:
     if not downloaded:
         console.print("[yellow]No models downloaded.[/yellow] Run [bold]turbo pull <model>[/bold] first.")
         raise SystemExit(1)
-    if len(downloaded) == 1:
-        alias, m = downloaded[0]
+
+    # Split into compatible / incompatible
+    compatible = []
+    incompatible = []
+    for alias, m in downloaded:
+        backend = m.get("backend", get_defaults().get("backend", "vllm-mlx"))
+        if requires_backend and backend not in requires_backend:
+            incompatible.append((alias, m))
+        else:
+            compatible.append((alias, m))
+
+    if not compatible:
+        console.print("[yellow]No compatible models downloaded.[/yellow]")
+        if requires_backend:
+            console.print(f"  Requires backend: [bold]{', '.join(requires_backend)}[/bold]")
+        raise SystemExit(1)
+
+    if len(compatible) == 1 and not incompatible:
+        alias, m = compatible[0]
         console.print(f"Using [bold]{m['name']}[/bold]")
         return alias, m
 
     console.print("\n  [bold]Select a model:[/bold]\n")
-    for i, (alias, m) in enumerate(downloaded, 1):
+    selectable = []
+    idx = 0
+    for alias, m in compatible:
+        idx += 1
         backend = m.get("backend", "vllm-mlx")
-        console.print(f"  [bold cyan]{i}[/bold cyan]) {m['name']}  [dim]({alias}) [{backend}][/dim]")
+        console.print(f"  [bold cyan]{idx}[/bold cyan]) {m['name']}  [dim]({alias}) [{backend}][/dim]")
+        selectable.append((alias, m))
+    for alias, m in incompatible:
+        backend = m.get("backend", "vllm-mlx")
+        console.print(f"  [dim]  ) {m['name']}  ({alias}) [{backend}] — incompatible backend[/dim]")
     console.print()
 
-    choice = click.prompt("  Choice", type=click.IntRange(1, len(downloaded)))
-    return downloaded[choice - 1]
+    choice = click.prompt("  Choice", type=click.IntRange(1, len(selectable)))
+    return selectable[choice - 1]
 
 
 # ---------------------------------------------------------------------------
@@ -195,12 +223,16 @@ def rm(model, yes):
 @cli.command()
 @click.argument("model", required=False)
 @click.option("--port", "-p", default=None, type=int, help="Port (default: 8899)")
-def serve(model, port):
+@click.option("--backend", "-b", default=None, type=click.Choice(["vllm-mlx", "omlx", "gguf"]),
+              help="Override backend (default: from model config)")
+def serve(model, port, backend):
     """Start model server (auto-detects backend)."""
     if model:
         m = resolve_model(model)
     else:
         _, m = pick_model()
+    if backend:
+        m = {**m, "backend": backend}
 
     provider = _get_provider_for(m)
     defaults = get_defaults()
@@ -316,25 +348,47 @@ def _server_is_running(port: int) -> bool:
         return False
 
 
+def _get_running_model(port: int) -> dict | None:
+    """If a server is running, return the matching model dict from registry (or None)."""
+    try:
+        resp = json.loads(urllib.request.urlopen(f"http://127.0.0.1:{port}/v1/models", timeout=2).read())
+        model_id = resp["data"][0]["id"] if resp.get("data") else None
+    except Exception:
+        return None
+    if not model_id:
+        return None
+    reg = load_registry()
+    for m in reg.get("models", {}).values():
+        if m.get("hf_repo") == model_id:
+            return m
+    # Unknown model on the server — return a synthetic dict
+    return {"name": model_id, "hf_repo": model_id, "backend": "unknown"}
+
+
 def _run_with_server(m: dict, port: int, launch_fn):
     """Start turbo server (or reuse running one) and run launch_fn(m, port).
 
     Handles server lifecycle: starts if needed, waits for ready,
     stops on exit.  launch_fn should be a blocking call (e.g. subprocess.run).
     """
-    provider = _get_provider_for(m)
-
-    if not provider.is_downloaded(m):
-        console.print("[yellow]Model not downloaded.[/yellow] Run: [bold]turbo pull ...[/bold]")
-        raise SystemExit(1)
-    if not provider.is_available():
-        console.print(f"[red]{provider.name} not found.[/red] Install: [bold]{provider.install_hint}[/bold]")
-        raise SystemExit(1)
-
+    # If a server is already running, just attach — no provider needed
     if _server_is_running(port):
         console.print(f"[green]Server already running on port {port}.[/green]")
         launch_fn(m, port)
         return
+
+    provider = _get_provider_for(m)
+
+    if not provider.is_downloaded(m):
+        size = f" ({m['size_gb']}GB)" if m.get("size_gb") else ""
+        console.print(f"[yellow]Model not downloaded:[/yellow] {m.get('name', m['hf_repo'])}{size}")
+        if click.confirm("  Pull now?"):
+            provider.pull(m)
+        else:
+            raise SystemExit(1)
+    if not provider.is_available():
+        console.print(f"[red]{provider.name} not found.[/red] Install: [bold]{provider.install_hint}[/bold]")
+        raise SystemExit(1)
 
     cmd = provider.build_serve_cmd(m, port)
     console.print(f"Starting [bold]{m['name']}[/bold] on port {port} [{provider.name}]...")
@@ -381,17 +435,50 @@ def _run_harness(harness_name: str, m: dict, port: int):
     _run_with_server(m, port, lambda _m, p: harness.launch(model_id, p, m))
 
 
+def _is_backend_compatible(harness_config: dict, backend: str) -> bool:
+    """Check if a backend is compatible with a harness's requires_backend."""
+    requires = harness_config.get("requires_backend")
+    if not requires:
+        return True
+    return backend in requires
+
+
 def _make_harness_command(harness_name: str):
     """Create a click command for a TOML-defined harness."""
     @click.command(name=harness_name, help=f"Start model server + launch {harness_name}.")
     @click.argument("model", required=False)
     @click.option("--port", "-p", default=None, type=int, help="Port (default: 8899)")
-    def cmd(model, port):
+    @click.option("--backend", "-b", default=None, type=click.Choice(["vllm-mlx", "omlx", "gguf"]),
+                  help="Override backend (default: from model config)")
+    def cmd(model, port, backend):
+        port = port or get_defaults().get("port", 8899)
+        reg = load_registry()
+        harness_config = reg.get("harnesses", {}).get(harness_name, {})
+        requires_backend = harness_config.get("requires_backend")
+
         if model:
             m = resolve_model(model)
+        elif _server_is_running(port):
+            # Server already running — check compatibility
+            running = _get_running_model(port)
+            running_backend = running.get("backend", "unknown") if running else "unknown"
+            if running and _is_backend_compatible(harness_config, running_backend):
+                # Compatible server running — attach directly
+                _run_harness(harness_name, running, port)
+                return
+            else:
+                # Incompatible server — show picker
+                if running:
+                    console.print(
+                        f"[yellow]Server on port {port} ({running.get('name', '?')}) "
+                        f"uses incompatible backend [{running_backend}].[/yellow]"
+                    )
+                _, m = pick_model(requires_backend=requires_backend)
         else:
-            _, m = pick_model()
-        port = port or get_defaults().get("port", 8899)
+            _, m = pick_model(requires_backend=requires_backend)
+
+        if backend:
+            m = {**m, "backend": backend}
         _run_harness(harness_name, m, port)
     return cmd
 
@@ -400,13 +487,30 @@ def _make_harness_command(harness_name: str):
 @click.argument("model", required=False)
 @click.option("--harness", "-H", required=True, help="Harness to launch (e.g. goose, hermes)")
 @click.option("--port", "-p", default=None, type=int, help="Port (default: 8899)")
-def run_cmd(model, harness, port):
+@click.option("--backend", "-b", default=None, type=click.Choice(["vllm-mlx", "omlx", "gguf"]),
+              help="Override backend (default: from model config)")
+def run_cmd(model, harness, port, backend):
     """Start model server + launch a harness by name."""
+    port = port or get_defaults().get("port", 8899)
+    reg = load_registry()
+    harness_config = reg.get("harnesses", {}).get(harness, {})
+    requires_backend = harness_config.get("requires_backend")
+
     if model:
         m = resolve_model(model)
+    elif _server_is_running(port):
+        running = _get_running_model(port)
+        running_backend = running.get("backend", "unknown") if running else "unknown"
+        if running and _is_backend_compatible(harness_config, running_backend):
+            _run_harness(harness, running, port)
+            return
+        else:
+            _, m = pick_model(requires_backend=requires_backend)
     else:
-        _, m = pick_model()
-    port = port or get_defaults().get("port", 8899)
+        _, m = pick_model(requires_backend=requires_backend)
+
+    if backend:
+        m = {**m, "backend": backend}
     _run_harness(harness, m, port)
 
 

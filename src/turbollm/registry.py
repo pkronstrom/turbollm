@@ -4,18 +4,36 @@ from urllib.parse import urlparse
 
 import click
 
+CONFIG_DIR = Path.home() / ".turbollm"
 BUNDLED_TOML = Path(__file__).parent.parent.parent / "models.toml"
+USER_TOML = CONFIG_DIR / "models.toml"
 HF_CACHE = Path.home() / ".cache" / "huggingface" / "hub"
-LEGACY_DIR = Path.home() / ".turbollm" / "models"
+LEGACY_DIR = CONFIG_DIR / "models"
+
+
+def _load_toml(path: Path) -> dict:
+    try:
+        return tomllib.loads(path.read_text())
+    except tomllib.TOMLDecodeError as e:
+        raise click.UsageError(f"Invalid TOML in {path}: {e}")
+
+
+def _bootstrap_user_registry() -> dict | None:
+    if USER_TOML.exists():
+        return _load_toml(USER_TOML)
+    if not BUNDLED_TOML.exists():
+        return None
+
+    data = _load_toml(BUNDLED_TOML)
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    USER_TOML.write_text(BUNDLED_TOML.read_text())
+    return data
 
 
 def load_registry() -> dict:
-    for path in [BUNDLED_TOML, Path.home() / ".turbollm" / "models.toml"]:
-        if path.exists():
-            try:
-                return tomllib.loads(path.read_text())
-            except tomllib.TOMLDecodeError as e:
-                raise click.UsageError(f"Invalid TOML in {path}: {e}")
+    data = _bootstrap_user_registry()
+    if data is not None:
+        return data
     return {"defaults": {}, "models": {}}
 
 

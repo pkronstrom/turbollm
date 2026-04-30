@@ -16,6 +16,12 @@ cd turbollm
 uv tool install -e .
 ```
 
+Turbo bootstraps user config into `~/.turbollm/` on first run:
+
+- `~/.turbollm/models.toml` is the canonical model and harness registry
+- `~/.turbollm/.env` is loaded for user-specific environment variables
+- bundled `models.toml` is only used to seed `~/.turbollm/models.toml` if it does not exist yet
+
 ### Backends
 
 Install at least one backend:
@@ -50,10 +56,11 @@ turbo rm qwen36-35b-mlx-4bit
 
 ## Harnesses (agent CLIs)
 
-Harnesses are agentic CLI tools that connect to the turbo server. Each gets `OPENAI_BASE_URL` and `OPENAI_API_KEY` set automatically.
+Harnesses are agentic CLI tools that connect to the turbo server. If a server is already running, harnesses attach to it directly. Otherwise, a model picker is shown.
 
 ```bash
-# Launch by name — starts server + harness
+# Launch by name — attaches to running server or starts one
+turbo claude [model]       # Claude Code (Anthropic Messages API)
 turbo opencode [model]     # OpenCode IDE
 turbo hermes [model]       # Hermes Agent
 turbo goose [model]        # Goose
@@ -83,7 +90,7 @@ For harnesses needing custom logic beyond env + cmd (like opencode's JSON config
 
 ## Adding models
 
-Edit `models.toml`:
+Edit `~/.turbollm/models.toml`:
 
 ```toml
 [models.my-model]
