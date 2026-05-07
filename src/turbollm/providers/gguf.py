@@ -59,6 +59,13 @@ class GgufProvider:
         if srv.get("enable_thinking") is False:
             cmd += ["--chat-template-kwargs", '{"enable_thinking": false}']
 
+        spec_type = srv.get("spec_type")
+        if spec_type:
+            cmd += ["--spec-type", str(spec_type)]
+        spec_draft_n_max = srv.get("spec_draft_n_max")
+        if spec_draft_n_max is not None:
+            cmd += ["--spec-draft-n-max", str(spec_draft_n_max)]
+
         # Speculative decoding with draft model
         draft_file = self._draft_gguf_file(model)
         if draft_file:
@@ -79,7 +86,12 @@ class GgufProvider:
         logging.getLogger("huggingface_hub").setLevel(logging.WARNING)
 
         console.print(f"  Downloading {hf_file}...")
-        local_file = hf_hub_download(repo_id=repo, filename=hf_file)
+        local_path = self._configured_path(model, "local_path")
+        kwargs = {"repo_id": repo, "filename": hf_file}
+        if local_path is not None:
+            local_path.mkdir(parents=True, exist_ok=True)
+            kwargs["local_dir"] = str(local_path)
+        local_file = hf_hub_download(**kwargs)
         fsize = Path(local_file).stat().st_size / 1e9
         console.print(f"  [green]done[/green] {hf_file} ({fsize:.1f}GB)")
 
@@ -88,7 +100,12 @@ class GgufProvider:
         draft_file = model.get("draft_hf_file")
         if draft_repo and draft_file:
             console.print(f"  Downloading draft model {draft_file}...")
-            hf_hub_download(repo_id=draft_repo, filename=draft_file)
+            draft_path = self._configured_path(model, "draft_local_path")
+            draft_kwargs = {"repo_id": draft_repo, "filename": draft_file}
+            if draft_path is not None:
+                draft_path.mkdir(parents=True, exist_ok=True)
+                draft_kwargs["local_dir"] = str(draft_path)
+            hf_hub_download(**draft_kwargs)
             console.print(f"  [green]done[/green] {draft_file}")
 
         console.print()
@@ -97,6 +114,9 @@ class GgufProvider:
         hf_file = model.get("hf_file")
         if not hf_file:
             return False
+        local = self._configured_path(model, "local_path")
+        if local is not None:
+            return (local / hf_file).exists()
         snap = _hf_snapshot_path(model["hf_repo"])
         if snap and (snap / hf_file).exists():
             return True
@@ -113,8 +133,20 @@ class GgufProvider:
         return None
 
     def _gguf_file(self, model: dict) -> Path:
-        local = _hf_snapshot_path(model["hf_repo"])
         hf_file = model.get("hf_file")
+        configured = self._configured_path(model, "local_path")
+
+        if configured and hf_file:
+            p = configured / hf_file
+            if p.exists():
+                return p
+
+        if configured:
+            ggufs = list(configured.glob("*.gguf"))
+            if ggufs:
+                return ggufs[0]
+
+        local = _hf_snapshot_path(model["hf_repo"])
 
         if local and hf_file:
             p = local / hf_file
@@ -138,3 +170,9 @@ class GgufProvider:
         if snap and (snap / draft_file).exists():
             return snap / draft_file
         return None
+
+    def _configured_path(self, model: dict, key: str) -> Path | None:
+        value = model.get(key)
+        if not value:
+            return None
+        return Path(os.path.expanduser(str(value)))

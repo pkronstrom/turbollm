@@ -21,4 +21,7 @@ def get_provider(backend: str) -> Provider:
     if backend == "omlx":
         from turbollm.providers.omlx import OmlxProvider
         return OmlxProvider()
-    raise ValueError(f"Unknown backend '{backend}'. Available: vllm-mlx, gguf, omlx")
+    if backend == "mlx-vlm":
+        from turbollm.providers.mlx_vlm import MlxVlmProvider
+        return MlxVlmProvider()
+    raise ValueError(f"Unknown backend '{backend}'. Available: vllm-mlx, gguf, omlx, mlx-vlm")

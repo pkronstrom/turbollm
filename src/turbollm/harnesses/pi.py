@@ -28,14 +28,16 @@ class PiHarness:
         is_qwen = "qwen" in model_id.lower() or "qwen" in model_name.lower() or "qwen" in model_repo.lower()
         defaults_oc = get_defaults().get("opencode", {})
         model_oc = model.get("opencode", {})
+        pi_cfg = model.get("pi", {})
         srv = model.get("server", {})
         context_window = model_oc.get("context_length", srv.get("max_tokens", defaults_oc.get("context_length", 32768)))
         max_tokens = model_oc.get("output_length", defaults_oc.get("output_length", 8192))
+        reasoning = pi_cfg.get("reasoning", model.get("can_reason", False))
 
         model_entry = {
             "id": model_id,
             "name": model_name,
-            "reasoning": model.get("can_reason", False),
+            "reasoning": reasoning,
             "input": ["text"],
             "contextWindow": context_window,
             "maxTokens": max_tokens,
@@ -44,6 +46,10 @@ class PiHarness:
         if is_qwen and model.get("can_reason", False):
             # Local Qwen 3.6 servers expect thinking toggles via chat_template_kwargs.
             model_entry["compat"] = {"thinkingFormat": "qwen-chat-template"}
+        if pi_cfg.get("thinking_format"):
+            model_entry.setdefault("compat", {})["thinkingFormat"] = pi_cfg["thinking_format"]
+        if pi_cfg.get("compat"):
+            model_entry.setdefault("compat", {}).update(pi_cfg["compat"])
 
         turbo_provider = {
             "baseUrl": f"http://127.0.0.1:{port}/v1",
@@ -66,4 +72,8 @@ class PiHarness:
         existing.setdefault("providers", {})["turbo"] = turbo_provider
         models_json.write_text(json.dumps(existing, indent=2) + "\n")
 
-        subprocess.run([self._binary, "--model", f"turbo/{model_id}"])
+        model_arg = f"turbo/{model_id}"
+        if pi_cfg.get("thinking"):
+            model_arg = f"{model_arg}:{pi_cfg['thinking']}"
+
+        subprocess.run([self._binary, "--model", model_arg])

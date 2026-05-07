@@ -156,6 +156,84 @@ timeout = 600
 context_length = 131072
 output_length = 16384
 
+[models.gemma4-31b-it-mlx-4bit]
+name = "Gemma 4 31B IT UD MLX 4bit"
+backend = "vllm-mlx"
+hf_repo = "unsloth/gemma-4-31b-it-UD-MLX-4bit"
+local_path = "~/.models/unsloth/gemma-4-31b-it-UD-MLX-4bit"
+size_gb = 22
+min_memory_gb = 48
+tool_use = true
+can_reason = true
+tags = ["coding", "dense", "vision", "gemma", "4bit"]
+tool_call_parser = "gemma4"
+reasoning_parser = "gemma4"
+
+[models.gemma4-31b-it-mlx-4bit.server]
+paged_cache = true
+cache_memory_percent = 0.40
+# 128GB MBP default. Gemma 4 supports 262K, but 64K is the practical
+# single-user agent setting before validating long-context quality/latency.
+max_tokens = 65536
+max_request_tokens = 65536
+timeout = 600
+default_temperature = 1.0
+default_top_p = 0.95
+default_chat_template_kwargs = { enable_thinking = false }
+
+[models.gemma4-31b-it-mlx-4bit.opencode]
+context_length = 65536
+output_length = 8192
+
+[models.gemma4-31b-it-mlx-4bit.pi]
+reasoning = false
+thinking = "off"
+thinking_format = "qwen-chat-template"
+
+[models.gemma4-31b-it-mlx-4bit.pi.compat]
+thinkingFormat = "qwen-chat-template"
+requiresToolResultName = true
+requiresAssistantAfterToolResult = true
+
+[models.gemma4-26b-a4b-it-mlx-4bit]
+name = "Gemma 4 26B-A4B IT UD MLX 4bit"
+backend = "vllm-mlx"
+hf_repo = "unsloth/gemma-4-26b-a4b-it-UD-MLX-4bit"
+local_path = "~/.models/unsloth/gemma-4-26b-a4b-it-UD-MLX-4bit"
+size_gb = 15
+min_memory_gb = 48
+tool_use = true
+can_reason = true
+tags = ["coding", "moe", "vision", "gemma", "4bit"]
+tool_call_parser = "gemma4"
+reasoning_parser = "gemma4"
+
+[models.gemma4-26b-a4b-it-mlx-4bit.server]
+paged_cache = true
+cache_memory_percent = 0.40
+# 128GB MBP default. This MoE is lighter than 31B dense, but keep the first
+# profile at 64K until Gemma tool/chat behavior is proven stable.
+max_tokens = 65536
+max_request_tokens = 65536
+timeout = 600
+default_temperature = 1.0
+default_top_p = 0.95
+default_chat_template_kwargs = { enable_thinking = false }
+
+[models.gemma4-26b-a4b-it-mlx-4bit.opencode]
+context_length = 65536
+output_length = 8192
+
+[models.gemma4-26b-a4b-it-mlx-4bit.pi]
+reasoning = false
+thinking = "off"
+thinking_format = "qwen-chat-template"
+
+[models.gemma4-26b-a4b-it-mlx-4bit.pi.compat]
+thinkingFormat = "qwen-chat-template"
+requiresToolResultName = true
+requiresAssistantAfterToolResult = true
+
 # --- GGUF models ---
 
 [models.qwen36-35b-gguf-q4km]

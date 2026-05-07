@@ -1,5 +1,6 @@
 import logging
 import os
+import json
 import shutil
 from pathlib import Path
 
@@ -58,6 +59,19 @@ class VllmMlxProvider:
         if chunked:
             cmd += ["--chunked-prefill-tokens", str(chunked)]
 
+        default_temperature = srv.get("default_temperature")
+        if default_temperature is not None:
+            cmd += ["--default-temperature", str(default_temperature)]
+        default_top_p = srv.get("default_top_p")
+        if default_top_p is not None:
+            cmd += ["--default-top-p", str(default_top_p)]
+        default_chat_template_kwargs = srv.get("default_chat_template_kwargs")
+        if default_chat_template_kwargs is not None:
+            cmd += [
+                "--default-chat-template-kwargs",
+                json.dumps(default_chat_template_kwargs, separators=(",", ":")),
+            ]
+
         # Timeout for long agentic tasks
         timeout = srv.get("timeout", 600)
         cmd += ["--timeout", str(timeout)]
@@ -90,6 +104,7 @@ class VllmMlxProvider:
         )
 
         repo = model["hf_repo"]
+        local_path = self._configured_path(model, "local_path")
 
         logging.getLogger("httpx").setLevel(logging.WARNING)
         logging.getLogger("huggingface_hub").setLevel(logging.WARNING)
@@ -101,9 +116,14 @@ class VllmMlxProvider:
         safetensor_files = [f for f in model_files if f.endswith(".safetensors")]
         other_files = [f for f in model_files if not f.endswith(".safetensors")]
 
+        download_kwargs = {"repo_id": repo}
+        if local_path is not None:
+            local_path.mkdir(parents=True, exist_ok=True)
+            download_kwargs["local_dir"] = str(local_path)
+
         # Download small files first (configs, tokenizer) quietly
         for f in other_files:
-            hf_hub_download(repo_id=repo, filename=f)
+            hf_hub_download(filename=f, **download_kwargs)
 
         # Download safetensors with per-file progress
         with Progress(
@@ -116,14 +136,14 @@ class VllmMlxProvider:
             for f in safetensor_files:
                 fname = f.split("/")[-1]
                 task = progress.add_task("dl", filename=fname, total=None, start=True)
-                local_file = hf_hub_download(repo_id=repo, filename=f)
+                local_file = hf_hub_download(filename=f, **download_kwargs)
                 fsize = Path(local_file).stat().st_size
                 progress.update(task, completed=fsize, total=fsize)
                 progress.remove_task(task)
                 console.print(f"  [green]done[/green] {fname} ({fsize / 1e9:.1f}GB)")
 
         # Ensure snapshot is resolved
-        local = snapshot_download(repo_id=repo)
+        local = snapshot_download(**download_kwargs)
         total_size = sum(f.stat().st_size for f in Path(local).rglob("*") if f.is_file()) / 1e9
         console.print(f"\n  [green]Done![/green] {total_size:.1f}GB total")
 
@@ -139,6 +159,10 @@ class VllmMlxProvider:
         return p is not None
 
     def _model_path(self, model: dict) -> Path | None:
+        local = self._configured_path(model, "local_path")
+        if local is not None and any(local.glob("*.safetensors")):
+            return local
+
         repo = model["hf_repo"]
         snap = _hf_snapshot_path(repo)
         if snap and any(snap.glob("*.safetensors")):
@@ -156,3 +180,9 @@ class VllmMlxProvider:
         if snap and any(snap.glob("*.safetensors")):
             return snap
         return None
+
+    def _configured_path(self, model: dict, key: str) -> Path | None:
+        value = model.get(key)
+        if not value:
+            return None
+        return Path(value).expanduser()

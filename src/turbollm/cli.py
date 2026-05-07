@@ -1,6 +1,7 @@
 import json
 import os
 import subprocess
+import tempfile
 import time
 import urllib.request
 from pathlib import Path
@@ -37,6 +38,8 @@ def _get_provider_for(m: dict):
 
 def _get_model_id(m: dict) -> str:
     """Get the model ID that the server will report (matches --served-model-name / -a)."""
+    if m.get("backend") == "mlx-vlm" and m.get("local_path"):
+        return str(Path(m["local_path"]).expanduser())
     return m["hf_repo"]
 
 
@@ -241,7 +244,7 @@ def rm(model, yes):
 @cli.command()
 @click.argument("model", required=False)
 @click.option("--port", "-p", default=None, type=int, help="Port (default: 8899)")
-@click.option("--backend", "-b", default=None, type=click.Choice(["vllm-mlx", "omlx", "gguf"]),
+@click.option("--backend", "-b", default=None, type=click.Choice(["vllm-mlx", "omlx", "gguf", "mlx-vlm"]),
               help="Override backend (default: from model config)")
 def serve(model, port, backend):
     """Start model server (auto-detects backend)."""
@@ -383,6 +386,15 @@ def _get_running_model(port: int) -> dict | None:
     return {"name": model_id, "hf_repo": model_id, "backend": "unknown"}
 
 
+def _read_log_tail(path: str, max_lines: int = 80) -> str:
+    try:
+        with open(path, encoding="utf-8", errors="replace") as handle:
+            lines = handle.readlines()
+    except OSError:
+        return ""
+    return "".join(lines[-max_lines:]).strip()
+
+
 def _run_with_server(m: dict, port: int, launch_fn):
     """Start turbo server (or reuse running one) and run launch_fn(m, port).
 
@@ -410,25 +422,49 @@ def _run_with_server(m: dict, port: int, launch_fn):
 
     cmd = provider.build_serve_cmd(m, port)
     console.print(f"Starting [bold]{m['name']}[/bold] on port {port} [{provider.name}]...")
-    server = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    log_file = tempfile.NamedTemporaryFile(
+        mode="w+",
+        encoding="utf-8",
+        prefix="turbollm-server-",
+        suffix=".log",
+        delete=False,
+    )
+    log_path = log_file.name
+    server = subprocess.Popen(cmd, stdout=log_file, stderr=subprocess.STDOUT)
 
-    for _ in range(120):
-        if _server_is_running(port):
-            break
-        time.sleep(1)
-    else:
-        console.print("[red]Server failed to start.[/red]")
-        server.terminate()
-        raise SystemExit(1)
-
-    console.print("[green]Server ready.[/green]")
     try:
-        launch_fn(m, port)
-    except KeyboardInterrupt:
-        pass
+        for _ in range(120):
+            if _server_is_running(port):
+                break
+            if server.poll() is not None:
+                break
+            time.sleep(1)
+
+        if not _server_is_running(port):
+            console.print("[red]Server failed to start.[/red]")
+            log_file.flush()
+            tail = _read_log_tail(log_path)
+            if tail:
+                console.print("[yellow]Backend log:[/yellow]")
+                console.print(tail)
+            if server.poll() is None:
+                server.terminate()
+            raise SystemExit(1)
+
+        console.print("[green]Server ready.[/green]")
+        try:
+            launch_fn(m, port)
+        except KeyboardInterrupt:
+            pass
     finally:
-        server.terminate()
+        if server.poll() is None:
+            server.terminate()
         server.wait()
+        log_file.close()
+        try:
+            os.unlink(log_path)
+        except OSError:
+            pass
         console.print("[dim]Server stopped.[/dim]")
 
 
@@ -466,7 +502,7 @@ def _make_harness_command(harness_name: str):
     @click.command(name=harness_name, help=f"Start model server + launch {harness_name}.")
     @click.argument("model", required=False)
     @click.option("--port", "-p", default=None, type=int, help="Port (default: 8899)")
-    @click.option("--backend", "-b", default=None, type=click.Choice(["vllm-mlx", "omlx", "gguf"]),
+    @click.option("--backend", "-b", default=None, type=click.Choice(["vllm-mlx", "omlx", "gguf", "mlx-vlm"]),
                   help="Override backend (default: from model config)")
     def cmd(model, port, backend):
         port = port or get_defaults().get("port", 8899)
@@ -505,7 +541,7 @@ def _make_harness_command(harness_name: str):
 @click.argument("model", required=False)
 @click.option("--harness", "-H", required=True, help="Harness to launch (e.g. goose, hermes)")
 @click.option("--port", "-p", default=None, type=int, help="Port (default: 8899)")
-@click.option("--backend", "-b", default=None, type=click.Choice(["vllm-mlx", "omlx", "gguf"]),
+@click.option("--backend", "-b", default=None, type=click.Choice(["vllm-mlx", "omlx", "gguf", "mlx-vlm"]),
               help="Override backend (default: from model config)")
 def run_cmd(model, harness, port, backend):
     """Start model server + launch a harness by name."""
