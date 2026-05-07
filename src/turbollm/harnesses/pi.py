@@ -20,7 +20,11 @@ class PiHarness:
     def is_available(self) -> bool:
         return shutil.which(self._binary) is not None
 
-    def launch(self, model_id: str, port: int, model: dict) -> None:
+    def _write_provider_config(self, model_id: str, port: int, model: dict) -> str:
+        """Write/refresh ~/.pi/agent/models.json with a turbo provider for this model.
+
+        Returns the model arg to pass to `pi --model` (e.g. ``turbo/<id>`` plus optional ``:thinking``).
+        """
         pi_dir = Path(os.environ.get("PI_CODING_AGENT_DIR", Path.home() / ".pi" / "agent"))
         models_json = pi_dir / "models.json"
         model_name = str(model.get("name", model_id))
@@ -62,7 +66,6 @@ class PiHarness:
             "models": [model_entry],
         }
 
-        # Merge into existing models.json if present
         if models_json.exists():
             existing = json.loads(models_json.read_text())
         else:
@@ -75,5 +78,22 @@ class PiHarness:
         model_arg = f"turbo/{model_id}"
         if pi_cfg.get("thinking"):
             model_arg = f"{model_arg}:{pi_cfg['thinking']}"
+        return model_arg
 
+    def launch(self, model_id: str, port: int, model: dict) -> None:
+        model_arg = self._write_provider_config(model_id, port, model)
         subprocess.run([self._binary, "--model", model_arg])
+
+    def headless(self, model_id: str, port: int, model: dict, prompt: str) -> int:
+        model_arg = self._write_provider_config(model_id, port, model)
+        # pi treats positional args as messages; it does not honor the GNU `--`
+        # separator, so we don't pass one. A prompt starting with `-` will be
+        # misparsed as a pi flag — uncommon enough to accept as a known limit.
+        result = subprocess.run([
+            self._binary,
+            "-p",
+            "--model", model_arg,
+            "--no-context-files",
+            prompt,
+        ])
+        return result.returncode

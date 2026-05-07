@@ -16,6 +16,7 @@ class Harness(Protocol):
 
     def is_available(self) -> bool: ...
     def launch(self, model_id: str, port: int, model: dict) -> None: ...
+    def headless(self, model_id: str, port: int, model: dict, prompt: str) -> int: ...
 
 
 class GenericHarness:
@@ -48,6 +49,9 @@ class GenericHarness:
 
         cmd = [part.format(**ctx) for part in self._cmd]
         subprocess.run(cmd, env=env)
+
+    def headless(self, model_id: str, port: int, model: dict, prompt: str) -> int:
+        raise NotImplementedError(f"{self.name} harness does not support headless mode")
 
 
 # --- Custom harness registry ---

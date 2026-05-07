@@ -400,12 +400,12 @@ def _run_with_server(m: dict, port: int, launch_fn):
 
     Handles server lifecycle: starts if needed, waits for ready,
     stops on exit.  launch_fn should be a blocking call (e.g. subprocess.run).
+    Returns whatever launch_fn returns (used for headless exit codes).
     """
     # If a server is already running, just attach — no provider needed
     if _server_is_running(port):
         console.print(f"[green]Server already running on port {port}.[/green]")
-        launch_fn(m, port)
-        return
+        return launch_fn(m, port)
 
     provider = _get_provider_for(m)
 
@@ -453,9 +453,9 @@ def _run_with_server(m: dict, port: int, launch_fn):
 
         console.print("[green]Server ready.[/green]")
         try:
-            launch_fn(m, port)
+            return launch_fn(m, port)
         except KeyboardInterrupt:
-            pass
+            return None
     finally:
         if server.poll() is None:
             server.terminate()
@@ -472,8 +472,12 @@ def _run_with_server(m: dict, port: int, launch_fn):
 # Harness integration
 # ---------------------------------------------------------------------------
 
-def _run_harness(harness_name: str, m: dict, port: int):
-    """Load a harness by name, check availability, and run with server."""
+def _run_harness(harness_name: str, m: dict, port: int, prompt: str | None = None):
+    """Load a harness by name, check availability, and run with server.
+
+    If ``prompt`` is provided, runs the harness in headless (print) mode and
+    exits with the harness's return code. Otherwise launches interactively.
+    """
     from turbollm.harnesses import get_harness
 
     reg = load_registry()
@@ -485,6 +489,16 @@ def _run_harness(harness_name: str, m: dict, port: int):
         raise SystemExit(1)
 
     model_id = _get_model_id(m)
+    if prompt is not None:
+        console.print(f"  Running {harness_name} (headless) → [dim]{model_id}[/dim]")
+        try:
+            rc = _run_with_server(m, port, lambda _m, p: harness.headless(model_id, p, m, prompt))
+        except NotImplementedError as e:
+            console.print(f"[red]{e}[/red]")
+            raise SystemExit(2)
+        if rc:
+            raise SystemExit(rc)
+        return
     console.print(f"  Launching {harness_name} → [dim]{model_id}[/dim]")
     _run_with_server(m, port, lambda _m, p: harness.launch(model_id, p, m))
 
@@ -504,7 +518,9 @@ def _make_harness_command(harness_name: str):
     @click.option("--port", "-p", default=None, type=int, help="Port (default: 8899)")
     @click.option("--backend", "-b", default=None, type=click.Choice(["vllm-mlx", "omlx", "gguf", "mlx-vlm"]),
                   help="Override backend (default: from model config)")
-    def cmd(model, port, backend):
+    @click.option("--prompt", default=None,
+                  help="Run harness headlessly with this prompt and exit (no TTY).")
+    def cmd(model, port, backend, prompt):
         port = port or get_defaults().get("port", 8899)
         reg = load_registry()
         harness_config = reg.get("harnesses", {}).get(harness_name, {})
@@ -518,7 +534,7 @@ def _make_harness_command(harness_name: str):
             running_backend = running.get("backend", "unknown") if running else "unknown"
             if running and _is_backend_compatible(harness_config, running_backend):
                 # Compatible server running — attach directly
-                _run_harness(harness_name, running, port)
+                _run_harness(harness_name, running, port, prompt=prompt)
                 return
             else:
                 # Incompatible server — show picker
@@ -533,7 +549,7 @@ def _make_harness_command(harness_name: str):
 
         if backend:
             m = {**m, "backend": backend}
-        _run_harness(harness_name, m, port)
+        _run_harness(harness_name, m, port, prompt=prompt)
     return cmd
 
 
@@ -543,7 +559,9 @@ def _make_harness_command(harness_name: str):
 @click.option("--port", "-p", default=None, type=int, help="Port (default: 8899)")
 @click.option("--backend", "-b", default=None, type=click.Choice(["vllm-mlx", "omlx", "gguf", "mlx-vlm"]),
               help="Override backend (default: from model config)")
-def run_cmd(model, harness, port, backend):
+@click.option("--prompt", default=None,
+              help="Run harness headlessly with this prompt and exit (no TTY).")
+def run_cmd(model, harness, port, backend, prompt):
     """Start model server + launch a harness by name."""
     port = port or get_defaults().get("port", 8899)
     reg = load_registry()
@@ -556,7 +574,7 @@ def run_cmd(model, harness, port, backend):
         running = _get_running_model(port)
         running_backend = running.get("backend", "unknown") if running else "unknown"
         if running and _is_backend_compatible(harness_config, running_backend):
-            _run_harness(harness, running, port)
+            _run_harness(harness, running, port, prompt=prompt)
             return
         else:
             _, m = pick_model(requires_backend=requires_backend)
@@ -565,7 +583,7 @@ def run_cmd(model, harness, port, backend):
 
     if backend:
         m = {**m, "backend": backend}
-    _run_harness(harness, m, port)
+    _run_harness(harness, m, port, prompt=prompt)
 
 
 if __name__ == "__main__":
