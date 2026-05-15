@@ -8,8 +8,10 @@ enum ParamEditor {
     /// Open an editor for `param`. On commit, calls `onCommit(newValue)`.
     static func open(workflow: Workflow, param: WorkflowParam, settings: Settings,
                      anchor: NSView, onCommit: @escaping (String?) -> Void) {
-        let current = settings.paramValue(workflow: workflow.name, param: param.name)
-            ?? param.defaultValue ?? ""
+        // Use the same resolution order as WorkflowRunner so popover starting
+        // values honor `auto` and `default_env`, not just sticky/default.
+        let resolved = (try? WorkflowRunner.resolveParams(workflow, settings: settings)) ?? [:]
+        let current = resolved[param.name] ?? ""
 
         switch param.type {
         case "string":
