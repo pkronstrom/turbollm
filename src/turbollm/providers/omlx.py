@@ -124,3 +124,10 @@ class OmlxProvider:
             return False
         link = self._symlink_path(model)
         return link.is_symlink()
+
+    def get_model_id(self, model: dict) -> str:
+        return model["hf_repo"]
+
+    def pull_draft(self, model: dict) -> None:
+        """omlx doesn't support speculative decoding yet — no draft model."""
+        return

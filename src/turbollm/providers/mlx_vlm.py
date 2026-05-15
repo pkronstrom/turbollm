@@ -103,6 +103,19 @@ class MlxVlmProvider:
             return self._draft_model_path(model) is not None
         return True
 
+    def get_model_id(self, model: dict) -> str:
+        """mlx-vlm reports the served model by its local filesystem path when
+        loaded from a local_path; otherwise the hf_repo (same as other backends)."""
+        if model.get("local_path"):
+            return str(Path(model["local_path"]).expanduser())
+        return model["hf_repo"]
+
+    def pull_draft(self, model: dict) -> None:
+        """Draft model (used by --draft-model for MTP speculative decoding)
+        is pulled inline by `pull()` for this backend, so no extra work needed
+        here. Keep the method to satisfy the Provider Protocol."""
+        return
+
     def _cmd_base(self) -> list[str]:
         if shutil.which("mlx_vlm.server"):
             return ["mlx_vlm.server"]

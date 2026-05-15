@@ -38,10 +38,11 @@ def _get_provider_for(m: dict):
 
 
 def _get_model_id(m: dict) -> str:
-    """Get the model ID that the server will report (matches --served-model-name / -a)."""
-    if m.get("backend") == "mlx-vlm" and m.get("local_path"):
-        return str(Path(m["local_path"]).expanduser())
-    return m["hf_repo"]
+    """Get the model ID that the server will report (matches --served-model-name / -a).
+
+    Delegates to the provider so each backend can override (mlx-vlm reports a
+    local filesystem path, others report hf_repo)."""
+    return _get_provider_for(m).get_model_id(m)
 
 
 def _picker_stats(m: dict) -> tuple[str, str, str, str]:
@@ -162,14 +163,8 @@ def pull(model):
         console.print(f"  [dim]{m['hf_repo']}[/dim]\n")
         provider.pull(m)
 
-    # Ensure draft model is also pulled
-    draft_repo = m.get("draft_hf_repo")
-    if draft_repo and hasattr(provider, '_draft_model_path'):
-        if provider._draft_model_path(m) is None:
-            console.print(f"\n  Pulling draft model: [dim]{draft_repo}[/dim]")
-            from huggingface_hub import snapshot_download
-            snapshot_download(repo_id=draft_repo)
-            console.print(f"  [green]Done![/green] Draft model cached")
+    # Ensure draft model is also pulled (no-op for providers without draft support).
+    provider.pull_draft(m)
 
 
 @cli.command(name="ls")
@@ -537,8 +532,16 @@ def _run_with_server(m: dict, port: int, launch_fn):
     log_path = log_file.name
     server = subprocess.Popen(cmd, stdout=log_file, stderr=subprocess.STDOUT)
 
+    # Startup timeout in seconds. Per-model override beats global default;
+    # falls back to 120s. Larger models (e.g. Qwen3.6 35B) reliably need more
+    # than the default on cold disk caches.
+    startup_timeout = int(
+        m.get("server", {}).get("startup_timeout")
+        or get_defaults().get("server_startup_timeout")
+        or 120
+    )
     try:
-        for _ in range(120):
+        for _ in range(startup_timeout):
             if _server_is_running(port):
                 break
             if server.poll() is not None:
@@ -616,6 +619,56 @@ def _is_backend_compatible(harness_config: dict, backend: str) -> bool:
     return backend in requires
 
 
+def _dispatch_harness(
+    harness_name: str,
+    model: str | None,
+    port: int | None,
+    backend: str | None,
+    prompt: str | None,
+    *,
+    show_incompat_warning: bool,
+) -> None:
+    """Shared dispatch for `turbo <harness>` and `turbo run -H <harness>`.
+
+    Resolution order:
+      1. Explicit ``model`` argument wins.
+      2. Else, if a server is already running on ``port``:
+         - compatible backend → attach to it
+         - incompatible backend → fall through to picker (optionally warn)
+      3. Else, run the picker filtered by the harness's ``requires_backend``.
+
+    The ``show_incompat_warning`` flag exists because the original
+    ``_make_harness_command`` path prints a yellow notice when it falls back
+    from an incompatible running server to the picker, but ``turbo run`` did
+    not. Kept as-is to preserve existing UX.
+    """
+    port = port or get_defaults().get("port", 8899)
+    reg = load_registry()
+    harness_config = reg.get("harnesses", {}).get(harness_name, {})
+    requires_backend = harness_config.get("requires_backend")
+
+    if model:
+        m = resolve_model(model)
+    elif _server_is_running(port):
+        running = _get_running_model(port)
+        running_backend = running.get("backend", "unknown") if running else "unknown"
+        if running and _is_backend_compatible(harness_config, running_backend):
+            _run_harness(harness_name, running, port, prompt=prompt)
+            return
+        if show_incompat_warning and running:
+            console.print(
+                f"[yellow]Server on port {port} ({running.get('name', '?')}) "
+                f"uses incompatible backend [{running_backend}].[/yellow]"
+            )
+        _, m = pick_model(requires_backend=requires_backend)
+    else:
+        _, m = pick_model(requires_backend=requires_backend)
+
+    if backend:
+        m = {**m, "backend": backend}
+    _run_harness(harness_name, m, port, prompt=prompt)
+
+
 def _make_harness_command(harness_name: str):
     """Create a click command for a TOML-defined harness."""
     @click.command(name=harness_name, help=f"Start model server + launch {harness_name}.")
@@ -626,35 +679,10 @@ def _make_harness_command(harness_name: str):
     @click.option("--prompt", default=None,
                   help="Run harness headlessly with this prompt and exit (no TTY).")
     def cmd(model, port, backend, prompt):
-        port = port or get_defaults().get("port", 8899)
-        reg = load_registry()
-        harness_config = reg.get("harnesses", {}).get(harness_name, {})
-        requires_backend = harness_config.get("requires_backend")
-
-        if model:
-            m = resolve_model(model)
-        elif _server_is_running(port):
-            # Server already running — check compatibility
-            running = _get_running_model(port)
-            running_backend = running.get("backend", "unknown") if running else "unknown"
-            if running and _is_backend_compatible(harness_config, running_backend):
-                # Compatible server running — attach directly
-                _run_harness(harness_name, running, port, prompt=prompt)
-                return
-            else:
-                # Incompatible server — show picker
-                if running:
-                    console.print(
-                        f"[yellow]Server on port {port} ({running.get('name', '?')}) "
-                        f"uses incompatible backend [{running_backend}].[/yellow]"
-                    )
-                _, m = pick_model(requires_backend=requires_backend)
-        else:
-            _, m = pick_model(requires_backend=requires_backend)
-
-        if backend:
-            m = {**m, "backend": backend}
-        _run_harness(harness_name, m, port, prompt=prompt)
+        _dispatch_harness(
+            harness_name, model, port, backend, prompt,
+            show_incompat_warning=True,
+        )
     return cmd
 
 
@@ -668,27 +696,10 @@ def _make_harness_command(harness_name: str):
               help="Run harness headlessly with this prompt and exit (no TTY).")
 def run_cmd(model, harness, port, backend, prompt):
     """Start model server + launch a harness by name."""
-    port = port or get_defaults().get("port", 8899)
-    reg = load_registry()
-    harness_config = reg.get("harnesses", {}).get(harness, {})
-    requires_backend = harness_config.get("requires_backend")
-
-    if model:
-        m = resolve_model(model)
-    elif _server_is_running(port):
-        running = _get_running_model(port)
-        running_backend = running.get("backend", "unknown") if running else "unknown"
-        if running and _is_backend_compatible(harness_config, running_backend):
-            _run_harness(harness, running, port, prompt=prompt)
-            return
-        else:
-            _, m = pick_model(requires_backend=requires_backend)
-    else:
-        _, m = pick_model(requires_backend=requires_backend)
-
-    if backend:
-        m = {**m, "backend": backend}
-    _run_harness(harness, m, port, prompt=prompt)
+    _dispatch_harness(
+        harness, model, port, backend, prompt,
+        show_incompat_warning=False,
+    )
 
 
 if __name__ == "__main__":

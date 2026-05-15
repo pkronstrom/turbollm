@@ -160,6 +160,15 @@ class GgufProvider:
             return any(cache.rglob(hf_file))
         return False
 
+    def get_model_id(self, model: dict) -> str:
+        return model["hf_repo"]
+
+    def pull_draft(self, model: dict) -> None:
+        """Draft model for llama.cpp --model-draft speculative decoding.
+        Pulled inline by `pull()` for this backend; nothing to do here.
+        Keep the method to satisfy the Provider Protocol."""
+        return
+
     def _find_binary(self) -> str | None:
         for name in ["llama-server", "llama.cpp-server"]:
             result = shutil.which(name)

@@ -168,6 +168,21 @@ class VllmMlxProvider:
         p = self._model_path(model)
         return p is not None
 
+    def get_model_id(self, model: dict) -> str:
+        return model["hf_repo"]
+
+    def pull_draft(self, model: dict) -> None:
+        """Download the draft model (used by --specprefill speculative decoding)."""
+        draft_repo = model.get("draft_hf_repo")
+        if not draft_repo:
+            return
+        if self._draft_model_path(model) is not None:
+            return
+        from huggingface_hub import snapshot_download
+        console.print(f"\n  Pulling draft model: [dim]{draft_repo}[/dim]")
+        snapshot_download(repo_id=draft_repo)
+        console.print(f"  [green]Done![/green] Draft model cached")
+
     def _model_path(self, model: dict) -> Path | None:
         local = self._configured_path(model, "local_path")
         if local is not None and any(local.glob("*.safetensors")):

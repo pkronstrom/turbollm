@@ -9,6 +9,18 @@ class Provider(Protocol):
     def build_serve_cmd(self, model: dict, port: int) -> list[str]: ...
     def pull(self, model: dict) -> None: ...
     def is_downloaded(self, model: dict) -> bool: ...
+    def get_model_id(self, model: dict) -> str:
+        """The id the server will report (matches --served-model-name / -a).
+
+        Defaults to the model's hf_repo. Override when the backend reports
+        something else (e.g. mlx-vlm uses the local filesystem path)."""
+        ...
+    def pull_draft(self, model: dict) -> None:
+        """Pull the configured draft model, if any. Default: no-op.
+
+        Providers that support speculative decoding (vllm-mlx, mlx-vlm, gguf)
+        override this to download the draft sidecar."""
+        ...
 
 
 def get_provider(backend: str) -> Provider:
