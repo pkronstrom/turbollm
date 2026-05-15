@@ -99,6 +99,13 @@ cmd = ["qwen", "--model", "{model_id}"]
 binary = "pi"
 install = "npm install -g @mariozechner/pi-coding-agent"
 # Uses custom launcher (models.json provider config pointing at turbo server)
+# Per-invocation pi extensions, loaded via `pi -e <path>`. Active only when pi
+# is launched through turbo (interactive sessions started with `pi` directly
+# are unaffected). Use this for guards we want during delegated/headless runs
+# without polluting normal pi usage. pi-autocompact auto-summarizes the
+# conversation when context usage crosses 80% — keeps long agent loops alive
+# instead of silently truncating at the model's context cap.
+extensions = ["~/Projects/own/pi-autocompact/src/index.ts"]
 
 # --- Models ------------------------------------------------------------------
 # Model entries declare capability + sensible defaults; the arrow-key picker

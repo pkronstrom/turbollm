@@ -16,6 +16,26 @@ class PiHarness:
         self.name = "pi"
         self._binary = config.get("binary", "pi")
         self.install_hint = config.get("install", "npm install -g @mariozechner/pi-coding-agent")
+        # Extra `-e <path>` extensions loaded only when pi is launched via turbo
+        # (i.e. not active in global interactive pi sessions). Useful for
+        # pi-autocompact and similar guards that we want on for delegated runs
+        # but not for normal interactive use.
+        self._extensions: list[str] = list(config.get("extensions") or [])
+
+    def _extension_args(self) -> list[str]:
+        """Expand configured extension paths into pi CLI flags.
+
+        Each entry becomes a `-e <expanded-path>` pair. Missing files are
+        skipped with a console hint so a stale path doesn't break every run.
+        """
+        out: list[str] = []
+        for raw in self._extensions:
+            p = Path(os.path.expanduser(str(raw)))
+            if not p.exists():
+                print(f"[turbo pi] warning: extension not found, skipping: {p}")
+                continue
+            out += ["-e", str(p)]
+        return out
 
     def is_available(self) -> bool:
         return shutil.which(self._binary) is not None
@@ -97,7 +117,7 @@ class PiHarness:
 
     def launch(self, model_id: str, port: int, model: dict) -> None:
         model_arg = self._write_provider_config(model_id, port, model)
-        subprocess.run([self._binary, "--model", model_arg])
+        subprocess.run([self._binary, "--model", model_arg, *self._extension_args()])
 
     def headless(self, model_id: str, port: int, model: dict, prompt: str) -> int:
         model_arg = self._write_provider_config(model_id, port, model)
@@ -109,6 +129,7 @@ class PiHarness:
             "-p",
             "--model", model_arg,
             "--no-context-files",
+            *self._extension_args(),
             prompt,
         ])
         return result.returncode
