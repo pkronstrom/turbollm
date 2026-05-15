@@ -6,6 +6,10 @@ enum MenuBuilder {
                       onRunWorkflow: @escaping (Workflow) -> Void,
                       onEditParam: @escaping (Workflow, WorkflowParam) -> Void) -> NSMenu {
         let menu = NSMenu()
+        // Our actions target a custom NSObject (MenuTarget) that's not in the
+        // responder chain, so AppKit's auto-validation grays out items it can't
+        // resolve. Disable auto-enable here and on every submenu we attach.
+        menu.autoenablesItems = false
 
         // Active activities section
         if !state.activities.isEmpty {
@@ -44,6 +48,7 @@ enum MenuBuilder {
                     // such an item only opens the submenu. So the top-level click can't
                     // run the workflow; we prepend a "▶ Run" item inside the submenu.
                     let submenu = NSMenu()
+                    submenu.autoenablesItems = false
                     let hasAcquiredParam = wf.params.contains { ["audio-recording", "screenshot-manual", "command"].contains($0.type) }
                     let runTitle = hasAcquiredParam
                         ? "▶ Run \(wf.name) (needs Plan 3 acquirers)"
