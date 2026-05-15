@@ -1047,5 +1047,31 @@ def run_cmd(model, harness, port, backend, prompt):
     )
 
 
+# ---------------------------------------------------------------------------
+# Sidecar — launch the Swift HUD
+# ---------------------------------------------------------------------------
+
+def _hud_dir() -> Path:
+    """Locate the tools/turbo-hud/ directory next to the turbollm source tree."""
+    return Path(__file__).resolve().parent.parent.parent / "tools" / "turbo-hud"
+
+
+@cli.command(name="sidecar")
+@click.option("--build/--no-build", default=True,
+              help="Run `swift build` before launching (default: yes).")
+def sidecar_cmd(build):
+    """Launch the Turbo HUD (Swift menu-bar app) via `swift run`."""
+    hud_dir = _hud_dir()
+    if not hud_dir.exists() or not (hud_dir / "Package.swift").exists():
+        console.print(
+            f"[red]Swift HUD package not found at {hud_dir}.[/red]\n"
+            "Implement the package (Plan 2) before invoking turbo sidecar."
+        )
+        raise SystemExit(1)
+    args = ["swift", "run"] if build else ["swift", "run", "--skip-build"]
+    console.print(f"[dim]Launching HUD via `swift run` in {hud_dir}...[/dim]")
+    subprocess.run(args, cwd=hud_dir)
+
+
 if __name__ == "__main__":
     cli()
