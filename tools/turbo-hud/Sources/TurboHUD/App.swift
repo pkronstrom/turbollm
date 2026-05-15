@@ -29,6 +29,21 @@ class App: NSObject, NSApplicationDelegate {
             self?.refreshMenu()
         }
 
+        URLSchemeHandler.install { [weak self] parsed in
+            guard let self else { return }
+            guard let wf = self.state.workflows.first(where: { $0.name == parsed.workflowName }) else {
+                // surface "unknown workflow" via menu notification — Plan 3 polish
+                return
+            }
+            // URL params write through to sticky settings (per spec.md "URL scheme handoff").
+            // The user's intent in sending a URL is "use these values"; making them
+            // sticky also lets the user re-run the same workflow from the menu later.
+            for (k, v) in parsed.params {
+                self.settings.setParamValue(workflow: wf.name, param: k, value: v)
+            }
+            self.runWorkflow(wf)
+        }
+
         refreshMenu()
     }
 
