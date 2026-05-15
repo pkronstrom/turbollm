@@ -53,3 +53,41 @@ def test_validate_workflow_requires_command_or_script():
     wf = {"params": []}
     with pytest.raises(workflows.WorkflowError, match="`command` or `script`"):
         workflows.validate_workflow("bad", wf)
+
+
+import datetime as _dt
+
+
+def test_expand_template_substitutes_param():
+    out = workflows.expand_template("hello {{name}}", params={"name": "world"})
+    assert out == "hello world"
+
+
+def test_expand_template_substitutes_env(monkeypatch):
+    monkeypatch.setenv("MY_VAR", "value-from-env")
+    out = workflows.expand_template("x={{env:MY_VAR}}", params={})
+    assert out == "x=value-from-env"
+
+
+def test_expand_template_missing_env_is_empty(monkeypatch):
+    monkeypatch.delenv("MISSING_VAR", raising=False)
+    out = workflows.expand_template("[{{env:MISSING_VAR}}]", params={})
+    assert out == "[]"
+
+
+def test_expand_template_date_uses_strftime():
+    out = workflows.expand_template("{{date:%Y}}", params={})
+    assert out == _dt.datetime.now().strftime("%Y")
+
+
+def test_expand_template_missing_param_raises():
+    with pytest.raises(workflows.WorkflowError, match="undefined param"):
+        workflows.expand_template("{{missing}}", params={"other": "x"})
+
+
+def test_expand_template_handles_multiple_tokens():
+    out = workflows.expand_template(
+        "audio={{audio}} title={{title}}",
+        params={"audio": "/tmp/a.wav", "title": "Meeting"},
+    )
+    assert out == "audio=/tmp/a.wav title=Meeting"

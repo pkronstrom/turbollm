@@ -65,3 +65,32 @@ def _default_mode(param: dict) -> str:
     if t == "screenshot-manual":
         return "trigger"
     return "primary"
+
+
+import datetime as _dt
+import os as _os
+import re as _re
+
+
+_TEMPLATE_RE = _re.compile(r"\{\{([^}]+)\}\}")
+
+
+def expand_template(template: str, params: dict[str, str]) -> str:
+    """Expand `{{date:FMT}}`, `{{env:VAR}}`, and `{{param-name}}` tokens.
+
+    Raises WorkflowError on `{{name}}` references that aren't in `params`.
+    Missing env vars expand to the empty string.
+    """
+    def _replace(match: _re.Match) -> str:
+        token = match.group(1).strip()
+        if token.startswith("date:"):
+            fmt = token[len("date:"):]
+            return _dt.datetime.now().strftime(fmt)
+        if token.startswith("env:"):
+            var = token[len("env:"):]
+            return _os.environ.get(var, "")
+        if token in params:
+            return str(params[token])
+        raise WorkflowError(f"undefined param '{token}' in template")
+
+    return _TEMPLATE_RE.sub(_replace, template)
