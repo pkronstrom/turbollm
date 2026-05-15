@@ -48,16 +48,18 @@ class App: NSObject, NSApplicationDelegate {
     }
 
     func refreshMenu() {
-        let (workflows, error) = registry.current()
-        state.workflows = workflows
-        state.workflowsError = error
-        statusItem.menu = MenuBuilder.build(state: state, settings: settings,
-                                            onRunWorkflow: { [weak self] wf in
-                                                self?.runWorkflow(wf)
-                                            },
-                                            onEditParam: { [weak self] wf, p in
-                                                self?.editParam(wf, p)
-                                            })
+        registry.current { [weak self] workflows, error in
+            guard let self else { return }
+            self.state.workflows = workflows
+            self.state.workflowsError = error
+            self.statusItem.menu = MenuBuilder.build(state: self.state, settings: self.settings,
+                                                     onRunWorkflow: { [weak self] wf in
+                                                         self?.runWorkflow(wf)
+                                                     },
+                                                     onEditParam: { [weak self] wf, p in
+                                                         self?.editParam(wf, p)
+                                                     })
+        }
     }
 
     func runWorkflow(_ wf: Workflow) {
