@@ -874,6 +874,42 @@ def _make_harness_command(harness_name: str):
     return cmd
 
 
+# ---------------------------------------------------------------------------
+# Workflows
+# ---------------------------------------------------------------------------
+
+@cli.group(name="workflows")
+def workflows_grp():
+    """Manage and run [workflows.*] from models.toml."""
+
+
+@workflows_grp.command(name="list")
+@click.option("--json", "as_json", is_flag=True, help="Emit JSON for machine consumption.")
+def workflows_list(as_json):
+    """List configured workflows."""
+    from turbollm import workflows as _wf
+
+    reg = load_registry()
+    items = []
+    for name, wf in _wf.load_workflows(reg).items():
+        entry = {"name": name, **wf}
+        items.append(entry)
+
+    if as_json:
+        click.echo(json.dumps(items, indent=2))
+        return
+
+    if not items:
+        console.print("[dim]No workflows configured.[/dim]")
+        return
+    table = Table(show_header=True, title="Workflows", title_justify="left")
+    table.add_column("Name", style="bold")
+    table.add_column("Description")
+    for wf in items:
+        table.add_row(wf["name"], wf.get("description", ""))
+    console.print(table)
+
+
 @cli.command(name="run")
 @click.argument("model", required=False)
 @click.option("--harness", "-H", required=True, help="Harness to launch (e.g. goose, hermes)")
