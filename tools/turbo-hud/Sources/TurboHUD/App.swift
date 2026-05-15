@@ -52,6 +52,11 @@ class App: NSObject, NSApplicationDelegate {
     }
 
     func editParam(_ wf: Workflow, _ p: WorkflowParam) {
-        // Plan 2 Task 10 wires the popover. For now, no-op.
+        guard let anchor = statusItem.button else { return }
+        ParamEditor.open(workflow: wf, param: p, settings: settings, anchor: anchor) { [weak self] value in
+            guard let self else { return }
+            self.settings.setParamValue(workflow: wf.name, param: p.name, value: value)
+            self.refreshMenu()
+        }
     }
 }
