@@ -6,7 +6,14 @@ from pathlib import Path
 
 from rich.console import Console
 
-from turbollm.registry import _hf_cache_path, _hf_snapshot_path, _legacy_path
+from turbollm.registry import (
+    _hf_cache_path,
+    _hf_snapshot_path,
+    _legacy_path,
+    context_default_tokens,
+    effective_kv_quant,
+    effective_sampling,
+)
 
 console = Console()
 
@@ -39,32 +46,35 @@ class VllmMlxProvider:
         if cache_pct:
             cmd += ["--cache-memory-percent", str(cache_pct)]
 
-        # Token limits
-        max_tokens = srv.get("max_tokens")
-        if max_tokens:
-            cmd += ["--max-tokens", str(max_tokens)]
-        max_req = srv.get("max_request_tokens")
-        if max_req:
-            cmd += ["--max-request-tokens", str(max_req)]
+        # Token limits. Picker writes server.max_tokens at runtime; fall back
+        # to context_default for direct (non-picker) invocations.
+        max_tokens = srv.get("max_tokens") or context_default_tokens(model)
+        cmd += ["--max-tokens", str(max_tokens)]
+        max_req = srv.get("max_request_tokens") or max_tokens
+        cmd += ["--max-request-tokens", str(max_req)]
 
-        # KV cache quantization — halves cache memory
-        if srv.get("kv_cache_quantization"):
+        # KV cache quantization. New unified `kv_quant` field; legacy
+        # `kv_cache_quantization` flag still honored if explicitly set.
+        kv_quant = effective_kv_quant(model)
+        if kv_quant in ("q8", "q4") or srv.get("kv_cache_quantization"):
             cmd += ["--kv-cache-quantization"]
-            kv_bits = srv.get("kv_cache_quantization_bits")
-            if kv_bits:
-                cmd += ["--kv-cache-quantization-bits", str(kv_bits)]
+            bits = 8 if kv_quant == "q8" else 4 if kv_quant == "q4" else srv.get("kv_cache_quantization_bits")
+            if bits:
+                cmd += ["--kv-cache-quantization-bits", str(bits)]
 
         # Chunked prefill for responsiveness during long prompts
         chunked = srv.get("chunked_prefill_tokens")
         if chunked:
             cmd += ["--chunked-prefill-tokens", str(chunked)]
 
-        default_temperature = srv.get("default_temperature")
-        if default_temperature is not None:
-            cmd += ["--default-temperature", str(default_temperature)]
-        default_top_p = srv.get("default_top_p")
-        if default_top_p is not None:
-            cmd += ["--default-top-p", str(default_top_p)]
+        # Sampler defaults from the resolved preset. vllm-mlx today only
+        # consumes --default-temperature and --default-top-p — pass them
+        # through; other resolved fields stay as metadata for clients.
+        sampling = effective_sampling(model)
+        if "temperature" in sampling:
+            cmd += ["--default-temperature", str(sampling["temperature"])]
+        if "top_p" in sampling:
+            cmd += ["--default-top-p", str(sampling["top_p"])]
         default_chat_template_kwargs = srv.get("default_chat_template_kwargs")
         if default_chat_template_kwargs is not None:
             cmd += [

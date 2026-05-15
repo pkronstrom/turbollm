@@ -34,8 +34,23 @@ class PiHarness:
         model_oc = model.get("opencode", {})
         pi_cfg = model.get("pi", {})
         srv = model.get("server", {})
-        context_window = model_oc.get("context_length", srv.get("max_tokens", defaults_oc.get("context_length", 32768)))
-        max_tokens = model_oc.get("output_length", defaults_oc.get("output_length", 8192))
+        # Picker writes pi.context_window at runtime if invoked; otherwise
+        # derive from the model's unified context_default (with legacy
+        # [opencode].context_length and [server].max_tokens as fallbacks).
+        context_window = pi_cfg.get(
+            "context_window",
+            model.get(
+                "context_default",
+                model_oc.get(
+                    "context_length",
+                    srv.get("max_tokens", defaults_oc.get("context_length", 32768)),
+                ),
+            ),
+        )
+        max_tokens = pi_cfg.get(
+            "max_tokens",
+            model_oc.get("output_length", defaults_oc.get("output_length", 8192)),
+        )
         reasoning = pi_cfg.get("reasoning", model.get("can_reason", False))
 
         model_entry = {

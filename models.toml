@@ -3,9 +3,14 @@ port = 8899
 backend = "vllm-mlx"
 
 [defaults.sampling]
+# Global fallbacks. Each model selects a named preset via `sampling = "..."`
+# (see [sampling.*] blocks below); per-model presets override these.
 temperature = 0.6
 top_p = 0.95
 top_k = 20
+min_p = 0.0
+presence_penalty = 0.0
+repeat_penalty = 1.0
 
 [defaults.opencode]
 context_length = 32768
@@ -18,9 +23,33 @@ paged_ssd_cache_max_size = "100GB"
 hot_cache_max_size = "8GB"
 max_concurrent_requests = 8
 
-# --- Harnesses (agent CLIs) ---
-# Each harness auto-gets OPENAI_BASE_URL + OPENAI_API_KEY pointed at the turbo server.
-# Template vars in cmd/env: {model_id}, {port}
+# --- Sampler presets ---------------------------------------------------------
+# Reference these from models via `sampling = "<preset-name>"`. The provider
+# resolves the preset to individual --temp / --top-p / --top-k flags at serve
+# time. Add new presets here when you onboard a new model family.
+
+[sampling.qwen3-thinking-coding]
+# Qwen's published recipe for Qwen3.6 thinking-mode coding tasks.
+# Source: https://huggingface.co/Qwen/Qwen3.6-27B (and 35B-A3B card)
+temperature = 0.6
+top_p = 0.95
+top_k = 20
+min_p = 0.0
+presence_penalty = 0.0
+repeat_penalty = 1.0
+
+[sampling.gemma-4]
+# Google's published recipe for Gemma 4.
+# Source: https://huggingface.co/google/gemma-4-31B-it
+temperature = 1.0
+top_p = 0.95
+top_k = 64
+min_p = 0.0
+repeat_penalty = 1.0
+
+# --- Harnesses (agent CLIs) --------------------------------------------------
+# Each harness auto-gets OPENAI_BASE_URL + OPENAI_API_KEY pointed at the turbo
+# server. Template vars in cmd/env: {model_id}, {port}
 
 [harnesses.claude]
 binary = "claude"
@@ -71,42 +100,55 @@ binary = "pi"
 install = "npm install -g @mariozechner/pi-coding-agent"
 # Uses custom launcher (models.json provider config pointing at turbo server)
 
-# --- MLX models (served via vllm-mlx) ---
+# --- Models ------------------------------------------------------------------
+# Model entries declare capability + sensible defaults; the arrow-key picker
+# (and provider code) read context_default / context_max / sampling /
+# kv_quant directly. [server] is for truly backend-specific flags only.
+#
+# Per-model fields:
+#   context_default  Picker's default landing context (tokens). Used as the
+#                    fallback for direct (non-picker) invocations and harness
+#                    context_window when the picker hasn't run.
+#   context_max      Picker ceiling (tokens). Set to the practical max for
+#                    128GB unified memory; raise if you have more RAM.
+#   sampling         Name of a [sampling.*] preset above.
+#   kv_quant         off | q8 | q4 | auto. `auto` resolves per backend in
+#                    registry.effective_kv_quant: gguf→q8, others→off.
 
 [models.qwen36-35b-4bit]
 name = "Qwen3.6 35B-A3B 4bit"
 backend = "vllm-mlx"
 hf_repo = "mlx-community/Qwen3.6-35B-A3B-4bit"
 # draft_hf_repo = "mlx-community/Qwen3-0.6B-4bit"
-# NOTE: specprefill broken for Qwen3.5/3.6 MoE — mixed attention (full+SWA+linear) breaks
-# KV cache in speculative decoding. See vllm-project/vllm#36872. Waiting for upstream fix.
+# NOTE: specprefill broken for Qwen3.5/3.6 MoE — mixed attention (full+SWA+linear)
+# breaks KV cache in speculative decoding. See vllm-project/vllm#36872.
 size_gb = 20
 min_memory_gb = 24
 tool_use = true
 can_reason = true
 tags = ["coding", "moe"]
-tool_call_parser = "hermes"
+tool_call_parser = "qwen3_coder"
 reasoning_parser = "qwen3"
+
+# 128GB M4 Max sizing: 192K is safe at 4bit + mixed attention (~38 GB KV).
+context_default = 65536      # 64K — picker default landing
+context_max = 196608         # 192K — picker ceiling
+
+sampling = "qwen3-thinking-coding"
+# Qwen3.6's mixed (linear + softmax) attention breaks under KV-cache
+# quantization on vllm-mlx; leave off until upstream support lands.
+kv_quant = "off"
 
 [models.qwen36-35b-4bit.server]
 paged_cache = true
 cache_memory_percent = 0.40
-# Qwen guidance prefers >=128K context for thinking-capable 3.6 sessions.
-max_tokens = 131072
-max_request_tokens = 131072
 timeout = 600
-# M4 Pro 128GB default: 128K is safe here and reduces early degradation in long agent runs.
-# --- Broken flags for Qwen3.6 (all produce "!!!" garbage output) ---
-# Root cause: Qwen3.6 mixed attention (full + SWA + linear) is incompatible
-# with any vllm-mlx optimization that modifies KV cache or batch scheduling.
-# continuous_batching = true    # batched requests corrupt linear attention state
-# kv_cache_quantization = true  # quantized cache breaks linear attention precision
-# chunked_prefill_tokens = 2048 # chunked prefill corrupts cross-chunk attention
-# specprefill = true            # draft model KV mismatch with target (vllm#36872)
-
-[models.qwen36-35b-4bit.opencode]
-context_length = 131072
-output_length = 16384
+default_chat_template_kwargs = { preserve_thinking = true }
+# --- Known-broken flags for Qwen3.6 on vllm-mlx (do NOT enable):
+# continuous_batching = true     # batched requests corrupt linear attention state
+# kv_cache_quantization = true   # see kv_quant = "off" above
+# chunked_prefill_tokens = 2048  # chunked prefill corrupts cross-chunk attention
+# specprefill = true             # draft KV mismatch with target (vllm#36872)
 
 [models.qwen36-27b-6bit]
 name = "Qwen3.6 27B UD 6bit"
@@ -117,44 +159,22 @@ min_memory_gb = 36
 tool_use = true
 can_reason = true
 tags = ["coding", "dense", "vision"]
-tool_call_parser = "hermes"
+tool_call_parser = "qwen3_coder"
 reasoning_parser = "qwen3"
+
+# 128GB M4 Max sizing: 192K is safe at 6bit + mixed attention (~38 GB KV);
+# weights are ~30 GB so total stays under ~75 GB peak.
+context_default = 65536
+context_max = 196608
+
+sampling = "qwen3-thinking-coding"
+kv_quant = "off"
 
 [models.qwen36-27b-6bit.server]
 paged_cache = true
 cache_memory_percent = 0.40
-# M4 Pro default: 27B is more reliable, but much slower than 35B-A3B at long context.
-max_tokens = 65536
-max_request_tokens = 65536
 timeout = 600
-
-[models.qwen36-27b-6bit.opencode]
-context_length = 65536
-output_length = 16384
-
-[models.qwen36-27b-6bit-longctx]
-name = "Qwen3.6 27B UD 6bit LongCtx"
-backend = "vllm-mlx"
-hf_repo = "unsloth/Qwen3.6-27B-UD-MLX-6bit"
-size_gb = 30
-min_memory_gb = 36
-tool_use = true
-can_reason = true
-tags = ["coding", "dense", "vision", "longctx"]
-tool_call_parser = "hermes"
-reasoning_parser = "qwen3"
-
-[models.qwen36-27b-6bit-longctx.server]
-paged_cache = true
-cache_memory_percent = 0.40
-# Long-context variant for 128GB machines; slower than the default 27B profile.
-max_tokens = 131072
-max_request_tokens = 131072
-timeout = 600
-
-[models.qwen36-27b-6bit-longctx.opencode]
-context_length = 131072
-output_length = 16384
+default_chat_template_kwargs = { preserve_thinking = true }
 
 [models.gemma4-31b-it-mlx-4bit]
 name = "Gemma 4 31B IT UD MLX 4bit"
@@ -169,21 +189,21 @@ tags = ["coding", "dense", "vision", "gemma", "4bit"]
 tool_call_parser = "gemma4"
 reasoning_parser = "gemma4"
 
+# Gemma 4's hybrid SWA + global attention bounds local-layer KV, so memory
+# scales gracefully with context — 256K is achievable on 128GB.
+context_default = 65536
+context_max = 262144
+
+sampling = "gemma-4"
+# Gemma 4 KV quant on vllm-mlx untested. Conservative default; flip to "q8"
+# once you've measured no quality loss on your eval set.
+kv_quant = "off"
+
 [models.gemma4-31b-it-mlx-4bit.server]
 paged_cache = true
 cache_memory_percent = 0.40
-# 128GB MBP default. Gemma 4 supports 262K, but 64K is the practical
-# single-user agent setting before validating long-context quality/latency.
-max_tokens = 65536
-max_request_tokens = 65536
 timeout = 600
-default_temperature = 1.0
-default_top_p = 0.95
 default_chat_template_kwargs = { enable_thinking = false }
-
-[models.gemma4-31b-it-mlx-4bit.opencode]
-context_length = 65536
-output_length = 8192
 
 [models.gemma4-31b-it-mlx-4bit.pi]
 reasoning = false
@@ -208,21 +228,19 @@ tags = ["coding", "moe", "vision", "gemma", "4bit"]
 tool_call_parser = "gemma4"
 reasoning_parser = "gemma4"
 
+# Same Gemma 4 hybrid-attention math as the 31B; lighter weights → more
+# slack, but keep the same conservative 256K ceiling.
+context_default = 65536
+context_max = 262144
+
+sampling = "gemma-4"
+kv_quant = "off"
+
 [models.gemma4-26b-a4b-it-mlx-4bit.server]
 paged_cache = true
 cache_memory_percent = 0.40
-# 128GB MBP default. This MoE is lighter than 31B dense, but keep the first
-# profile at 64K until Gemma tool/chat behavior is proven stable.
-max_tokens = 65536
-max_request_tokens = 65536
 timeout = 600
-default_temperature = 1.0
-default_top_p = 0.95
 default_chat_template_kwargs = { enable_thinking = false }
-
-[models.gemma4-26b-a4b-it-mlx-4bit.opencode]
-context_length = 65536
-output_length = 8192
 
 [models.gemma4-26b-a4b-it-mlx-4bit.pi]
 reasoning = false
@@ -234,7 +252,7 @@ thinkingFormat = "qwen-chat-template"
 requiresToolResultName = true
 requiresAssistantAfterToolResult = true
 
-# --- GGUF models ---
+# --- GGUF models -------------------------------------------------------------
 
 [models.qwen36-35b-gguf-q4km]
 name = "Qwen3.6 35B-A3B GGUF Q4_K_M"
@@ -242,28 +260,28 @@ backend = "gguf"
 hf_repo = "unsloth/Qwen3.6-35B-A3B-GGUF"
 hf_file = "Qwen3.6-35B-A3B-Q4_K_M.gguf"
 # draft_hf_repo = "unsloth/Qwen3-0.6B-GGUF"
-# draft_hf_file = "Qwen3-0.6B-Q4_K_M.gguf"
-# NOTE: speculative decoding broken for Qwen3.5/3.6 MoE — see vllm#36872
-# llama.cpp --model-draft may have same issue. Revisit when upstream fixes land.
+# NOTE: speculative decoding broken for Qwen3.5/3.6 MoE — see vllm#36872.
 size_gb = 20
 min_memory_gb = 24
 tool_use = true
 can_reason = true
 tags = ["coding", "moe"]
 
-[models.qwen36-35b-gguf-q4km.opencode]
-context_length = 65536
-output_length = 16384
+# 128GB sizing: q8 K/V (set below) halves KV memory, so 192K is comfortable.
+context_default = 65536
+context_max = 196608
+
+sampling = "qwen3-thinking-coding"
+# Unsloth's published guidance for Qwen3.6-GGUF: q8_0 K/V is recommended; q4
+# desyncs Gated DeltaNet state. Source: https://unsloth.ai/docs/models/qwen3.6
+kv_quant = "q8"
 
 [models.qwen36-35b-gguf-q4km.server]
 ngl = 999
 threads = 8
-context = 65536
 batch = 512
 ubatch = 1024
 flash_attention = true
-cache_type_k = "q8_0"             # may cause issues — test before using, same linear attn concern
-cache_type_v = "q8_0"
 swa_full = true
 no_context_shift = true
 keep = 1024

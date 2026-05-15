@@ -5,7 +5,13 @@ from pathlib import Path
 
 from rich.console import Console
 
-from turbollm.registry import _hf_cache_path, _hf_snapshot_path
+from turbollm.registry import (
+    _hf_cache_path,
+    _hf_snapshot_path,
+    context_default_tokens,
+    effective_kv_quant,
+    effective_sampling,
+)
 
 console = Console()
 
@@ -32,18 +38,47 @@ class GgufProvider:
         flag_map = {
             "ngl": "-ngl",
             "threads": "-t",
-            "context": "-c",
             "batch": "-b",
             "ubatch": "-ub",
             "parallel": "--parallel",
             "keep": "--keep",
-            "cache_type_k": "--cache-type-k",
-            "cache_type_v": "--cache-type-v",
         }
         for key, flag in flag_map.items():
             val = srv.get(key)
             if val is not None:
                 cmd += [flag, str(val)]
+
+        # Context. Picker writes server.context at runtime; fall back to
+        # context_default for direct (non-picker) invocations.
+        ctx = srv.get("context") or context_default_tokens(model)
+        cmd += ["-c", str(ctx)]
+
+        # KV cache quantization. Unified kv_quant field maps to llama-server's
+        # --cache-type-k/--cache-type-v. Legacy explicit cache_type_k/v in
+        # [server] still wins if set (lets you mix-and-match, e.g. q8 K + q4 V).
+        kv_quant = effective_kv_quant(model)
+        kv_type_map = {"off": "f16", "q8": "q8_0", "q4": "q4_0"}
+        cache_k = srv.get("cache_type_k") or kv_type_map.get(kv_quant, "f16")
+        cache_v = srv.get("cache_type_v") or kv_type_map.get(kv_quant, "f16")
+        if cache_k != "f16":
+            cmd += ["--cache-type-k", cache_k]
+        if cache_v != "f16":
+            cmd += ["--cache-type-v", cache_v]
+
+        # Sampler defaults from the resolved preset. llama-server consumes
+        # the full set, so pass everything through.
+        sampling = effective_sampling(model)
+        sampler_flags = {
+            "temperature": "--temp",
+            "top_p": "--top-p",
+            "top_k": "--top-k",
+            "min_p": "--min-p",
+            "presence_penalty": "--presence-penalty",
+            "repeat_penalty": "--repeat-penalty",
+        }
+        for key, flag in sampler_flags.items():
+            if key in sampling:
+                cmd += [flag, str(sampling[key])]
 
         bool_flags = {
             "flash_attention": "-fa",

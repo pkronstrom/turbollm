@@ -81,6 +81,77 @@ def get_defaults() -> dict:
     return load_registry().get("defaults", {})
 
 
+# --- Unified config helpers (sampling presets, KV quant, context) --------------
+# These let provider code and the picker read one source of truth instead of
+# probing many overlapping keys across [server] / [opencode] / [pi] blocks.
+
+def get_sampling_preset(name: str) -> dict:
+    """Resolve a named sampling preset (e.g. "qwen3-thinking-coding") to its
+    fields. Returns {} if the preset is missing — providers should treat that
+    as "use binary defaults"."""
+    return load_registry().get("sampling", {}).get(name, {})
+
+
+def effective_sampling(model: dict) -> dict:
+    """Resolve the sampler fields that should be applied for this model.
+
+    Order of precedence (lowest to highest):
+      1. [defaults.sampling]
+      2. [sampling.<preset>] if model has `sampling = "<preset>"`
+      3. Any per-model overrides in [models.X.server] with `default_<field>` keys
+         (legacy shape — preserved so old configs keep working).
+    """
+    out: dict = {}
+    out.update(load_registry().get("defaults", {}).get("sampling", {}))
+    preset_name = model.get("sampling")
+    if preset_name:
+        out.update(get_sampling_preset(preset_name))
+    srv = model.get("server", {})
+    for k in ("temperature", "top_p", "top_k", "min_p",
+              "presence_penalty", "repeat_penalty"):
+        v = srv.get(f"default_{k}")
+        if v is not None:
+            out[k] = v
+    return out
+
+
+def effective_kv_quant(model: dict) -> str:
+    """Resolve the model's `kv_quant` field to a concrete value.
+
+    `auto` resolves per backend:
+      - gguf  → "q8"  (Unsloth's broadly-safe baseline for Qwen3-family)
+      - other → "off" (no validated case yet for MLX backends)
+
+    Returns one of: off / q8 / q4. Unknown values are treated as "off".
+    """
+    raw = (model.get("kv_quant") or "off").strip().lower()
+    if raw == "auto":
+        backend = model.get("backend", "vllm-mlx")
+        return "q8" if backend == "gguf" else "off"
+    if raw in ("off", "q8", "q4"):
+        return raw
+    return "off"
+
+
+def context_default_tokens(model: dict) -> int:
+    """Picker's default landing context, in tokens. Falls back to legacy
+    [server].max_tokens / [server].context for old-shape configs."""
+    v = model.get("context_default")
+    if v:
+        return int(v)
+    srv = model.get("server", {})
+    return int(srv.get("max_tokens") or srv.get("context") or 32768)
+
+
+def context_max_tokens(model: dict) -> int:
+    """Picker ceiling, in tokens. Falls back to context_default if not set
+    so the picker degenerates to a single choice rather than misbehaving."""
+    v = model.get("context_max")
+    if v:
+        return int(v)
+    return context_default_tokens(model)
+
+
 # --- HF cache helpers (used by providers) ---
 
 def _hf_cache_path(hf_repo: str) -> Path:

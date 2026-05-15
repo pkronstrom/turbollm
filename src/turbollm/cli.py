@@ -25,6 +25,7 @@ _load_env()
 from rich.console import Console
 from rich.table import Table
 
+from turbollm.picker import pick as picker_pick
 from turbollm.providers import get_provider
 from turbollm.registry import get_defaults, load_registry, resolve_model
 
@@ -58,8 +59,10 @@ def _picker_stats(m: dict) -> tuple[str, str, str, str]:
 def pick_model(requires_backend: list[str] | None = None) -> tuple[str, dict]:
     """Interactive picker for downloaded models.
 
-    If requires_backend is set, incompatible models are shown greyed out
-    and cannot be selected.
+    Uses the arrow-key picker (turbollm.picker) which lets the user pick model
+    AND adjust per-model context size + reasoning on the same screen. Falls
+    back to a numbered prompt when stdin/stdout isn't a TTY. The returned
+    model dict has any user overrides already merged into its [server] block.
     """
     reg = load_registry()
     models = reg.get("models", {})
@@ -73,15 +76,16 @@ def pick_model(requires_backend: list[str] | None = None) -> tuple[str, dict]:
         console.print("[yellow]No models downloaded.[/yellow] Run [bold]turbo pull <model>[/bold] first.")
         raise SystemExit(1)
 
-    # Split into compatible / incompatible
-    compatible = []
-    incompatible = []
+    # Split into compatible / incompatible (incompatible-backend models are
+    # listed dim and unselectable below the picker).
+    compatible: list[tuple[str, dict, str]] = []
+    incompatible: list[tuple[str, dict, str]] = []
     for alias, m in downloaded:
         backend = m.get("backend", get_defaults().get("backend", "vllm-mlx"))
         if requires_backend and backend not in requires_backend:
-            incompatible.append((alias, m))
+            incompatible.append((alias, m, backend))
         else:
-            compatible.append((alias, m))
+            compatible.append((alias, m, backend))
 
     if not compatible:
         console.print("[yellow]No compatible models downloaded.[/yellow]")
@@ -90,31 +94,23 @@ def pick_model(requires_backend: list[str] | None = None) -> tuple[str, dict]:
         raise SystemExit(1)
 
     if len(compatible) == 1 and not incompatible:
-        alias, m = compatible[0]
+        alias, m, _ = compatible[0]
         console.print(f"Using [bold]{m['name']}[/bold]")
         return alias, m
 
-    console.print("\n  [bold]Select a model:[/bold]\n")
-    selectable = []
-    idx = 0
-    for alias, m in compatible:
-        idx += 1
-        backend, ctx, out, size = _picker_stats(m)
-        console.print(
-            f"  [bold cyan]{idx}[/bold cyan]) {m['name']}  "
-            f"[dim]({alias}) [{backend}] ctx {ctx} out {out} size {size}[/dim]"
-        )
-        selectable.append((alias, m))
-    for alias, m in incompatible:
-        backend, ctx, out, size = _picker_stats(m)
-        console.print(
-            f"  [dim]  ) {m['name']}  ({alias}) [{backend}] "
-            f"ctx {ctx} out {out} size {size} — incompatible backend[/dim]"
-        )
-    console.print()
-
-    choice = click.prompt("  Choice", type=click.IntRange(1, len(selectable)))
-    return selectable[choice - 1]
+    result = picker_pick(compatible)
+    if result is None:
+        console.print("[yellow]Cancelled.[/yellow]")
+        raise SystemExit(1)
+    alias, new_model, overrides = result
+    if incompatible:
+        console.print()
+        for ialias, im, ibackend in incompatible:
+            console.print(
+                f"  [dim](skipped) {im.get('name', ialias)} ({ialias}) "
+                f"[{ibackend}] — incompatible backend[/dim]"
+            )
+    return alias, new_model
 
 
 # ---------------------------------------------------------------------------
@@ -248,10 +244,16 @@ def rm(model, yes):
               help="Override backend (default: from model config)")
 def serve(model, port, backend):
     """Start model server (auto-detects backend)."""
+    alias: str | None = None
     if model:
         m = resolve_model(model)
+        # If the user typed an alias (vs. a raw hf_repo), keep it for the port stamp
+        # so harnesses launched in other shells can pick the exact registry entry.
+        reg = load_registry()
+        if model in reg.get("models", {}):
+            alias = model
     else:
-        _, m = pick_model()
+        alias, m = pick_model()
     if backend:
         m = {**m, "backend": backend}
 
@@ -272,7 +274,11 @@ def serve(model, port, backend):
     console.print(f"Serving [bold]{m['name']}[/bold] on port {port}")
     console.print(f"  [dim]backend: {provider.name}[/dim]")
     console.print(f"  [dim]{' '.join(cmd)}[/dim]\n")
-    subprocess.run(cmd)
+    _write_port_stamp(port, alias)
+    try:
+        subprocess.run(cmd)
+    finally:
+        _clear_port_stamp(port)
 
 
 @cli.command()
@@ -369,8 +375,63 @@ def _server_is_running(port: int) -> bool:
         return False
 
 
+TURBOLLM_STATE_DIR = Path.home() / ".turbollm" / "state"
+
+
+def _port_stamp_path(port: int) -> Path:
+    return TURBOLLM_STATE_DIR / f"port-{port}.json"
+
+
+def _write_port_stamp(port: int, alias: str | None) -> None:
+    """Record the alias served on this port so `turbo <harness>` in another shell
+    can resolve back to the full registry entry (including pi/opencode/server
+    config) without depending on the server's advertised model id, which may not
+    match any hf_repo (e.g. backends that rename the served model)."""
+    TURBOLLM_STATE_DIR.mkdir(parents=True, exist_ok=True)
+    payload = {"alias": alias, "pid": os.getpid(), "started_at": time.time()}
+    _port_stamp_path(port).write_text(json.dumps(payload) + "\n")
+
+
+def _read_port_stamp(port: int) -> dict | None:
+    p = _port_stamp_path(port)
+    if not p.exists():
+        return None
+    try:
+        data = json.loads(p.read_text())
+    except (json.JSONDecodeError, OSError):
+        return None
+    pid = data.get("pid")
+    if pid:
+        try:
+            os.kill(int(pid), 0)
+        except (OSError, ProcessLookupError):
+            return None
+    return data
+
+
+def _clear_port_stamp(port: int) -> None:
+    p = _port_stamp_path(port)
+    if p.exists():
+        try:
+            p.unlink()
+        except OSError:
+            pass
+
+
 def _get_running_model(port: int) -> dict | None:
-    """If a server is running, return the matching model dict from registry (or None)."""
+    """If a server is running, return the matching model dict from registry (or None).
+
+    Prefers the port-stamp written by `turbo serve` (carries the exact alias the user
+    asked for, so two aliases sharing the same hf_repo resolve correctly). Falls back
+    to matching the server-advertised model id against hf_repo for servers started
+    outside of turbo."""
+    stamp = _read_port_stamp(port)
+    if stamp and stamp.get("alias"):
+        try:
+            return resolve_model(stamp["alias"])
+        except Exception:
+            pass
+
     try:
         resp = json.loads(urllib.request.urlopen(f"http://127.0.0.1:{port}/v1/models", timeout=2).read())
         model_id = resp["data"][0]["id"] if resp.get("data") else None
