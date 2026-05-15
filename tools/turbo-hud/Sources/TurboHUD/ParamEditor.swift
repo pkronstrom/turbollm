@@ -1,6 +1,9 @@
 import AppKit
 
 enum ParamEditor {
+    /// Retains the active popover so ARC does not release it before the user commits.
+    static var currentPopover: NSPopover?
+
     /// Open an editor for `param`. On commit, calls `onCommit(newValue)`.
     static func open(workflow: Workflow, param: WorkflowParam, settings: Settings,
                      anchor: NSView, onCommit: @escaping (String?) -> Void) {
@@ -32,6 +35,8 @@ enum ParamEditor {
         }
         popover.contentViewController = vc
         popover.behavior = .transient
+        popover.delegate = PopoverLifetimeDelegate.shared
+        currentPopover = popover
         popover.show(relativeTo: anchor.bounds, of: anchor, preferredEdge: .maxX)
     }
 
@@ -44,6 +49,8 @@ enum ParamEditor {
         }
         popover.contentViewController = vc
         popover.behavior = .transient
+        popover.delegate = PopoverLifetimeDelegate.shared
+        currentPopover = popover
         popover.show(relativeTo: anchor.bounds, of: anchor, preferredEdge: .maxX)
     }
 
@@ -69,6 +76,15 @@ enum ParamEditor {
         if panel.runModal() == .OK, let url = panel.url {
             onCommit(url.path)
         }
+    }
+}
+
+/// Clears ParamEditor.currentPopover when the popover closes so ARC can reclaim it.
+final class PopoverLifetimeDelegate: NSObject, NSPopoverDelegate {
+    static let shared = PopoverLifetimeDelegate()
+
+    func popoverDidClose(_ notification: Notification) {
+        ParamEditor.currentPopover = nil
     }
 }
 
