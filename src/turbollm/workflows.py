@@ -6,6 +6,11 @@ internal HUD design spec for the full schema.
 """
 from __future__ import annotations
 
+import datetime as _dt
+import os as _os
+import re as _re
+import subprocess as _subprocess
+
 
 class WorkflowError(Exception):
     """Raised on malformed workflow definitions."""
@@ -13,6 +18,11 @@ class WorkflowError(Exception):
 
 # Param `type` values that resolve at run time (HUD performs UI; CLI typically refuses).
 ACQUIRED_TYPES = {"audio-recording", "screenshot-manual", "command"}
+
+# Param `type` values resolved ahead of time (configured by user in HUD or CLI).
+CONFIGURED_TYPES = {"string", "text", "enum", "file", "directory"}
+
+KNOWN_TYPES = ACQUIRED_TYPES | CONFIGURED_TYPES
 
 
 def load_workflows(registry: dict) -> dict[str, dict]:
@@ -29,6 +39,7 @@ def validate_workflow(name: str, wf: dict) -> None:
 
     Checks:
     - exactly one of `command` (inline shell) or `script` (named [scripts.*] reference) is set
+    - every param declares a `name` and a known `type`
     - at most one acquired param has mode == "primary"
     - `command`-type acquired params declare `acquire` or `acquire_script`
     """
@@ -40,9 +51,24 @@ def validate_workflow(name: str, wf: dict) -> None:
         )
 
     params = wf.get("params", [])
+    for p in params:
+        if "name" not in p:
+            raise WorkflowError(
+                f"workflow '{name}' has a param missing the required `name` field"
+            )
+        if "type" not in p:
+            raise WorkflowError(
+                f"workflow '{name}' param '{p['name']}' is missing the required `type` field"
+            )
+        if p["type"] not in KNOWN_TYPES:
+            raise WorkflowError(
+                f"workflow '{name}' param '{p['name']}' has unknown type '{p['type']}' "
+                f"(known: {sorted(KNOWN_TYPES)})"
+            )
+
     primaries = [
         p for p in params
-        if p.get("type") in ACQUIRED_TYPES and p.get("mode", _default_mode(p)) == "primary"
+        if p["type"] in ACQUIRED_TYPES and p.get("mode", _default_mode(p)) == "primary"
     ]
     if len(primaries) > 1:
         raise WorkflowError(
@@ -51,10 +77,10 @@ def validate_workflow(name: str, wf: dict) -> None:
         )
 
     for p in params:
-        if p.get("type") == "command":
+        if p["type"] == "command":
             if not (p.get("acquire") or p.get("acquire_script")):
                 raise WorkflowError(
-                    f"workflow '{name}' param '{p.get('name')}' is type=command "
+                    f"workflow '{name}' param '{p['name']}' is type=command "
                     "and must set `acquire` or `acquire_script`"
                 )
 
@@ -65,11 +91,6 @@ def _default_mode(param: dict) -> str:
     if t == "screenshot-manual":
         return "trigger"
     return "primary"
-
-
-import datetime as _dt
-import os as _os
-import re as _re
 
 
 _TEMPLATE_RE = _re.compile(r"\{\{([^}]+)\}\}")
@@ -97,12 +118,21 @@ def expand_template(template: str, params: dict[str, str]) -> str:
 
 
 def resolve_params(params: list[dict], overrides: dict[str, str]) -> dict[str, str]:
-    """Resolve each param's value from CLI overrides → default_env → default → auto.
+    """Resolve each param's value, checking sources in priority order:
+    1. `overrides` (typically CLI `--param` flags)
+    2. `auto = "..."` template (expanded against params already resolved)
+    3. `default_env = "VAR"` (when the env var is set and non-empty)
+    4. `default = "..."`
+    5. empty string
 
     Acquired params (audio-recording, screenshot-manual, command) must be
     provided in `overrides` from the CLI — the CLI cannot perform acquisition.
     Configured params (string, text, enum, file, directory) without any source
     resolve to the empty string.
+
+    Note: `auto` templates can only reference params that appear earlier in the
+    param list (the resolution is sequential and only earlier results are in
+    scope). Workflow authors should order params with this constraint in mind.
     """
     resolved: dict[str, str] = {}
     for p in params:
@@ -131,9 +161,6 @@ def resolve_params(params: list[dict], overrides: dict[str, str]) -> dict[str, s
         resolved[name] = p.get("default", "")
 
     return resolved
-
-
-import subprocess as _subprocess
 
 
 def run_workflow(

@@ -55,6 +55,24 @@ def test_validate_workflow_requires_command_or_script():
         workflows.validate_workflow("bad", wf)
 
 
+def test_validate_workflow_rejects_param_without_name():
+    wf = {"command": "echo", "params": [{"type": "string"}]}
+    with pytest.raises(workflows.WorkflowError, match="missing the required `name` field"):
+        workflows.validate_workflow("bad", wf)
+
+
+def test_validate_workflow_rejects_param_without_type():
+    wf = {"command": "echo", "params": [{"name": "x"}]}
+    with pytest.raises(workflows.WorkflowError, match="missing the required `type` field"):
+        workflows.validate_workflow("bad", wf)
+
+
+def test_validate_workflow_rejects_unknown_type():
+    wf = {"command": "echo", "params": [{"name": "x", "type": "not-a-real-type"}]}
+    with pytest.raises(workflows.WorkflowError, match="unknown type 'not-a-real-type'"):
+        workflows.validate_workflow("bad", wf)
+
+
 import datetime as _dt
 
 
