@@ -71,6 +71,29 @@ final class MenuBuilderTests: XCTestCase {
                         "Run item must have an action wired.")
     }
 
+    func test_run_item_disabled_when_workflow_has_acquired_params() {
+        let state = AppState()
+        state.workflows = [
+            Workflow(name: "rec", description: nil, command: nil, script: "s", args: nil, env: nil,
+                     params: [
+                        WorkflowParam(name: "audio", type: "audio-recording", mode: "primary",
+                                      defaultValue: nil, defaultEnv: nil, auto: nil,
+                                      options: nil, extensions: nil),
+                        WorkflowParam(name: "title", type: "string", mode: nil,
+                                      defaultValue: nil, defaultEnv: nil, auto: nil,
+                                      options: nil, extensions: nil),
+                     ])
+        ]
+        let menu = MenuBuilder.build(state: state, settings: Settings(suiteName: "t.\(UUID().uuidString)"),
+                                     onRunWorkflow: { _ in }, onEditParam: { _, _ in })
+        let runItem = menu.items.first(where: { $0.title == "rec" })?.submenu?.items.first
+        XCTAssertNotNil(runItem)
+        XCTAssertTrue(runItem!.title.contains("Plan 3"),
+                      "Run item must explain why it's disabled when acquired params are present.")
+        XCTAssertFalse(runItem!.isEnabled,
+                       "Run item must be disabled when any param needs a Plan 3 acquirer — clicking would just fail with acquiredParamMissing.")
+    }
+
     func test_acquired_param_types_render_disabled_with_plan3_hint() {
         let state = AppState()
         state.workflows = [

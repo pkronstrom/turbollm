@@ -44,9 +44,17 @@ enum MenuBuilder {
                     // such an item only opens the submenu. So the top-level click can't
                     // run the workflow; we prepend a "▶ Run" item inside the submenu.
                     let submenu = NSMenu()
-                    let runItem = NSMenuItem(title: "▶ Run \(wf.name)", action: #selector(MenuTarget.runWorkflow(_:)), keyEquivalent: "")
+                    let hasAcquiredParam = wf.params.contains { ["audio-recording", "screenshot-manual", "command"].contains($0.type) }
+                    let runTitle = hasAcquiredParam
+                        ? "▶ Run \(wf.name) (needs Plan 3 acquirers)"
+                        : "▶ Run \(wf.name)"
+                    let runItem = NSMenuItem(title: runTitle, action: #selector(MenuTarget.runWorkflow(_:)), keyEquivalent: "")
                     runItem.representedObject = wf
                     runItem.target = MenuTarget.shared
+                    if hasAcquiredParam {
+                        runItem.action = nil
+                        runItem.isEnabled = false
+                    }
                     submenu.addItem(runItem)
                     submenu.addItem(NSMenuItem.separator())
 
