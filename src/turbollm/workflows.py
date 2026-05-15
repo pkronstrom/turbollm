@@ -131,3 +131,60 @@ def resolve_params(params: list[dict], overrides: dict[str, str]) -> dict[str, s
         resolved[name] = p.get("default", "")
 
     return resolved
+
+
+import subprocess as _subprocess
+
+
+def run_workflow(
+    name: str,
+    wf: dict,
+    *,
+    overrides: dict[str, str],
+    registry: dict,
+) -> int:
+    """Resolve params, expand command template, run as a subprocess.
+
+    Writes an activity file for the duration. Returns the subprocess exit code.
+    """
+    from turbollm import activity as _activity
+
+    validate_workflow(name, wf)
+    resolved = resolve_params(wf.get("params", []), overrides)
+
+    # Pick the command string: inline or via script reference.
+    if wf.get("command"):
+        command = expand_template(wf["command"], resolved)
+    else:
+        script_name = wf["script"]
+        scripts = registry.get("scripts", {})
+        if script_name not in scripts:
+            raise WorkflowError(
+                f"workflow '{name}' references script '{script_name}' "
+                "but no such [scripts.*] entry exists"
+            )
+        script_cmd = scripts[script_name].get("command", "")
+        positional = [expand_template(a, resolved) for a in wf.get("args", [])]
+        command = script_cmd  # the script's own template uses $1..$N
+        # We will pass `positional` as positional args to /bin/sh below.
+
+    env_overrides = {
+        k: expand_template(v, resolved) for k, v in wf.get("env", {}).items()
+    }
+
+    aid = _activity.start_activity(
+        kind="workflow", label=f"Running {name}", icon="play", color="blue",
+    )
+    try:
+        env = {**_os_environ_copy(), **env_overrides}
+        if wf.get("command"):
+            argv = ["/bin/sh", "-c", command, name]
+        else:
+            argv = ["/bin/sh", "-c", command, name, *positional]
+        return _subprocess.run(argv, env=env).returncode
+    finally:
+        _activity.clear_activity(aid)
+
+
+def _os_environ_copy() -> dict[str, str]:
+    return dict(_os.environ)

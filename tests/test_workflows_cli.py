@@ -126,3 +126,47 @@ def test_hud_status_clear_removes_file(monkeypatch, tmp_path):
     clr = runner.invoke(turbo_cli.cli, ["hud", "status", "clear", aid])
     assert clr.exit_code == 0
     assert list(state_dir.glob("activity-*.json")) == []
+
+
+def test_workflows_run_executes_simple_command(monkeypatch, tmp_path):
+    out_file = tmp_path / "out.txt"
+    fake_registry = {
+        "workflows": {
+            "echo-thing": {
+                "command": f'echo "ran" > "{out_file}"',
+                "params": [],
+            }
+        }
+    }
+    runner = CliRunner()
+    with patch("turbollm.cli.load_registry", return_value=fake_registry):
+        result = runner.invoke(turbo_cli.cli, ["workflows", "run", "echo-thing"])
+    assert result.exit_code == 0, result.output
+    assert out_file.read_text() == "ran\n"
+
+
+def test_workflows_run_with_param_override(monkeypatch, tmp_path):
+    out_file = tmp_path / "out.txt"
+    fake_registry = {
+        "workflows": {
+            "say": {
+                "command": f'echo "hi {{{{who}}}}" > "{out_file}"',
+                "params": [{"name": "who", "type": "string", "default": "stranger"}],
+            }
+        }
+    }
+    runner = CliRunner()
+    with patch("turbollm.cli.load_registry", return_value=fake_registry):
+        result = runner.invoke(
+            turbo_cli.cli, ["workflows", "run", "say", "--param", "who=Peter"]
+        )
+    assert result.exit_code == 0, result.output
+    assert out_file.read_text() == "hi Peter\n"
+
+
+def test_workflows_run_unknown_name_fails():
+    runner = CliRunner()
+    with patch("turbollm.cli.load_registry", return_value={"workflows": {}}):
+        result = runner.invoke(turbo_cli.cli, ["workflows", "run", "missing"])
+    assert result.exit_code == 1
+    assert "No such workflow" in result.output

@@ -140,3 +140,77 @@ def test_resolve_params_empty_string_when_no_default():
     params = [{"name": "title", "type": "string"}]
     out = workflows.resolve_params(params, overrides={})
     assert out == {"title": ""}
+
+
+def test_run_workflow_executes_inline_command(monkeypatch, tmp_path):
+    out_file = tmp_path / "marker.txt"
+    wf = {
+        "command": f'echo hello > "{out_file}"',
+        "params": [],
+    }
+    rc = workflows.run_workflow("simple", wf, overrides={}, registry={})
+    assert rc == 0
+    assert out_file.read_text() == "hello\n"
+
+
+def test_run_workflow_resolves_script_reference(monkeypatch, tmp_path):
+    out_file = tmp_path / "from-script.txt"
+    wf = {
+        "script": "the-script",
+        "args": ["{{name}}"],
+        "params": [{"name": "name", "type": "string", "default": "world"}],
+    }
+    registry = {
+        "scripts": {
+            "the-script": {"command": f'echo "hello $1" > "{out_file}"'},
+        },
+        "workflows": {"refscript": wf},
+    }
+    rc = workflows.run_workflow("refscript", wf, overrides={}, registry=registry)
+    assert rc == 0
+    assert out_file.read_text() == "hello world\n"
+
+
+def test_run_workflow_writes_activity_file(monkeypatch, tmp_path):
+    from turbollm import activity
+
+    monkeypatch.setattr(activity, "STATE_DIR", tmp_path / "state")
+    wf = {"command": "true", "params": []}
+    captured_ids: list[str] = []
+
+    real_start = activity.start_activity
+
+    def _spy_start(**kw):
+        aid = real_start(**kw)
+        captured_ids.append(aid)
+        return aid
+
+    monkeypatch.setattr(activity, "start_activity", _spy_start)
+
+    rc = workflows.run_workflow("named", wf, overrides={}, registry={})
+    assert rc == 0
+    assert len(captured_ids) == 1
+    # Activity is cleared after run
+    assert not list((tmp_path / "state").glob("activity-*.json"))
+
+
+def test_run_workflow_refuses_unresolved_acquired_param():
+    wf = {
+        "command": "echo {{audio}}",
+        "params": [{"name": "audio", "type": "audio-recording", "mode": "primary"}],
+    }
+    with pytest.raises(workflows.WorkflowError, match="acquired param 'audio'"):
+        workflows.run_workflow("x", wf, overrides={}, registry={})
+
+
+def test_run_workflow_accepts_acquired_param_override(tmp_path):
+    out_file = tmp_path / "marker.txt"
+    wf = {
+        "command": f'echo "got={{{{audio}}}}" > "{out_file}"',
+        "params": [{"name": "audio", "type": "audio-recording", "mode": "primary"}],
+    }
+    rc = workflows.run_workflow(
+        "x", wf, overrides={"audio": "/path/to/file.wav"}, registry={}
+    )
+    assert rc == 0
+    assert out_file.read_text() == "got=/path/to/file.wav\n"

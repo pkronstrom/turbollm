@@ -910,6 +910,39 @@ def workflows_list(as_json):
     console.print(table)
 
 
+@workflows_grp.command(name="run")
+@click.argument("name")
+@click.option(
+    "--param", "params", multiple=True, metavar="KEY=VALUE",
+    help="Override a workflow param (repeatable). E.g. --param file=/tmp/audio.wav",
+)
+def workflows_run(name, params):
+    """Run a workflow. Most acquired params (audio-recording, screenshot-manual)
+    cannot be acquired from the CLI — pass a pre-resolved value via --param."""
+    from turbollm import workflows as _wf
+
+    reg = load_registry()
+    all_wfs = _wf.load_workflows(reg)
+    if name not in all_wfs:
+        console.print(f"[red]No such workflow:[/red] {name}")
+        raise SystemExit(1)
+
+    overrides: dict[str, str] = {}
+    for spec in params:
+        if "=" not in spec:
+            console.print(f"[red]Invalid --param '{spec}'.[/red] Expected KEY=VALUE.")
+            raise SystemExit(2)
+        k, v = spec.split("=", 1)
+        overrides[k] = v
+
+    try:
+        rc = _wf.run_workflow(name, all_wfs[name], overrides=overrides, registry=reg)
+    except _wf.WorkflowError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise SystemExit(2)
+    raise SystemExit(rc)
+
+
 # ---------------------------------------------------------------------------
 # Activities (HUD state visibility)
 # ---------------------------------------------------------------------------
