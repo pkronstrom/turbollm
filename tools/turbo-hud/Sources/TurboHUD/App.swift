@@ -63,8 +63,13 @@ class App: NSObject, NSApplicationDelegate {
     }
 
     func runWorkflow(_ wf: Workflow) {
-        Task.detached {
-            _ = try? WorkflowRunner.run(wf, settings: self.settings)
+        Task.detached { [weak self] in
+            guard let settings = self?.settings else { return }
+            do {
+                try WorkflowRunner.run(wf, settings: settings)
+            } catch {
+                NSLog("workflow run failed: \(error)")
+            }
         }
     }
 
