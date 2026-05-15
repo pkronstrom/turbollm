@@ -25,6 +25,8 @@ final class WorkflowRegistry {
         }
     }
 
+    static let subprocessTimeout: TimeInterval = 30
+
     private func fetchFromCLI() -> ([Workflow], String?) {
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: "/usr/bin/env")
@@ -38,7 +40,14 @@ final class WorkflowRegistry {
         } catch {
             return ([], "turbo CLI not found in PATH")
         }
-        proc.waitUntilExit()
+        let deadline = DispatchTime.now() + Self.subprocessTimeout
+        let done = DispatchSemaphore(value: 0)
+        proc.terminationHandler = { _ in done.signal() }
+        if done.wait(timeout: deadline) == .timedOut {
+            proc.terminate()
+            _ = done.wait(timeout: .now() + 2)
+            return ([], "turbo workflows list --json timed out after \(Int(Self.subprocessTimeout))s")
+        }
         if proc.terminationStatus != 0 {
             let err = String(data: errPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
             return ([], "turbo workflows list --json failed: \(err.prefix(120))")
