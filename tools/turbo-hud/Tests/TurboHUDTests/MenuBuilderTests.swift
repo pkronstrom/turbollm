@@ -7,7 +7,7 @@ final class MenuBuilderTests: XCTestCase {
         state.activities = [
             Activity(id: "a1", kind: "workflow", label: "Running x",
                      icon: nil, color: nil, phase: nil,
-                     startedAt: Date(), ownerPid: 1)
+                     startedAt: Date(), ownerPid: 1, children: [])
         ]
         state.workflows = [
             Workflow(name: "transcribe-file", description: "Transcribe", command: nil,
@@ -36,7 +36,8 @@ final class MenuBuilderTests: XCTestCase {
                      params: [
                         WorkflowParam(name: "title", type: "string", mode: nil,
                                       defaultValue: "", defaultEnv: nil, auto: nil,
-                                      options: nil, extensions: nil)
+                                      options: nil, extensions: nil,
+                                      scope: nil, command: nil)
                      ])
         ]
         let suite = "t.\(UUID().uuidString)"
@@ -58,7 +59,8 @@ final class MenuBuilderTests: XCTestCase {
                      params: [
                         WorkflowParam(name: "title", type: "string", mode: nil,
                                       defaultValue: nil, defaultEnv: nil, auto: nil,
-                                      options: nil, extensions: nil)
+                                      options: nil, extensions: nil,
+                                      scope: nil, command: nil)
                      ])
         ]
         let menu = MenuBuilder.build(state: state, settings: Settings(suiteName: "t.\(UUID().uuidString)"),
@@ -78,10 +80,12 @@ final class MenuBuilderTests: XCTestCase {
                      params: [
                         WorkflowParam(name: "audio", type: "audio-recording", mode: "primary",
                                       defaultValue: nil, defaultEnv: nil, auto: nil,
-                                      options: nil, extensions: nil),
+                                      options: nil, extensions: nil,
+                                      scope: nil, command: nil),
                         WorkflowParam(name: "title", type: "string", mode: nil,
                                       defaultValue: nil, defaultEnv: nil, auto: nil,
-                                      options: nil, extensions: nil),
+                                      options: nil, extensions: nil,
+                                      scope: nil, command: nil),
                      ])
         ]
         let menu = MenuBuilder.build(state: state, settings: Settings(suiteName: "t.\(UUID().uuidString)"),
@@ -101,7 +105,8 @@ final class MenuBuilderTests: XCTestCase {
                      params: [
                         WorkflowParam(name: "audio", type: "audio-recording", mode: "primary",
                                       defaultValue: nil, defaultEnv: nil, auto: nil,
-                                      options: nil, extensions: nil)
+                                      options: nil, extensions: nil,
+                                      scope: nil, command: nil)
                      ])
         ]
         let menu = MenuBuilder.build(state: state, settings: Settings(suiteName: "t.\(UUID().uuidString)"),

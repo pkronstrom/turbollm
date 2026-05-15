@@ -6,7 +6,8 @@ final class WorkflowRunnerTests: XCTestCase {
         let wf = sampleWorkflow(params: [
             WorkflowParam(name: "vault", type: "directory", mode: nil,
                           defaultValue: "/default/path", defaultEnv: nil,
-                          auto: nil, options: nil, extensions: nil)
+                          auto: nil, options: nil, extensions: nil,
+                          scope: nil, command: nil)
         ])
         let suite = "com.turbollm.hud.test.\(UUID().uuidString)"
         defer { UserDefaults().removePersistentDomain(forName: suite) }
@@ -20,7 +21,8 @@ final class WorkflowRunnerTests: XCTestCase {
         let wf = sampleWorkflow(params: [
             WorkflowParam(name: "x", type: "string", mode: nil,
                           defaultValue: "fallback", defaultEnv: nil,
-                          auto: nil, options: nil, extensions: nil)
+                          auto: nil, options: nil, extensions: nil,
+                          scope: nil, command: nil)
         ])
         let suite = "com.turbollm.hud.test.\(UUID().uuidString)"
         defer { UserDefaults().removePersistentDomain(forName: suite) }
@@ -32,7 +34,8 @@ final class WorkflowRunnerTests: XCTestCase {
         let wf = sampleWorkflow(params: [
             WorkflowParam(name: "title", type: "string", mode: nil,
                           defaultValue: nil, defaultEnv: nil,
-                          auto: "{{date:%Y}}", options: nil, extensions: nil)
+                          auto: "{{date:%Y}}", options: nil, extensions: nil,
+                          scope: nil, command: nil)
         ])
         let suite = "com.turbollm.hud.test.\(UUID().uuidString)"
         defer { UserDefaults().removePersistentDomain(forName: suite) }
