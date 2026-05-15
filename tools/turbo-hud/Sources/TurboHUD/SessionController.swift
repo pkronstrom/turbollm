@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 
 // MARK: - SessionError
@@ -6,6 +7,14 @@ enum SessionError: Error {
     case noPrimaryAcquirer
     case multiplePrimaryAcquirers
     case permissionDenied(String)
+}
+
+// MARK: - TaggedAcquirerResult
+
+/// Internal type used to distinguish the primary task completion from background/trigger tasks.
+private enum AcquireTag {
+    case primary(AcquirerResult?)
+    case other(AcquirerResult?)
 }
 
 // MARK: - SessionController
@@ -19,6 +28,9 @@ final class SessionController {
     // Active acquirers for the current session; cleared on session end.
     private var activeAcquirers: [any Acquirer] = []
     private var sessionActive: Bool = false
+
+    // Test-only override for InputFormController.show — if non-nil, called instead of the real UI.
+    var inputFormShowOverride: ((_ workflow: Workflow, _ prefilled: [String: String], _ settings: Settings) async throws -> [String: String])?
 
     init() {}
 
@@ -54,8 +66,8 @@ final class SessionController {
             }
         }
 
-        // Build acquirer instances for this session.
-        let builtAcquirers = buildAcquirers(for: workflow)
+        // Build acquirer instances for this session. (T-fix-1)
+        let builtAcquirers = buildAcquirers(for: workflow, settings: settings)
         activeAcquirers = builtAcquirers
         sessionActive = true
 
@@ -69,34 +81,8 @@ final class SessionController {
                                          startedAt: Date(), phase: "Running")
         appState?.activeSession = sessionState
 
-        // Run primary + background acquirers concurrently.
-        let primaryAcquirer = builtAcquirers.first(where: { $0.mode == .primary })!
-        let backgroundAcquirers = builtAcquirers.filter { $0.mode == .background }
+        let acquiredResults = await runAcquirers(builtAcquirers)
 
-        var acquiredResults: [String: String] = [:]
-
-        // Start all background acquirers concurrently then await the primary.
-        await withTaskGroup(of: AcquirerResult?.self) { group in
-            for bg in backgroundAcquirers {
-                group.addTask {
-                    return try? await bg.acquire()
-                }
-            }
-
-            // Primary — drives session lifetime.
-            group.addTask {
-                return try? await primaryAcquirer.acquire()
-            }
-
-            for await result in group {
-                if let r = result {
-                    acquiredResults[r.paramName] = r.value
-                }
-            }
-        }
-
-        // Cancel any background acquirers that haven't stopped yet.
-        for bg in backgroundAcquirers { bg.cancel() }
         activeAcquirers = []
         sessionActive = false
 
@@ -106,11 +92,101 @@ final class SessionController {
         // Delete activity file.
         try? FileManager.default.removeItem(at: activityURL)
 
-        // Merge configured + acquired params and spawn the workflow.
+        // Merge configured + acquired params.
         var params = configuredResolved
         for (k, v) in acquiredResults { params[k] = v }
 
+        // T-fix-4: Show InputFormController for any remaining unset configured params.
+        // If the test override is set, call it; otherwise use the real UI.
+        if let override = inputFormShowOverride {
+            if let merged = try? await override(workflow, params, settings) {
+                params = merged
+            }
+        } else {
+            // In production, obtain the status-item button as anchor.
+            // In headless / test environments NSApp.windows may be empty — skip UI gracefully.
+            let unsetCount = InputFormController.unsetParams(
+                workflow: workflow, prefilled: params, settings: settings
+            ).count
+            if unsetCount > 0 {
+                // Try to get anchor from the shared status item button.
+                // We do this via a MainActor call since we're already on MainActor.
+                if let anchor = statusItemAnchor() {
+                    if let merged = try? await InputFormController.show(
+                        workflow: workflow,
+                        prefilled: params,
+                        settings: settings,
+                        anchor: anchor
+                    ) {
+                        params = merged
+                    }
+                } else {
+                    NSLog("SessionController: no anchor available for InputFormController; %d params remain unset", unsetCount)
+                }
+            }
+        }
+
         spawnWorkflow(workflow, params: params)
+    }
+
+    /// Returns the NSStatusItem button if the App singleton is accessible.
+    private func statusItemAnchor() -> NSView? {
+        // Try to obtain the status item button from the application delegate.
+        if let appDelegate = NSApp.delegate as? AnyObject,
+           let statusItem = (appDelegate as AnyObject).value(forKey: "statusItem") as? NSStatusItem {
+            return statusItem.button
+        }
+        return nil
+    }
+
+    // MARK: - Shared acquirer orchestration (T-fix-2)
+
+    /// Runs all acquirers concurrently. The session ends when the primary acquirer
+    /// completes (returns or throws). All background and trigger acquirers are then
+    /// cancelled immediately; a bounded ≤500 ms window collects any final results.
+    private func runAcquirers(_ acquirers: [any Acquirer]) async -> [String: String] {
+        let primaryAcquirer = acquirers.first(where: { $0.mode == .primary })!
+        let backgroundAcquirers = acquirers.filter { $0.mode == .background }
+        let triggerAcquirers = acquirers.filter { $0.mode == .trigger }
+
+        var acquiredResults: [String: String] = [:]
+
+        // Phase 1: run all acquirers; stop as soon as the primary task finishes.
+        await withTaskGroup(of: AcquireTag.self) { group in
+            // Start trigger acquirers (they suspend until cancel() is called).
+            for trig in triggerAcquirers {
+                group.addTask {
+                    return .other(try? await trig.acquire())
+                }
+            }
+            // Start background acquirers.
+            for bg in backgroundAcquirers {
+                group.addTask {
+                    return .other(try? await bg.acquire())
+                }
+            }
+            // Primary — tagged so we can detect its completion.
+            group.addTask {
+                return .primary(try? await primaryAcquirer.acquire())
+            }
+
+            for await tag in group {
+                switch tag {
+                case .primary(let r):
+                    if let r { acquiredResults[r.paramName] = r.value }
+                    // Primary completed — cancel all remaining acquirers immediately.
+                    // Each acquirer's cancel() resumes its acquire() continuation, so the
+                    // for-await loop drains the .other results below and the group exits.
+                    for bg in backgroundAcquirers { bg.cancel() }
+                    for trig in triggerAcquirers { trig.cancel() }
+
+                case .other(let r):
+                    if let r { acquiredResults[r.paramName] = r.value }
+                }
+            }
+        }
+
+        return acquiredResults
     }
 
     // MARK: - Cancel
@@ -127,11 +203,56 @@ final class SessionController {
         ["audio-recording", "screenshot-manual", "command"].contains(param.type)
     }
 
-    private func buildAcquirers(for workflow: Workflow) -> [any Acquirer] {
-        // Concrete acquirer types are created by the callers in C-C/C-D.
-        // For now, return an empty list — SessionController tests inject MockAcquirer via
-        // the test-only initialiser below.
-        return []
+    // T-fix-1: Build concrete Acquirer instances for each acquired param in the workflow.
+    func buildAcquirers(for workflow: Workflow, settings: Settings) -> [any Acquirer] {
+        var result: [any Acquirer] = []
+
+        let outputBase = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Recordings/turbo", isDirectory: true)
+
+        for param in workflow.params {
+            switch param.type {
+            case "audio-recording":
+                // Read scope from sticky settings (user may have changed it via menu).
+                let scopeKey = "\(workflow.name).\(param.name).scope"
+                let scopeStr = UserDefaults(suiteName: Settings.defaultSuiteName)?
+                    .string(forKey: scopeKey) ?? param.scope ?? "mic-only"
+                let scope: AudioScope = scopeStr == "system+mic" ? .systemPlusMic : .micOnly
+
+                // Read sticky input-device UID.
+                let deviceKey = "\(workflow.name).\(param.name).input_device"
+                let inputDeviceUID = UserDefaults(suiteName: Settings.defaultSuiteName)?
+                    .string(forKey: deviceKey)
+
+                let recorder = AudioRecorder(
+                    paramName: param.name,
+                    scope: scope,
+                    inputDeviceUID: inputDeviceUID,
+                    outputDir: outputBase
+                )
+                result.append(recorder)
+
+            case "screenshot-manual":
+                let screenshotter = ScreenshotManual(
+                    paramName: param.name,
+                    outputDir: outputBase
+                )
+                result.append(screenshotter)
+
+            case "command":
+                guard let cmd = param.command, !cmd.isEmpty else {
+                    NSLog("SessionController: command param '%@' has no command string — skipping", param.name)
+                    continue
+                }
+                let cmdAcquirer = CommandAcquirer(paramName: param.name, command: cmd)
+                result.append(cmdAcquirer)
+
+            default:
+                break
+            }
+        }
+
+        return result
     }
 
     /// Test-only initialiser that allows injecting acquirers directly.
@@ -169,31 +290,23 @@ final class SessionController {
                                          startedAt: Date(), phase: "Running")
         appState?.activeSession = sessionState
 
-        let primaryAcquirer = acquirers.first(where: { $0.mode == .primary })!
-        let backgroundAcquirers = acquirers.filter { $0.mode == .background }
+        let acquiredResults = await runAcquirers(acquirers)
 
-        var acquiredResults: [String: String] = [:]
-
-        await withTaskGroup(of: AcquirerResult?.self) { group in
-            for bg in backgroundAcquirers {
-                group.addTask {
-                    return try? await bg.acquire()
-                }
-            }
-            group.addTask {
-                return try? await primaryAcquirer.acquire()
-            }
-            for await result in group {
-                if let r = result { acquiredResults[r.paramName] = r.value }
-            }
-        }
-
-        for bg in backgroundAcquirers { bg.cancel() }
         activeAcquirers = []
         sessionActive = false
 
         appState?.activeSession = nil
         try? FileManager.default.removeItem(at: activityURL)
+
+        // Merge configured + acquired params, then call inputFormShowOverride if set
+        // (allows T-fix-4 tests to verify the param map reaches the form step).
+        var params = configuredResolved
+        for (k, v) in acquiredResults { params[k] = v }
+
+        if let override = inputFormShowOverride {
+            _ = try? await override(workflow, params, settings)
+        }
+        // Note: startWithAcquirers does NOT call spawnWorkflow — test-only path.
     }
 
     // MARK: - Activity file

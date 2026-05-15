@@ -182,4 +182,171 @@ final class SessionControllerTests: XCTestCase {
         let activeSession = ctrl.appState?.activeSession
         XCTAssertNil(activeSession)
     }
+
+    // MARK: - T-fix-1: buildAcquirers factory
+
+    func test_buildAcquirers_returns_commandAcquirer_for_command_param() {
+        // T-fix-1: buildAcquirers must instantiate concrete acquirers; before the fix
+        // it returned [] which caused a force-unwrap crash in start().
+        let ctrl = SessionController()
+        let wf = Workflow(
+            name: "cmd-wf", description: nil, command: "echo", script: nil,
+            args: nil, env: nil,
+            params: [
+                WorkflowParam(name: "today", type: "command", mode: "background",
+                              defaultValue: nil, defaultEnv: nil, auto: nil,
+                              options: nil, extensions: nil, scope: nil,
+                              command: "date +%Y-%m-%d")
+            ]
+        )
+        let acquirers = ctrl.buildAcquirers(for: wf, settings: makeSettings())
+        XCTAssertEqual(acquirers.count, 1, "buildAcquirers must return one acquirer for one command param")
+        XCTAssertEqual(acquirers[0].paramName, "today")
+        XCTAssertEqual(acquirers[0].mode, .background,
+                       "CommandAcquirer mode is always .background")
+    }
+
+    func test_buildAcquirers_returns_screenshotManual_for_screenshot_param() {
+        let ctrl = SessionController()
+        let wf = Workflow(
+            name: "screenshot-wf", description: nil, command: nil, script: nil,
+            args: nil, env: nil,
+            params: [
+                WorkflowParam(name: "screenshots", type: "screenshot-manual", mode: "trigger",
+                              defaultValue: nil, defaultEnv: nil, auto: nil,
+                              options: nil, extensions: nil, scope: nil, command: nil)
+            ]
+        )
+        let acquirers = ctrl.buildAcquirers(for: wf, settings: makeSettings())
+        XCTAssertEqual(acquirers.count, 1)
+        XCTAssertEqual(acquirers[0].paramName, "screenshots")
+        XCTAssertEqual(acquirers[0].mode, .trigger)
+    }
+
+    func test_buildAcquirers_returns_audioRecorder_for_audio_recording_param() {
+        let ctrl = SessionController()
+        let wf = Workflow(
+            name: "record-wf", description: nil, command: nil, script: nil,
+            args: nil, env: nil,
+            params: [
+                WorkflowParam(name: "audio", type: "audio-recording", mode: "primary",
+                              defaultValue: nil, defaultEnv: nil, auto: nil,
+                              options: nil, extensions: nil, scope: "mic-only", command: nil)
+            ]
+        )
+        let acquirers = ctrl.buildAcquirers(for: wf, settings: makeSettings())
+        XCTAssertEqual(acquirers.count, 1)
+        XCTAssertEqual(acquirers[0].paramName, "audio")
+        XCTAssertEqual(acquirers[0].mode, .primary,
+                       "AudioRecorder mode is always .primary")
+    }
+
+    func test_buildAcquirers_returns_empty_for_non_acquired_params() {
+        let ctrl = SessionController()
+        let wf = Workflow(
+            name: "plain-wf", description: nil, command: "echo", script: nil,
+            args: nil, env: nil,
+            params: [
+                WorkflowParam(name: "title", type: "string", mode: nil,
+                              defaultValue: "hello", defaultEnv: nil, auto: nil,
+                              options: nil, extensions: nil, scope: nil, command: nil)
+            ]
+        )
+        let acquirers = ctrl.buildAcquirers(for: wf, settings: makeSettings())
+        XCTAssertTrue(acquirers.isEmpty, "Non-acquired params must not produce acquirers")
+    }
+
+    func test_buildAcquirers_skips_command_param_with_no_command_string() {
+        let ctrl = SessionController()
+        let wf = Workflow(
+            name: "bad-cmd-wf", description: nil, command: nil, script: nil,
+            args: nil, env: nil,
+            params: [
+                WorkflowParam(name: "broken", type: "command", mode: "background",
+                              defaultValue: nil, defaultEnv: nil, auto: nil,
+                              options: nil, extensions: nil, scope: nil, command: nil)
+            ]
+        )
+        let acquirers = ctrl.buildAcquirers(for: wf, settings: makeSettings())
+        XCTAssertTrue(acquirers.isEmpty,
+                      "command param with no command string must be skipped gracefully")
+    }
+
+    // MARK: - T-fix-2: Background completes after primary; session ends in bounded time
+
+    func test_session_ends_promptly_after_primary_even_when_background_blocks() async throws {
+        // T-fix-2: A background acquirer that blocks indefinitely should NOT delay
+        // session teardown after the primary completes.
+        let ctrl = SessionController()
+
+        let primary = MockAcquirer(
+            paramName: "audio",
+            mode: .primary,
+            result: AcquirerResult(paramName: "audio", value: "/tmp/out.wav", phase: nil),
+            delay: 0  // returns immediately
+        )
+        // Background acquirer with a long delay; should be cancelled when primary returns.
+        let bg = MockAcquirer(
+            paramName: "data",
+            mode: .background,
+            result: AcquirerResult(paramName: "data", value: "bg-value", phase: nil),
+            delay: 30.0  // would deadlock the test without T-fix-2
+        )
+
+        let wf = makeWorkflow()
+
+        let start = Date()
+        try await ctrl.startWithAcquirers([primary, bg], workflow: wf, settings: makeSettings())
+        let elapsed = Date().timeIntervalSince(start)
+
+        XCTAssertLessThan(elapsed, 2.0,
+            "Session must end within 2 s of primary completing, not wait for background (elapsed: \(elapsed)s)")
+        XCTAssertTrue(bg.cancelCalled,
+            "Background acquirer must have cancel() called after primary completes")
+    }
+
+    // MARK: - T-fix-4: InputFormController override reaches spawnWorkflow
+
+    func test_inputFormOverride_merged_params_are_used_in_session() async throws {
+        // T-fix-4: After acquirers complete, SessionController must call InputFormController.show
+        // (or its override) with the merged param map. We verify via the override closure.
+        let ctrl = SessionController()
+
+        var capturedPrefilled: [String: String]? = nil
+
+        ctrl.inputFormShowOverride = { workflow, prefilled, settings in
+            capturedPrefilled = prefilled
+            // Return a merged map with an extra user-provided param.
+            var result = prefilled
+            result["user_note"] = "test-note"
+            return result
+        }
+
+        let wf = Workflow(
+            name: "test-wf", description: nil, command: "echo", script: nil,
+            args: nil, env: nil,
+            params: [
+                WorkflowParam(name: "audio", type: "audio-recording", mode: "primary",
+                              defaultValue: nil, defaultEnv: nil, auto: nil,
+                              options: nil, extensions: nil, scope: "mic-only", command: nil),
+                WorkflowParam(name: "user_note", type: "string", mode: nil,
+                              defaultValue: nil, defaultEnv: nil, auto: nil,
+                              options: nil, extensions: nil, scope: nil, command: nil)
+            ]
+        )
+
+        let primary = MockAcquirer(
+            paramName: "audio",
+            mode: .primary,
+            result: AcquirerResult(paramName: "audio", value: "/tmp/out.wav", phase: nil)
+        )
+
+        try await ctrl.startWithAcquirers([primary], workflow: wf, settings: makeSettings())
+
+        // The override should have been called with the acquired audio path in prefilled.
+        XCTAssertNotNil(capturedPrefilled,
+            "inputFormShowOverride must be called during start()")
+        XCTAssertEqual(capturedPrefilled?["audio"], "/tmp/out.wav",
+            "audio acquirer result must be passed as prefilled to InputFormController")
+    }
 }

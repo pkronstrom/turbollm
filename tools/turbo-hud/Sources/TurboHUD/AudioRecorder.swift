@@ -75,10 +75,13 @@ final class AudioRecorder: Acquirer {
 
     func acquire() async throws -> AcquirerResult {
         // Ensure output directory exists.
+        // T-fix-3: pass the constructor's outputDir as sessionDir so the recorder
+        // always writes under the dir specified at init time, rather than falling
+        // back to $TURBO_AUDIO_INBOX / ~/Recordings/turbo unconditionally.
         let outURL = Self.outputPath(for: Workflow(
             name: paramName, description: nil, command: nil,
             script: nil, args: nil, env: nil, params: []
-        ), sessionDir: nil)
+        ), sessionDir: outputDir)
         try FileManager.default.createDirectory(
             at: outURL.deletingLastPathComponent(),
             withIntermediateDirectories: true

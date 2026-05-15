@@ -209,4 +209,55 @@ final class MenuBuilderTests: XCTestCase {
         let runItem = submenuItems.first(where: { $0.title.hasPrefix("▶ Run") })
         XCTAssertFalse(runItem?.isEnabled ?? true, "Run must be disabled when mic is denied.")
     }
+
+    // MARK: - T-fix-5: system+mic with Screen Recording denied disables Run
+
+    func test_system_plus_mic_scope_screen_recording_denied_disables_run() {
+        // T-fix-5: When a workflow has audio-recording with scope = "system+mic"
+        // and Screen Recording permission is absent (and mic is authorized),
+        // the Run item must be disabled with subtitle "needs Screen Recording"
+        // and a Screen Recording grant row must appear.
+        //
+        // Since we cannot control the real permission state, we test the menu-build
+        // logic by checking:
+        //  - If Screen Recording is denied (and mic is authorized): Run is disabled
+        //    and tooltip indicates "needs Screen Recording".
+        //  - Otherwise (Screen Recording granted or mic denied): menu builds without crash.
+        let permState = Permissions.state()
+
+        let state = AppState()
+        state.workflows = [
+            Workflow(name: "sys-rec", description: nil, command: nil, script: "s",
+                     args: nil, env: nil,
+                     params: [
+                        WorkflowParam(name: "audio", type: "audio-recording", mode: "primary",
+                                      defaultValue: nil, defaultEnv: nil, auto: nil,
+                                      options: nil, extensions: nil,
+                                      scope: "system+mic", command: nil)
+                     ])
+        ]
+        let menu = MenuBuilder.build(state: state, settings: Settings(suiteName: "t.\(UUID().uuidString)"),
+                                     onRunWorkflow: { _ in }, onEditParam: { _, _ in })
+
+        let wfItem = menu.items.first(where: { $0.title == "sys-rec" })
+        XCTAssertNotNil(wfItem, "Workflow item must exist in menu")
+
+        let submenuItems = wfItem?.submenu?.items ?? []
+        let runItem = submenuItems.first(where: { $0.title.hasPrefix("▶ Run") })
+        XCTAssertNotNil(runItem, "Run item must exist in submenu")
+
+        if permState.microphone == .authorized && !permState.screenRecording {
+            // Screen Recording denied, mic authorized — this is the T-fix-5 case.
+            XCTAssertFalse(runItem?.isEnabled ?? true,
+                           "Run must be disabled when Screen Recording is denied for system+mic scope")
+            XCTAssertEqual(runItem?.toolTip, "needs Screen Recording",
+                           "Run tooltip must say 'needs Screen Recording' for system+mic without SR permission")
+            let grantItem = submenuItems.first(where: { $0.title.contains("Screen Recording") })
+            XCTAssertNotNil(grantItem,
+                            "A Screen Recording grant row must appear when SR is denied for system+mic")
+        } else {
+            // In environments where SR is granted or mic is denied, just verify menu builds.
+            XCTAssertNotNil(runItem, "Menu must build without crashing in any permission state")
+        }
+    }
 }

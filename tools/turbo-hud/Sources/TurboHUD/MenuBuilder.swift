@@ -96,6 +96,11 @@ enum MenuBuilder {
                         runItem.action = nil
                         runItem.isEnabled = false
                         runItem.toolTip = "needs Microphone access"
+                    } else if needsScreenRecording {
+                        // T-fix-5: system+mic scope requires Screen Recording permission.
+                        runItem.action = nil
+                        runItem.isEnabled = false
+                        runItem.toolTip = "needs Screen Recording"
                     }
                     submenu.addItem(runItem)
                     submenu.addItem(NSMenuItem.separator())
