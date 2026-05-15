@@ -21,6 +21,8 @@ enum MenuBuilder {
         }
 
         // Workflows section
+        MenuTarget.shared.onRun = onRunWorkflow
+        MenuTarget.shared.onEdit = onEditParam
         if let err = state.workflowsError {
             let item = NSMenuItem(title: err, action: nil, keyEquivalent: "")
             item.isEnabled = false
@@ -37,7 +39,6 @@ enum MenuBuilder {
                 item.representedObject = wf
                 item.target = MenuTarget.shared
                 item.action = #selector(MenuTarget.runWorkflow(_:))
-                MenuTarget.shared.onRun = onRunWorkflow
 
                 if !wf.params.isEmpty {
                     let submenu = NSMenu()
@@ -48,7 +49,6 @@ enum MenuBuilder {
                         subItem.representedObject = WorkflowParamBinding(workflow: wf, param: p)
                         subItem.target = MenuTarget.shared
                         subItem.action = #selector(MenuTarget.editParam(_:))
-                        MenuTarget.shared.onEdit = onEditParam
                         submenu.addItem(subItem)
                     }
                     item.submenu = submenu
