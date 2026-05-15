@@ -892,8 +892,12 @@ def workflows_list(as_json):
     reg = load_registry()
     items = []
     for name, wf in _wf.load_workflows(reg).items():
-        entry = {"name": name, **wf}
-        items.append(entry)
+        try:
+            _wf.validate_workflow(name, wf)
+        except _wf.WorkflowError as exc:
+            click.echo(f"warning: skipping workflow '{name}': {exc}", err=True)
+            continue
+        items.append({"name": name, **wf})
 
     if as_json:
         click.echo(json.dumps(items, indent=2))

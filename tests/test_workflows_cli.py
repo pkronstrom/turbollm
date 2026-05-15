@@ -170,3 +170,23 @@ def test_workflows_run_unknown_name_fails():
         result = runner.invoke(turbo_cli.cli, ["workflows", "run", "missing"])
     assert result.exit_code == 1
     assert "No such workflow" in result.output
+
+
+def test_workflows_list_surfaces_validation_errors_in_stderr():
+    """Malformed workflows should produce a warning in stderr but not abort the list."""
+    bad_registry = {
+        "workflows": {
+            "good": {"command": "echo ok", "params": []},
+            "broken": {"params": []},  # missing both command and script
+        }
+    }
+    runner = CliRunner()
+    with patch("turbollm.cli.load_registry", return_value=bad_registry):
+        result = runner.invoke(turbo_cli.cli, ["workflows", "list", "--json"])
+
+    assert result.exit_code == 0
+    data = json.loads(result.stdout)
+    # Only the valid workflow is in the JSON output.
+    assert [w["name"] for w in data] == ["good"]
+    # The warning is on stderr, not stdout.
+    assert "broken" in result.stderr
