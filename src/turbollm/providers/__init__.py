@@ -36,4 +36,7 @@ def get_provider(backend: str) -> Provider:
     if backend == "mlx-vlm":
         from turbollm.providers.mlx_vlm import MlxVlmProvider
         return MlxVlmProvider()
-    raise ValueError(f"Unknown backend '{backend}'. Available: vllm-mlx, gguf, omlx, mlx-vlm")
+    if backend == "mlx-audio":
+        from turbollm.providers.mlx_audio import MlxAudioProvider
+        return MlxAudioProvider()
+    raise ValueError(f"Unknown backend '{backend}'. Available: vllm-mlx, gguf, omlx, mlx-vlm, mlx-audio")

@@ -23,6 +23,10 @@ paged_ssd_cache_max_size = "100GB"
 hot_cache_max_size = "8GB"
 max_concurrent_requests = 8
 
+[defaults.mlx-audio]
+# ASR runs on its own port so it can sit alongside an LLM on 8899.
+port = 8900
+
 # --- Sampler presets ---------------------------------------------------------
 # Reference these from models via `sampling = "<preset-name>"`. The provider
 # resolves the preset to individual --temp / --top-p / --top-k flags at serve
@@ -296,3 +300,68 @@ parallel = 1
 enable_thinking = false
 jinja = true
 mlock = true
+
+
+# --- ASR (mlx-audio) ----------------------------------------------------------
+# ASR models don't use sampling / kv_quant / context fields — the mlx-audio
+# server picks the model per-request via the API `model=` field. We list them
+# like LLMs so `turbo pull`, `turbo serve`, and `turbo transcribe` resolve
+# aliases uniformly.
+
+[models.parakeet-v3]
+name = "parakeet-v3"
+backend = "mlx-audio"
+hf_repo = "mlx-community/parakeet-tdt-0.6b-v3"
+size_gb = 1.2
+tags = ["asr", "multilingual"]
+# Parakeet TDT 0.6B v3 — NVIDIA-trained, MLX-ported by mlx-community.
+# Covers 25 European languages incl. English, Finnish, Swedish.
+
+
+# --- Scripts ------------------------------------------------------------------
+# Declarative `turbo <name>` commands. Each [scripts.<name>] becomes a click
+# subcommand; `command` runs via /bin/sh -c with $0=<name>, $1..$N = forwarded
+# args. ALWAYS quote positional refs ("$1") so paths with spaces survive.
+# Built-in commands > harnesses > scripts when names collide.
+
+[scripts.summarize]
+description = "Transcribe an audio file and summarize via local LLM"
+usage = "FILE"
+# --no-extensions: headless pi doesn't need TUI extensions like
+# pi-powerline-footer; some of them error on non-interactive sessions.
+command = """
+turbo transcribe "$1" \
+  | pi --no-extensions -p 'Summarize this meeting transcript. Output markdown with sections: Summary, Decisions, Action items (owner if mentioned), Open questions.'
+"""
+
+[scripts.summarize-to-obsidian]
+description = "Transcribe, summarize, save to Obsidian Meetings folder"
+usage = "FILE [TITLE]"
+# Set $OBSIDIAN_VAULT to your vault root (defaults to ~/Documents/Obsidian).
+# Writes $VAULT/Meetings/YYYY-MM-DD-<title>.md with YAML frontmatter.
+# Title defaults to the audio filename minus extension.
+command = """
+set -euo pipefail
+vault="${OBSIDIAN_VAULT:-$HOME/Documents/Obsidian}"
+bn="${1##*/}"
+title="${2:-${bn%.*}}"
+out="$vault/Meetings/$(date +%Y-%m-%d)-$title.md"
+mkdir -p "$(dirname "$out")"
+
+summary="$(turbo transcribe "$1" | pi --no-extensions -p 'Summarize this meeting transcript. Output markdown with sections: Summary, Decisions, Action items (owner if mentioned), Open questions.')"
+
+cat > "$out" <<EOF
+---
+date: $(date -Iseconds)
+source: $1
+tags: [meeting, auto-transcribed]
+model: parakeet-v3 + local-llm
+---
+
+# $title
+
+$summary
+EOF
+
+echo "Wrote: $out" >&2
+"""

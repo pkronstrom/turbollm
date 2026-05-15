@@ -119,23 +119,26 @@ def pick_model(requires_backend: list[str] | None = None) -> tuple[str, dict]:
 # ---------------------------------------------------------------------------
 
 class TurboGroup(click.Group):
-    """Click group that auto-discovers harness commands from [harnesses.*] in TOML."""
+    """Click group that auto-discovers harness and script commands from TOML."""
 
     def get_command(self, ctx, cmd_name):
-        # Built-in commands always take priority
+        # Built-in commands always take priority, then harnesses, then scripts.
         rv = click.Group.get_command(self, ctx, cmd_name)
         if rv is not None:
             return rv
         reg = load_registry()
         if cmd_name in reg.get("harnesses", {}):
             return _make_harness_command(cmd_name)
+        if cmd_name in reg.get("scripts", {}):
+            return _make_script_command(cmd_name, reg["scripts"][cmd_name])
         return None
 
     def list_commands(self, ctx):
         builtin = set(click.Group.list_commands(self, ctx))
         reg = load_registry()
         harnesses = set(reg.get("harnesses", {}).keys())
-        return sorted(builtin | harnesses)
+        scripts = set(reg.get("scripts", {}).keys())
+        return sorted(builtin | harnesses | scripts)
 
 
 @click.group(cls=TurboGroup)
@@ -203,12 +206,13 @@ def ls_cmd(available):
 
     _print_backends_table()
     _print_harnesses_table(reg)
+    _print_scripts_table(reg)
 
 
 def _print_backends_table() -> None:
     from turbollm.providers import get_provider
 
-    backends = ["vllm-mlx", "gguf", "omlx", "mlx-vlm"]
+    backends = ["vllm-mlx", "gguf", "omlx", "mlx-vlm", "mlx-audio"]
     table = Table(show_header=True, title="\nBackends", title_justify="left")
     table.add_column("Backend", style="bold")
     table.add_column("Binary")
@@ -221,6 +225,19 @@ def _print_backends_table() -> None:
         status = "[green]available[/green]" if available else "[dim]missing[/dim]"
         install = "" if available else provider.install_hint
         table.add_row(key, provider.name, status, install)
+    console.print(table)
+
+
+def _print_scripts_table(reg: dict) -> None:
+    scripts = reg.get("scripts", {})
+    if not scripts:
+        return
+    table = Table(show_header=True, title="\nScripts", title_justify="left")
+    table.add_column("Name", style="bold")
+    table.add_column("Usage")
+    table.add_column("Description")
+    for name, cfg in scripts.items():
+        table.add_row(name, cfg.get("usage", ""), cfg.get("description", ""))
     console.print(table)
 
 
@@ -279,7 +296,7 @@ def rm(model, yes):
 @cli.command()
 @click.argument("model", required=False)
 @click.option("--port", "-p", default=None, type=int, help="Port (default: 8899)")
-@click.option("--backend", "-b", default=None, type=click.Choice(["vllm-mlx", "omlx", "gguf", "mlx-vlm"]),
+@click.option("--backend", "-b", default=None, type=click.Choice(["vllm-mlx", "omlx", "gguf", "mlx-vlm", "mlx-audio"]),
               help="Override backend (default: from model config)")
 def serve(model, port, backend):
     """Start model server (auto-detects backend)."""
@@ -400,6 +417,150 @@ def chat(port):
 
         print()
         messages.append({"role": "assistant", "content": "".join(assistant_msg)})
+
+
+# ---------------------------------------------------------------------------
+# Audio: transcribe via mlx-audio backend
+# ---------------------------------------------------------------------------
+
+def _build_multipart(fields: dict, file_field: str, filename: str,
+                     content_type: str, file_bytes: bytes) -> tuple[bytes, str]:
+    """Hand-rolled multipart/form-data so transcribe stays stdlib-only."""
+    import uuid
+    boundary = "----turbollm" + uuid.uuid4().hex
+    parts: list[bytes] = []
+    for name, value in fields.items():
+        if value is None:
+            continue
+        parts.append(f"--{boundary}\r\n".encode())
+        parts.append(f'Content-Disposition: form-data; name="{name}"\r\n\r\n'.encode())
+        parts.append(f"{value}\r\n".encode())
+    parts.append(f"--{boundary}\r\n".encode())
+    parts.append(
+        f'Content-Disposition: form-data; name="{file_field}"; filename="{filename}"\r\n'.encode()
+    )
+    parts.append(f"Content-Type: {content_type}\r\n\r\n".encode())
+    parts.append(file_bytes)
+    parts.append(f"\r\n--{boundary}--\r\n".encode())
+    return b"".join(parts), f"multipart/form-data; boundary={boundary}"
+
+
+_AUDIO_MIME = {
+    ".m4a": "audio/mp4",
+    ".mp3": "audio/mpeg",
+    ".wav": "audio/wav",
+    ".flac": "audio/flac",
+    ".ogg": "audio/ogg",
+    ".webm": "audio/webm",
+    ".mp4": "audio/mp4",
+}
+
+
+@cli.command()
+@click.argument("audio_file", type=click.Path(exists=True, dir_okay=False))
+@click.option("--model", "-m", default=None,
+              help="Model alias or HF repo. Defaults to the running server's model, else parakeet-v3.")
+@click.option("--language", "-l", default=None, help="ISO language code (e.g. en, fi). Optional.")
+@click.option("--format", "-f", "response_format",
+              type=click.Choice(["text", "json", "srt", "vtt", "verbose_json"]),
+              default="text", help="Response format (default: text).")
+@click.option("--port", "-p", default=None, type=int, help="Port (default: 8899).")
+def transcribe(audio_file, model, language, response_format, port):
+    """Transcribe an audio file via mlx-audio. Auto-starts server if needed.
+
+    Transcript goes to stdout; status to stderr. Pipe-friendly:
+        turbo transcribe meeting.m4a | pi -p "summarize this"
+    """
+    import sys
+    err = Console(stderr=True)
+
+    defaults = get_defaults()
+    audio_defaults = defaults.get("mlx-audio", {})
+    port = port or audio_defaults.get("port") or 8900
+
+    # Resolve the model to use for the API call.
+    if model:
+        m = resolve_model(model)
+    else:
+        stamped = _get_running_model(port)
+        m = stamped if stamped and stamped.get("backend") == "mlx-audio" else resolve_model("parakeet-v3")
+
+    # Guard: if something is already running on this port but it's not an
+    # mlx-audio server, refuse rather than POST to the wrong process.
+    running = _get_running_model(port)
+    if running and running.get("backend") not in ("mlx-audio", "unknown"):
+        err.print(
+            f"[red]Port {port} is serving {running.get('name')} ({running.get('backend')}).[/red] "
+            f"Pick a free port with -p, or stop that server first."
+        )
+        raise SystemExit(1)
+
+    if m.get("backend") != "mlx-audio":
+        err.print(f"[red]{m.get('name','?')} is not an mlx-audio model.[/red] Pick an ASR alias with -m.")
+        raise SystemExit(1)
+
+    model_id = _get_provider_for(m).get_model_id(m)
+    path = Path(audio_file)
+
+    # mlx-audio's server crashes writing an intermediate tmp file when the
+    # input extension isn't a format its audio writer supports (e.g. .m4a).
+    # Pre-convert anything non-wav to wav via ffmpeg so the server's
+    # extension-based output selection succeeds.
+    if path.suffix.lower() != ".wav":
+        import shutil as _sh
+        if not _sh.which("ffmpeg"):
+            err.print("[red]ffmpeg required to transcribe non-wav files.[/red] brew install ffmpeg")
+            raise SystemExit(1)
+        err.print(f"[dim]converting {path.suffix} → wav via ffmpeg…[/dim]")
+        wav_tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+        wav_tmp.close()
+        try:
+            subprocess.run(
+                ["ffmpeg", "-y", "-loglevel", "error", "-i", str(path),
+                 "-ac", "1", "-ar", "16000", wav_tmp.name],
+                check=True,
+            )
+            file_bytes = Path(wav_tmp.name).read_bytes()
+            send_name = path.with_suffix(".wav").name
+            mime = "audio/wav"
+        finally:
+            os.unlink(wav_tmp.name)
+    else:
+        file_bytes = path.read_bytes()
+        send_name = path.name
+        mime = "audio/wav"
+
+    def _do(_m, p):
+        fields = {"model": model_id, "response_format": response_format}
+        if language:
+            fields["language"] = language
+        body, ctype = _build_multipart(fields, "file", send_name, mime, file_bytes)
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{p}/v1/audio/transcriptions",
+            data=body,
+            headers={"Content-Type": ctype},
+        )
+        err.print(f"[dim]POST /v1/audio/transcriptions  model={model_id}  size={len(file_bytes)/1e6:.1f}MB[/dim]")
+        try:
+            with urllib.request.urlopen(req, timeout=600) as resp:
+                raw = resp.read().decode("utf-8", errors="replace")
+        except urllib.error.HTTPError as e:
+            err.print(f"[red]HTTP {e.code}:[/red] {e.read().decode('utf-8', 'replace')}")
+            raise SystemExit(1) from None
+        # mlx-audio's server ignores response_format and always returns JSON
+        # {"text": "..."}. For --format text, unwrap that on the client side
+        # so transcripts pipe cleanly into LLM summarizers etc.
+        if response_format == "text":
+            try:
+                sys.stdout.write(json.loads(raw).get("text", raw).rstrip() + "\n")
+            except json.JSONDecodeError:
+                sys.stdout.write(raw.rstrip() + "\n")
+        else:
+            sys.stdout.write(raw)
+        sys.stdout.flush()
+        return 0
+
+    _run_with_server(m, port, _do)
 
 
 # ---------------------------------------------------------------------------
@@ -667,6 +828,33 @@ def _dispatch_harness(
     if backend:
         m = {**m, "backend": backend}
     _run_harness(harness_name, m, port, prompt=prompt)
+
+
+def _make_script_command(name: str, config: dict):
+    """Create a click command for a TOML-defined [scripts.*] entry.
+
+    The `command` field is run via /bin/sh -c with positional args. Inside the
+    command string, $0 = script name, $1..$N = forwarded CLI args. Always quote
+    positional refs in scripts to handle paths with spaces.
+    """
+    description = config.get("description", f"Run script: {name}")
+    usage = config.get("usage", "[ARGS]...")
+    command = config.get("command", "")
+
+    @click.command(
+        name=name,
+        help=f"{description}\n\nUsage: turbo {name} {usage}",
+        context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+    )
+    @click.argument("args", nargs=-1, type=click.UNPROCESSED)
+    def cmd(args):
+        if not command:
+            console.print(f"[red]Script '{name}' has no `command` configured.[/red]")
+            raise SystemExit(2)
+        rc = subprocess.run(["/bin/sh", "-c", command, name, *args]).returncode
+        raise SystemExit(rc)
+
+    return cmd
 
 
 def _make_harness_command(harness_name: str):

@@ -50,3 +50,25 @@ them as plain text.
 
 **Fix:** Added `reasoning_parser = "qwen3"` to the model config. vllm-mlx passes `--reasoning-parser qwen3`
 which extracts thinking into the `reasoning_content` field that OpenCode hides by default.
+
+## mlx-audio (ASR backend)
+
+### Repo names with dots crash model category lookup
+
+**Status:** Patched locally (May 2026). Not reported upstream.
+
+`mlx-community/parakeet-tdt-0.6b-v3` contains `0.6b`. `get_model_name_parts()` in
+`mlx_audio/utils.py` derives candidates like `parakeet_tdt_0.6b`; `is_valid_module_name`
+doesn't reject the `.`, so `importlib.util.find_spec("mlx_audio.tts.models.parakeet_tdt_0.6b")`
+treats the dot as a package separator, fails on the non-existent `parakeet_tdt_0` parent, and
+raises `ModuleNotFoundError` — aborting category resolution before the valid `parakeet`
+candidate is ever tried. Server returns an empty chunked response; clients see
+`http.client.IncompleteRead`.
+
+**Local patch** applied to:
+`~/.local/share/uv/tools/mlx-audio/lib/python3.12/site-packages/mlx_audio/utils.py`
+in `is_valid_module_name()` — reject any name containing `.`. Patch is overwritten by
+`uv tool upgrade mlx-audio`; reapply after upgrades.
+
+**Re-check** after each `mlx-audio` upgrade — drop the patch if upstream filters dots in
+`is_valid_module_name` or wraps `find_spec` in try/except.
