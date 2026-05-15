@@ -943,6 +943,57 @@ def activities_list(as_json):
     console.print(table)
 
 
+# ---------------------------------------------------------------------------
+# HUD status helpers (for scripts to announce activity)
+# ---------------------------------------------------------------------------
+
+@cli.group(name="hud")
+def hud_grp():
+    """HUD-related helpers (used by scripts to set/clear status entries)."""
+
+
+@hud_grp.group(name="status")
+def hud_status_grp():
+    """Set / update / clear HUD activity entries."""
+
+
+@hud_status_grp.command(name="set")
+@click.option("--label", required=True, help="User-visible label.")
+@click.option("--icon", default=None, help="SF Symbol name (HUD uses if recognized).")
+@click.option("--color", default=None, help="Color hint, e.g. red, blue, green.")
+@click.option("--phase", default=None, help="Optional phase string.")
+def hud_status_set(label, icon, color, phase):
+    """Announce a new activity. Prints the id to stdout."""
+    from turbollm import activity as _act
+
+    aid = _act.start_activity(
+        kind="external", label=label, icon=icon, color=color, phase=phase,
+    )
+    click.echo(aid)
+
+
+@hud_status_grp.command(name="update")
+@click.argument("activity_id")
+@click.option("--label", default=None)
+@click.option("--icon", default=None)
+@click.option("--color", default=None)
+@click.option("--phase", default=None)
+def hud_status_update(activity_id, label, icon, color, phase):
+    """Merge new field values into an existing activity entry."""
+    from turbollm import activity as _act
+
+    _act.update_activity(activity_id, label=label, icon=icon, color=color, phase=phase)
+
+
+@hud_status_grp.command(name="clear")
+@click.argument("activity_id")
+def hud_status_clear(activity_id):
+    """Remove an activity entry."""
+    from turbollm import activity as _act
+
+    _act.clear_activity(activity_id)
+
+
 @cli.command(name="run")
 @click.argument("model", required=False)
 @click.option("--harness", "-H", required=True, help="Harness to launch (e.g. goose, hermes)")
