@@ -50,4 +50,43 @@ final class MenuBuilderTests: XCTestCase {
         let subTitles = wfItem!.submenu!.items.map(\.title)
         XCTAssertTrue(subTitles.contains("title: My title"))
     }
+
+    func test_workflow_with_params_has_run_item_in_submenu() {
+        let state = AppState()
+        state.workflows = [
+            Workflow(name: "wf", description: nil, command: "echo", script: nil, args: nil, env: nil,
+                     params: [
+                        WorkflowParam(name: "title", type: "string", mode: nil,
+                                      defaultValue: nil, defaultEnv: nil, auto: nil,
+                                      options: nil, extensions: nil)
+                     ])
+        ]
+        let menu = MenuBuilder.build(state: state, settings: Settings(suiteName: "t.\(UUID().uuidString)"),
+                                     onRunWorkflow: { _ in }, onEditParam: { _, _ in })
+        let wfItem = menu.items.first(where: { $0.title == "wf" })
+        let runItem = wfItem?.submenu?.items.first
+        XCTAssertEqual(runItem?.title, "▶ Run wf",
+                       "Submenu must lead with a Run item — top-level click can't fire its action when a submenu is attached.")
+        XCTAssertNotNil(runItem?.action,
+                        "Run item must have an action wired.")
+    }
+
+    func test_acquired_param_types_render_disabled_with_plan3_hint() {
+        let state = AppState()
+        state.workflows = [
+            Workflow(name: "rec", description: nil, command: nil, script: "s", args: nil, env: nil,
+                     params: [
+                        WorkflowParam(name: "audio", type: "audio-recording", mode: "primary",
+                                      defaultValue: nil, defaultEnv: nil, auto: nil,
+                                      options: nil, extensions: nil)
+                     ])
+        ]
+        let menu = MenuBuilder.build(state: state, settings: Settings(suiteName: "t.\(UUID().uuidString)"),
+                                     onRunWorkflow: { _ in }, onEditParam: { _, _ in })
+        let wfItem = menu.items.first(where: { $0.title == "rec" })
+        let audioItem = wfItem?.submenu?.items.first(where: { $0.title.hasPrefix("audio:") })
+        XCTAssertNotNil(audioItem)
+        XCTAssertFalse(audioItem!.isEnabled, "Acquired param types must render disabled until Plan 3.")
+        XCTAssertTrue(audioItem!.title.contains("Plan 3"), "Acquired param label must explain why it's not editable.")
+    }
 }

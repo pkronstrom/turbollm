@@ -35,20 +35,38 @@ enum MenuBuilder {
             for wf in state.workflows {
                 let item = NSMenuItem(title: wf.name, action: nil, keyEquivalent: "")
                 item.toolTip = wf.description
-                // Stash the workflow in `representedObject`; action handler reads it.
                 item.representedObject = wf
                 item.target = MenuTarget.shared
                 item.action = #selector(MenuTarget.runWorkflow(_:))
 
                 if !wf.params.isEmpty {
+                    // AppKit ignores `action` on items that also have a submenu — clicking
+                    // such an item only opens the submenu. So the top-level click can't
+                    // run the workflow; we prepend a "▶ Run" item inside the submenu.
                     let submenu = NSMenu()
+                    let runItem = NSMenuItem(title: "▶ Run \(wf.name)", action: #selector(MenuTarget.runWorkflow(_:)), keyEquivalent: "")
+                    runItem.representedObject = wf
+                    runItem.target = MenuTarget.shared
+                    submenu.addItem(runItem)
+                    submenu.addItem(NSMenuItem.separator())
+
                     for p in wf.params {
                         let current = settings.paramValue(workflow: wf.name, param: p.name) ?? p.defaultValue ?? ""
-                        let label = "\(p.name): \(current.isEmpty ? "(unset)" : current)"
+                        let isAcquired = ["audio-recording", "screenshot-manual", "command"].contains(p.type)
+                        let label: String
+                        if isAcquired {
+                            label = "\(p.name): (acquired \(p.type) — Plan 3)"
+                        } else {
+                            label = "\(p.name): \(current.isEmpty ? "(unset)" : current)"
+                        }
                         let subItem = NSMenuItem(title: label, action: nil, keyEquivalent: "")
-                        subItem.representedObject = WorkflowParamBinding(workflow: wf, param: p)
-                        subItem.target = MenuTarget.shared
-                        subItem.action = #selector(MenuTarget.editParam(_:))
+                        if isAcquired {
+                            subItem.isEnabled = false
+                        } else {
+                            subItem.representedObject = WorkflowParamBinding(workflow: wf, param: p)
+                            subItem.target = MenuTarget.shared
+                            subItem.action = #selector(MenuTarget.editParam(_:))
+                        }
                         submenu.addItem(subItem)
                     }
                     item.submenu = submenu

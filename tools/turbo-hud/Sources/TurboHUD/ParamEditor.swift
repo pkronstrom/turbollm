@@ -38,7 +38,11 @@ enum ParamEditor {
         popover.behavior = .transient
         popover.delegate = PopoverLifetimeDelegate.shared
         currentPopover = popover
-        popover.show(relativeTo: anchor.bounds, of: anchor, preferredEdge: .maxX)
+        // Defer to next runloop tick so the closing menu doesn't dismiss the
+        // popover before the user sees it.
+        DispatchQueue.main.async {
+            popover.show(relativeTo: anchor.bounds, of: anchor, preferredEdge: .maxX)
+        }
     }
 
     private static func showEnum(anchor: NSView, current: String, options: [String],
@@ -52,7 +56,9 @@ enum ParamEditor {
         popover.behavior = .transient
         popover.delegate = PopoverLifetimeDelegate.shared
         currentPopover = popover
-        popover.show(relativeTo: anchor.bounds, of: anchor, preferredEdge: .maxX)
+        DispatchQueue.main.async {
+            popover.show(relativeTo: anchor.bounds, of: anchor, preferredEdge: .maxX)
+        }
     }
 
     private static func showFile(extensions: [String]?, current: String,
