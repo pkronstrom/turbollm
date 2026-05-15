@@ -910,6 +910,39 @@ def workflows_list(as_json):
     console.print(table)
 
 
+# ---------------------------------------------------------------------------
+# Activities (HUD state visibility)
+# ---------------------------------------------------------------------------
+
+@cli.group(name="activities")
+def activities_grp():
+    """Inspect running turbollm activities (cross-process via ~/.turbollm/state/)."""
+
+
+@activities_grp.command(name="list")
+@click.option("--json", "as_json", is_flag=True, help="Emit JSON for machine consumption.")
+def activities_list(as_json):
+    """List currently-running activities."""
+    from turbollm import activity as _act
+
+    items = _act.list_activities()
+    if as_json:
+        click.echo(json.dumps(items, indent=2))
+        return
+
+    if not items:
+        console.print("[dim]No activities running.[/dim]")
+        return
+    table = Table(show_header=True, title="Activities", title_justify="left")
+    table.add_column("Kind", style="bold")
+    table.add_column("Label")
+    table.add_column("PID")
+    table.add_column("Started")
+    for it in items:
+        table.add_row(it["kind"], it["label"], str(it["owner_pid"]), it["started_at"])
+    console.print(table)
+
+
 @cli.command(name="run")
 @click.argument("model", required=False)
 @click.option("--harness", "-H", required=True, help="Harness to launch (e.g. goose, hermes)")

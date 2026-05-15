@@ -41,3 +41,28 @@ def test_workflows_list_json_empty_when_no_workflows():
         result = runner.invoke(turbo_cli.cli, ["workflows", "list", "--json"])
     assert result.exit_code == 0
     assert json.loads(result.output) == []
+
+
+def test_activities_list_json_returns_current_entries(monkeypatch, tmp_path):
+    from turbollm import activity
+
+    monkeypatch.setattr(activity, "STATE_DIR", tmp_path / "state")
+    activity.start_activity(kind="workflow", label="A")
+    activity.start_activity(kind="server", label="B")
+
+    runner = CliRunner()
+    result = runner.invoke(turbo_cli.cli, ["activities", "list", "--json"])
+    assert result.exit_code == 0, result.output
+    data = json.loads(result.output)
+    labels = {it["label"] for it in data}
+    assert labels == {"A", "B"}
+
+
+def test_activities_list_json_empty_when_no_state(monkeypatch, tmp_path):
+    from turbollm import activity
+
+    monkeypatch.setattr(activity, "STATE_DIR", tmp_path / "state")
+    runner = CliRunner()
+    result = runner.invoke(turbo_cli.cli, ["activities", "list", "--json"])
+    assert result.exit_code == 0
+    assert json.loads(result.output) == []
