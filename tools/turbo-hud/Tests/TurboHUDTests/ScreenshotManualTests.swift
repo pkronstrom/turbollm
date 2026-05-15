@@ -22,23 +22,15 @@ final class ScreenshotManualTests: XCTestCase {
         acquirer.trigger(filePath: "/tmp/x.png")
         acquirer.trigger(filePath: "/tmp/x.png")
 
-        // acquire() suspends; we cancel from a concurrent task to resolve it.
-        let result = try await withThrowingTaskGroup(of: AcquirerResult.self) { group in
-            group.addTask { try await acquirer.acquire() }
-            group.addTask {
-                // Small yield so acquire() has time to set up its continuation.
-                try await Task.sleep(nanoseconds: 10_000_000)
-                acquirer.cancel()
-                // This task never produces a result; the acquire task does.
-                throw CancellationError()
-            }
-            // Collect the first non-error result.
-            for try await result in group {
-                group.cancelAll()
-                return result
-            }
-            throw AcquirerError.emptyOutput
+        // Cancel from a detached task so its lifetime cannot race the acquire
+        // task as siblings in a throwing group (where the cancellation throw
+        // could propagate before the acquire result is yielded).
+        Task.detached {
+            try? await Task.sleep(nanoseconds: 10_000_000)
+            acquirer.cancel()
         }
+
+        let result = try await acquirer.acquire()
 
         XCTAssertEqual(result.paramName, "screenshots")
         XCTAssertEqual(result.value, "/tmp/x.png\n/tmp/x.png\n/tmp/x.png")
@@ -51,19 +43,12 @@ final class ScreenshotManualTests: XCTestCase {
             outputDir: FileManager.default.temporaryDirectory
         )
 
-        let result = try await withThrowingTaskGroup(of: AcquirerResult.self) { group in
-            group.addTask { try await acquirer.acquire() }
-            group.addTask {
-                try await Task.sleep(nanoseconds: 10_000_000)
-                acquirer.cancel()
-                throw CancellationError()
-            }
-            for try await result in group {
-                group.cancelAll()
-                return result
-            }
-            throw AcquirerError.emptyOutput
+        Task.detached {
+            try? await Task.sleep(nanoseconds: 10_000_000)
+            acquirer.cancel()
         }
+
+        let result = try await acquirer.acquire()
 
         XCTAssertEqual(result.value, "")
     }
