@@ -21,6 +21,11 @@ class App: NSObject, NSApplicationDelegate {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         iconController = StatusIconController(statusItem: statusItem, state: state)
 
+        // Wire SessionController so it can update AppState during sessions.
+        Task { @MainActor in
+            SessionController.shared.appState = self.state
+        }
+
         let stateDir = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".turbollm").appendingPathComponent("state")
         watcher = HudStateWatcher(stateDir: stateDir)
@@ -63,12 +68,24 @@ class App: NSObject, NSApplicationDelegate {
     }
 
     func runWorkflow(_ wf: Workflow) {
-        Task.detached { [weak self] in
-            guard let settings = self?.settings else { return }
-            do {
-                try WorkflowRunner.run(wf, settings: settings)
-            } catch {
-                NSLog("workflow run failed: \(error)")
+        let acquiredTypes: Set<String> = ["audio-recording", "screenshot-manual", "command"]
+        let hasAcquiredParam = wf.params.contains { acquiredTypes.contains($0.type) }
+        if hasAcquiredParam {
+            // Route through SessionController — it manages acquirers, session state,
+            // and spawns the workflow command after all params are collected.
+            let settings = self.settings
+            Task { @MainActor in
+                await SessionController.shared.start(workflow: wf, settings: settings)
+            }
+        } else {
+            // Configured-only workflow: existing Plan 2 path.
+            Task.detached { [weak self] in
+                guard let settings = self?.settings else { return }
+                do {
+                    try WorkflowRunner.run(wf, settings: settings)
+                } catch {
+                    NSLog("workflow run failed: \(error)")
+                }
             }
         }
     }
