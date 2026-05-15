@@ -5,7 +5,7 @@ import Observation
 /// after the onChange fires once, observation is gone. To get continuous
 /// updates we must re-call the tracker inside onChange. This is the
 /// canonical pattern for Swift 5.9+ @Observable.
-final class StatusIconController {
+final class StatusIconController: @unchecked Sendable {
     private let statusItem: NSStatusItem
     private let state: AppState
 

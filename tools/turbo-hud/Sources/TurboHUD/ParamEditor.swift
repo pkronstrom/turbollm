@@ -1,4 +1,5 @@
 import AppKit
+import UniformTypeIdentifiers
 
 enum ParamEditor {
     /// Retains the active popover so ARC does not release it before the user commits.
@@ -60,7 +61,9 @@ enum ParamEditor {
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false
-        if let exts = extensions { panel.allowedFileTypes = exts }
+        if let exts = extensions {
+            panel.allowedContentTypes = exts.compactMap { UTType(filenameExtension: $0) }
+        }
         if !current.isEmpty { panel.directoryURL = URL(fileURLWithPath: current).deletingLastPathComponent() }
         if panel.runModal() == .OK, let url = panel.url {
             onCommit(url.path)
