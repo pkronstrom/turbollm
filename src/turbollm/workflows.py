@@ -94,3 +94,40 @@ def expand_template(template: str, params: dict[str, str]) -> str:
         raise WorkflowError(f"undefined param '{token}' in template")
 
     return _TEMPLATE_RE.sub(_replace, template)
+
+
+def resolve_params(params: list[dict], overrides: dict[str, str]) -> dict[str, str]:
+    """Resolve each param's value from CLI overrides → default_env → default → auto.
+
+    Acquired params (audio-recording, screenshot-manual, command) must be
+    provided in `overrides` from the CLI — the CLI cannot perform acquisition.
+    Configured params (string, text, enum, file, directory) without any source
+    resolve to the empty string.
+    """
+    resolved: dict[str, str] = {}
+    for p in params:
+        name = p["name"]
+        ptype = p.get("type")
+
+        if name in overrides:
+            resolved[name] = overrides[name]
+            continue
+
+        if ptype in ACQUIRED_TYPES:
+            raise WorkflowError(
+                f"acquired param '{name}' (type={ptype}) requires --param {name}=<value> "
+                "when running from the CLI; the HUD performs acquisition natively"
+            )
+
+        if "auto" in p:
+            resolved[name] = expand_template(p["auto"], params=resolved)
+            continue
+
+        env_var = p.get("default_env")
+        if env_var and _os.environ.get(env_var):
+            resolved[name] = _os.environ[env_var]
+            continue
+
+        resolved[name] = p.get("default", "")
+
+    return resolved

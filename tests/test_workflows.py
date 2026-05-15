@@ -91,3 +91,52 @@ def test_expand_template_handles_multiple_tokens():
         params={"audio": "/tmp/a.wav", "title": "Meeting"},
     )
     assert out == "audio=/tmp/a.wav title=Meeting"
+
+
+def test_resolve_params_uses_default_when_no_override():
+    params = [{"name": "title", "type": "string", "default": "untitled"}]
+    out = workflows.resolve_params(params, overrides={})
+    assert out == {"title": "untitled"}
+
+
+def test_resolve_params_override_beats_default():
+    params = [{"name": "title", "type": "string", "default": "untitled"}]
+    out = workflows.resolve_params(params, overrides={"title": "From CLI"})
+    assert out == {"title": "From CLI"}
+
+
+def test_resolve_params_default_env(monkeypatch):
+    monkeypatch.setenv("OBSIDIAN_VAULT", "/Users/me/Vault")
+    params = [{"name": "vault", "type": "directory", "default_env": "OBSIDIAN_VAULT"}]
+    out = workflows.resolve_params(params, overrides={})
+    assert out == {"vault": "/Users/me/Vault"}
+
+
+def test_resolve_params_auto_template():
+    params = [{"name": "title", "type": "string", "auto": "{{date:%Y}}"}]
+    out = workflows.resolve_params(params, overrides={})
+    assert out["title"] == _dt.datetime.now().strftime("%Y")
+
+
+def test_resolve_params_override_beats_auto():
+    params = [{"name": "title", "type": "string", "auto": "{{date:%Y}}"}]
+    out = workflows.resolve_params(params, overrides={"title": "Manual"})
+    assert out == {"title": "Manual"}
+
+
+def test_resolve_params_acquired_without_override_raises():
+    params = [{"name": "audio", "type": "audio-recording", "mode": "primary"}]
+    with pytest.raises(workflows.WorkflowError, match="acquired param 'audio'"):
+        workflows.resolve_params(params, overrides={})
+
+
+def test_resolve_params_acquired_accepts_override():
+    params = [{"name": "audio", "type": "audio-recording", "mode": "primary"}]
+    out = workflows.resolve_params(params, overrides={"audio": "/tmp/file.wav"})
+    assert out == {"audio": "/tmp/file.wav"}
+
+
+def test_resolve_params_empty_string_when_no_default():
+    params = [{"name": "title", "type": "string"}]
+    out = workflows.resolve_params(params, overrides={})
+    assert out == {"title": ""}
