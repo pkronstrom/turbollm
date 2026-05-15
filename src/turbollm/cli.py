@@ -175,11 +175,11 @@ def pull(model):
 @cli.command(name="ls")
 @click.option("--available", "-a", is_flag=True, help="Show all models in registry")
 def ls_cmd(available):
-    """List models."""
+    """List models, backends, and harnesses."""
     reg = load_registry()
     models = reg.get("models", {})
 
-    table = Table(show_header=True)
+    table = Table(show_header=True, title="Models", title_justify="left")
     table.add_column("Alias", style="bold")
     table.add_column("Backend")
     table.add_column("Size", justify="right")
@@ -193,20 +193,64 @@ def ls_cmd(available):
             status = "[green]downloaded[/green]" if provider.is_downloaded(m) else "[dim]not pulled[/dim]"
             table.add_row(alias, backend, f"{m.get('size_gb', '?')}GB", status, m["hf_repo"])
         console.print(table)
+    else:
+        found = False
+        for alias, m in models.items():
+            provider = _get_provider_for(m)
+            if provider.is_downloaded(m):
+                backend = m.get("backend", "vllm-mlx")
+                table.add_row(alias, backend, f"{m.get('size_gb', '?')}GB", "[green]downloaded[/green]", m["hf_repo"])
+                found = True
+        if found:
+            console.print(table)
+        else:
+            console.print("No models downloaded. Run [bold]turbo pull <model>[/bold] to get started.")
+
+    _print_backends_table()
+    _print_harnesses_table(reg)
+
+
+def _print_backends_table() -> None:
+    from turbollm.providers import get_provider
+
+    backends = ["vllm-mlx", "gguf", "omlx", "mlx-vlm"]
+    table = Table(show_header=True, title="\nBackends", title_justify="left")
+    table.add_column("Backend", style="bold")
+    table.add_column("Binary")
+    table.add_column("Status")
+    table.add_column("Install", style="dim")
+
+    for key in backends:
+        provider = get_provider(key)
+        available = provider.is_available()
+        status = "[green]available[/green]" if available else "[dim]missing[/dim]"
+        install = "" if available else provider.install_hint
+        table.add_row(key, provider.name, status, install)
+    console.print(table)
+
+
+def _print_harnesses_table(reg: dict) -> None:
+    from turbollm.harnesses import get_harness
+
+    harnesses = reg.get("harnesses", {})
+    table = Table(show_header=True, title="\nHarnesses", title_justify="left")
+    table.add_column("Name", style="bold")
+    table.add_column("Binary")
+    table.add_column("Status")
+    table.add_column("Install", style="dim")
+
+    if not harnesses:
+        console.print("[dim]No harnesses configured.[/dim]")
         return
 
-    found = False
-    for alias, m in models.items():
-        provider = _get_provider_for(m)
-        if provider.is_downloaded(m):
-            backend = m.get("backend", "vllm-mlx")
-            table.add_row(alias, backend, f"{m.get('size_gb', '?')}GB", "[green]downloaded[/green]", m["hf_repo"])
-            found = True
-
-    if found:
-        console.print(table)
-    else:
-        console.print("No models downloaded. Run [bold]turbo pull <model>[/bold] to get started.")
+    for name, config in harnesses.items():
+        harness = get_harness(name, config)
+        binary = config.get("binary", name)
+        available = harness.is_available()
+        status = "[green]available[/green]" if available else "[dim]missing[/dim]"
+        install = "" if available else config.get("install", "")
+        table.add_row(name, binary, status, install)
+    console.print(table)
 
 
 @cli.command()
