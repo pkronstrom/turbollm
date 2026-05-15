@@ -33,6 +33,9 @@ final class HudStateWatcher {
             let pidDead = !Self.isPidAlive(activity.ownerPid)
             let tooOld = now.timeIntervalSince(activity.startedAt) > Self.staleAgeSeconds
             if pidDead || tooOld {
+                for childPid in activity.children {
+                    kill(pid_t(childPid), SIGTERM)
+                }
                 try? fm.removeItem(at: url)
                 continue
             }
