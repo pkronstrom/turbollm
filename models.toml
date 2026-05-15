@@ -365,3 +365,40 @@ EOF
 
 echo "Wrote: $out" >&2
 """
+
+
+# --- Workflows ----------------------------------------------------------------
+# HUD-renderable named actions with typed params. Surfaced via
+# `turbo workflows list --json` and runnable via `turbo workflows run <name>`.
+# See internal HUD design spec for full schema.
+
+[workflows.transcribe-file]
+description = "Transcribe an audio file to stdout"
+command = 'turbo transcribe "{{file}}"'
+
+[[workflows.transcribe-file.params]]
+name = "file"
+type = "file"
+extensions = ["m4a", "wav", "mp3", "flac"]
+
+
+[workflows.record-to-obsidian]
+description = "Record audio, summarize, save to Obsidian (HUD-only: needs audio-recording acquirer)"
+script = "summarize-to-obsidian"
+args = ["{{audio}}", "{{title}}"]
+
+[[workflows.record-to-obsidian.params]]
+name = "audio"
+type = "audio-recording"
+mode = "primary"
+scope = "system+mic"
+
+[[workflows.record-to-obsidian.params]]
+name = "title"
+type = "string"
+auto = "{{date:%Y-%m-%d-%H%M}}"
+
+[[workflows.record-to-obsidian.params]]
+name = "vault"
+type = "directory"
+default_env = "OBSIDIAN_VAULT"
