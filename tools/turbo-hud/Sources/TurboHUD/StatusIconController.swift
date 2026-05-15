@@ -28,6 +28,20 @@ final class StatusIconController: @unchecked Sendable {
     }
 
     func update() {
+        // Active recording session takes priority over activity count.
+        if let session = state.activeSession {
+            let hasAudio = session.workflow.params.contains { $0.type == "audio-recording" }
+            if hasAudio {
+                statusItem.button?.title = "🔴"
+                statusItem.button?.toolTip = "Recording \(session.workflow.name) — \(elapsedString(since: session.startedAt))"
+                return
+            } else {
+                statusItem.button?.title = "🟢"
+                statusItem.button?.toolTip = "Session active: \(session.workflow.name)"
+                return
+            }
+        }
+
         let count = state.activities.count
         if count == 0 {
             statusItem.button?.title = "🐢"
@@ -39,5 +53,12 @@ final class StatusIconController: @unchecked Sendable {
             statusItem.button?.title = "🟢\(count)"
             statusItem.button?.toolTip = state.activities.map(\.label).joined(separator: " · ")
         }
+    }
+
+    private func elapsedString(since date: Date) -> String {
+        let secs = Int(-date.timeIntervalSinceNow)
+        let m = secs / 60
+        let s = secs % 60
+        return String(format: "%d:%02d", m, s)
     }
 }
