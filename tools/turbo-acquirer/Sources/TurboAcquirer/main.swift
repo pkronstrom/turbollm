@@ -28,8 +28,10 @@ struct App {
             return handleCommand(argv: Array(argv.dropFirst(2)))
         case "permissions-state":
             return handlePermissionsState(argv: Array(argv.dropFirst(2)))
+        case "record-screen":
+            return handleRecordScreen(argv: Array(argv.dropFirst(2)))
         default:
-            return "unknown subcommand: \(subcommand)\nUsage: turbo-acquirer <subcommand> [options]\nSubcommands: record-audio, screenshot, command, permissions-state"
+            return "unknown subcommand: \(subcommand)\nUsage: turbo-acquirer <subcommand> [options]\nSubcommands: record-audio, screenshot, command, permissions-state, record-screen"
         }
     }
 
@@ -85,5 +87,21 @@ struct App {
 
     static func handlePermissionsState(argv: [String]) -> String {
         PermissionsStateCommand.run()
+    }
+
+    static func handleRecordScreen(argv: [String]) -> String {
+        guard let args = RecordScreen.parseArgs(argv: argv) else {
+            fputs("error: --output-dir <dir> is required\n", stderr)
+            exit(1)
+        }
+        let parentId = ProcessInfo.processInfo.environment["TURBO_WORKFLOW_ID"]
+        return RecordScreen.run(
+            outputDir: args.outputDir,
+            scope: args.scope,
+            threshold: args.threshold,
+            minIntervalMs: args.minIntervalMs,
+            maxKeyframes: args.maxKeyframes,
+            parentId: parentId
+        )
     }
 }
