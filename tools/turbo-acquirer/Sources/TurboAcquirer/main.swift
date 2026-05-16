@@ -1,6 +1,9 @@
 import Foundation
 
-@main
+// Entry point — call App.main() from top-level so @main is not needed
+// (Swift requires @main to be in a non-main.swift file for executable targets).
+App.main()
+
 struct App {
     static func main() {
         let argv = CommandLine.arguments
