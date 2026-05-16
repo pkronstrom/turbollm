@@ -118,6 +118,54 @@ flash_attention = true
 
 Create `src/turbollm/providers/my_backend.py` implementing the `Provider` protocol, register it in `providers/__init__.py`.
 
+## TurboHUD (macOS menu-bar companion)
+
+`turbo sidecar` builds and launches **TurboHUD** — a menu-bar app that shows
+active workflow and server status. Phase 1 introduced a two-binary architecture:
+
+| Binary | Role |
+|--------|------|
+| `TurboHUD` | Menu-bar app. Renders workflow list, shows activity, triggers runs. |
+| `turbo-acquirer` | Acquires media: records audio, takes screenshots, runs shell commands. Holds macOS TCC permissions (Microphone, Screen Recording). |
+
+`turbo sidecar` builds both binaries and symlinks them to `~/.local/bin/`.
+
+### Running workflows
+
+All workflows are available via a unified CLI entrypoint:
+
+```bash
+turbo workflows run record-to-obsidian     # headless or with HUD running
+turbo workflows run transcribe-file --param file=/path/to/audio.wav
+```
+
+The HUD menu Run button shells out to the same `turbo workflows run` command,
+so HUD and CLI produce identical results.
+
+### Configuring sticky workflow params
+
+Use `turbo workflows config` to pre-set params that the HUD or CLI would
+otherwise prompt for:
+
+```bash
+# Set the Obsidian vault path for record-to-obsidian:
+turbo workflows config record-to-obsidian vault=/Users/you/Documents/Obsidian
+
+# List all configured stickies for a workflow:
+turbo workflows config record-to-obsidian
+
+# Clear a sticky:
+turbo workflows config record-to-obsidian vault=
+```
+
+### TCC permissions after first install
+
+On first recording after deploying Phase 1, macOS will prompt you to grant
+**Microphone** (and **Screen Recording** if you use `system+mic` scope) to
+`turbo-acquirer`. This is expected and one-time — the binary identity changed
+from the HUD to the dedicated acquirer binary. You will see a notification
+from TurboHUD explaining this on first launch.
+
 ## Requirements
 
 - Apple Silicon Mac (M1+)

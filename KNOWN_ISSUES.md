@@ -2,6 +2,35 @@
 
 Issues that affect turbollm model serving. Re-check these periodically as upstream projects update.
 
+## TurboHUD — Phase 1 architecture notes
+
+### TCC re-grant required after Phase 1 upgrade
+
+**Status:** Expected, one-time.
+
+After upgrading to the two-binary architecture (Phase 1), macOS will prompt
+you to grant **Microphone** access to `turbo-acquirer` on the first recording
+run. If you use the `system+mic` scope, it also prompts for **Screen Recording**.
+This happens because TCC grants are bound to binary identity, and the recording
+code moved from `TurboHUD` to the new `turbo-acquirer` binary.
+
+TurboHUD posts a notification explaining this on first launch after Phase 1.
+The re-grant is a one-time event.
+
+**Workaround:** Grant the permissions when prompted. Use `turbo-acquirer
+permissions-state` to verify the current state.
+
+### `turbo sidecar` must be run before first use
+
+**Status:** By design.
+
+`turbo sidecar` builds both `TurboHUD` and `turbo-acquirer` and writes symlinks
+to `~/.local/bin/`. Without it, `turbo workflows run` cannot find `turbo-acquirer`
+and will fall back to direct TCC calls from the HUD (which may not have mic
+access). Always run `turbo sidecar` after cloning or updating the repo.
+
+
+
 ## Qwen3.6 35B-A3B on vllm-mlx
 
 ### Continuous batching produces garbage output
