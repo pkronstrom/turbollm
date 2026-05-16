@@ -21,17 +21,44 @@ enum ParamEditor {
     }
 
     /// Opens a transparent fullscreen NSWindow for region selection.
-    /// On mouse-drag commit, writes `<wf>.<param>.region` to `Settings.defaultSuiteName`.
-    /// On Esc, reverts scope to "full-display".
     ///
-    /// NOTE: The fullscreen NSWindow path is exercised in the T-31 manual smoke test,
-    /// not in unit tests (headless environment cannot display windows). App.swift wires
-    /// `MenuTarget.onOpenRegionPicker` to call this.
+    /// The user drags a rectangle on screen; on mouseUp the region is written to
+    /// `<wf>.<param>.region` in `Settings.defaultSuiteName` and the window closes.
+    /// Pressing Esc reverts `<wf>.<param>.scope` to the value it had before the picker
+    /// was opened (typically "full-display") and closes without writing a sticky.
+    ///
+    /// App.swift wires `MenuTarget.onOpenRegionPicker` to call this function.
+    /// The NSWindow display path is exercised manually in T-31; the controller's
+    /// commit/cancel logic is covered by unit tests.
     static func openRegionPicker(workflow: Workflow, param: WorkflowParam) {
-        // Production implementation: create a transparent, click-through NSWindow that spans
-        // all screens, track mouseDown/mouseDragged/mouseUp to compute the selection rect,
-        // then write the sticky. The stub is intentionally empty — the manual smoke path
-        // (T-31) exercises the live window code on a real display.
+        // Read the scope that was active before region was selected (for cancel revert).
+        let scopeKey = "\(workflow.name).\(param.name).scope"
+        let previousScope = UserDefaults(suiteName: Settings.defaultSuiteName)?
+            .string(forKey: scopeKey) ?? "full-display"
+
+        let controller = RegionPickerController(
+            workflow: workflow, param: param, previousScope: previousScope
+        )
+
+        guard let screen = NSScreen.main else { return }
+
+        let window = NSWindow(
+            contentRect: screen.frame,
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false,
+            screen: screen
+        )
+        window.backgroundColor = NSColor.black.withAlphaComponent(0.3)
+        window.isOpaque = false
+        window.hasShadow = false
+        window.level = .screenSaver
+        window.ignoresMouseEvents = false
+        window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+
+        let pickerView = RegionPickerView(controller: controller, owningWindow: window)
+        window.contentView = pickerView
+        window.makeKeyAndOrderFront(nil)
     }
 
     /// Open an editor for `param`. On commit, calls `onCommit(newValue)`.
@@ -191,5 +218,126 @@ final class EnumEditorVC: NSViewController {
 
     @objc func commit() {
         if let selected = popUp.selectedItem?.title { onCommit(selected) }
+    }
+}
+
+// MARK: - T-fix-3: RegionPickerController (logic, unit-testable)
+
+/// Controller for the region picker; handles commit and cancel without
+/// coupling to the NSWindow lifecycle. Injecting a custom `UserDefaults`
+/// makes the logic unit-testable without touching the production suite.
+final class RegionPickerController {
+    let workflow: Workflow
+    let param: WorkflowParam
+    /// Scope value to restore on cancel (e.g. "full-display").
+    let previousScope: String
+
+    private let defaults: UserDefaults
+
+    init(workflow: Workflow,
+         param: WorkflowParam,
+         previousScope: String,
+         defaults: UserDefaults = UserDefaults(suiteName: Settings.defaultSuiteName) ?? .standard) {
+        self.workflow = workflow
+        self.param = param
+        self.previousScope = previousScope
+        self.defaults = defaults
+    }
+
+    private var regionKey: String { "\(workflow.name).\(param.name).region" }
+    private var scopeKey:  String { "\(workflow.name).\(param.name).scope" }
+
+    /// Called when the user finishes dragging a rectangle.
+    /// Persists the region sticky and leaves scope=region in place.
+    func commit(rect: CGRect) {
+        let regionStr = ParamEditor.formatRegion(
+            x: Int(rect.origin.x), y: Int(rect.origin.y),
+            w: Int(rect.size.width), h: Int(rect.size.height)
+        )
+        defaults.set(regionStr, forKey: regionKey)
+    }
+
+    /// Called when the user presses Esc.
+    /// Reverts scope to the value it had before the picker was opened,
+    /// leaving no region sticky (so next time scope=region is chosen the
+    /// picker opens again).
+    func cancel() {
+        defaults.set(previousScope, forKey: scopeKey)
+    }
+}
+
+// MARK: - T-fix-3: RegionPickerView (NSWindow content; manual-smoke only)
+
+/// Transparent NSView that tracks a mouse drag and calls the controller
+/// on commit (mouseUp) or cancel (Esc key).
+///
+/// NOTE: This class creates a live NSWindow — it is exercised in the T-31
+/// manual smoke, not in unit tests.
+final class RegionPickerView: NSView {
+    private let controller: RegionPickerController
+    private weak var owningWindow: NSWindow?
+
+    private var dragStart: NSPoint = .zero
+    private var dragRect: NSRect = .zero
+
+    init(controller: RegionPickerController, owningWindow: NSWindow) {
+        self.controller = controller
+        self.owningWindow = owningWindow
+        super.init(frame: .zero)
+    }
+    required init?(coder: NSCoder) { fatalError() }
+
+    override var acceptsFirstResponder: Bool { true }
+
+    override func draw(_ dirtyRect: NSRect) {
+        // Semi-transparent overlay with a clear selection rectangle.
+        NSColor.black.withAlphaComponent(0.3).setFill()
+        bounds.fill()
+        if dragRect != .zero {
+            NSColor.white.withAlphaComponent(0.3).setFill()
+            dragRect.fill()
+            NSColor.white.setStroke()
+            let path = NSBezierPath(rect: dragRect)
+            path.lineWidth = 2
+            path.stroke()
+        }
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        dragStart = convert(event.locationInWindow, from: nil)
+        dragRect = .zero
+        needsDisplay = true
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        let current = convert(event.locationInWindow, from: nil)
+        dragRect = NSRect(
+            x: min(dragStart.x, current.x),
+            y: min(dragStart.y, current.y),
+            width: abs(current.x - dragStart.x),
+            height: abs(current.y - dragStart.y)
+        )
+        needsDisplay = true
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        guard dragRect.width > 4 && dragRect.height > 4 else {
+            // Tiny / accidental click — treat as cancel.
+            controller.cancel()
+            owningWindow?.close()
+            return
+        }
+        // Convert from view-flipped coordinates to screen coordinates.
+        let screenRect = window?.convertToScreen(convert(dragRect, to: nil)) ?? dragRect
+        controller.commit(rect: screenRect)
+        owningWindow?.close()
+    }
+
+    override func keyDown(with event: NSEvent) {
+        // Esc (keyCode 53) cancels the pick.
+        if event.keyCode == 53 {
+            controller.cancel()
+            owningWindow?.close()
+        }
     }
 }

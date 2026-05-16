@@ -525,6 +525,73 @@ final class MenuBuilderTests: XCTestCase {
                        "0,0,1920,1080")
     }
 
+    func test_regionPickerController_commit_persists_region_sticky() {
+        let suite = "t.\(UUID().uuidString)"
+        let ud = UserDefaults(suiteName: suite)!
+        let wf = Workflow(name: "rec", description: nil, command: nil, script: "s",
+                          args: nil, env: nil, params: [])
+        let param = WorkflowParam(name: "screen", type: "screen-recording", mode: nil,
+                                   defaultValue: nil, defaultEnv: nil, auto: nil,
+                                   options: nil, extensions: nil, scope: nil, command: nil)
+        let controller = RegionPickerController(
+            workflow: wf, param: param, previousScope: "full-display", defaults: ud
+        )
+        controller.commit(rect: CGRect(x: 10, y: 20, width: 300, height: 200))
+        XCTAssertEqual(ud.string(forKey: "rec.screen.region"), "10,20,300,200",
+                       "commit must write region as x,y,w,h to UserDefaults")
+    }
+
+    func test_regionPickerController_commit_does_not_change_scope() {
+        let suite = "t.\(UUID().uuidString)"
+        let ud = UserDefaults(suiteName: suite)!
+        ud.set("region", forKey: "rec.screen.scope")
+        let wf = Workflow(name: "rec", description: nil, command: nil, script: "s",
+                          args: nil, env: nil, params: [])
+        let param = WorkflowParam(name: "screen", type: "screen-recording", mode: nil,
+                                   defaultValue: nil, defaultEnv: nil, auto: nil,
+                                   options: nil, extensions: nil, scope: nil, command: nil)
+        let controller = RegionPickerController(
+            workflow: wf, param: param, previousScope: "full-display", defaults: ud
+        )
+        controller.commit(rect: CGRect(x: 0, y: 0, width: 400, height: 300))
+        // Scope must stay "region" — commit only writes the region sticky.
+        XCTAssertEqual(ud.string(forKey: "rec.screen.scope"), "region",
+                       "commit must not revert scope — scope stays region")
+    }
+
+    func test_regionPickerController_cancel_reverts_scope_to_previous() {
+        let suite = "t.\(UUID().uuidString)"
+        let ud = UserDefaults(suiteName: suite)!
+        ud.set("region", forKey: "rec.screen.scope")
+        let wf = Workflow(name: "rec", description: nil, command: nil, script: "s",
+                          args: nil, env: nil, params: [])
+        let param = WorkflowParam(name: "screen", type: "screen-recording", mode: nil,
+                                   defaultValue: nil, defaultEnv: nil, auto: nil,
+                                   options: nil, extensions: nil, scope: nil, command: nil)
+        let controller = RegionPickerController(
+            workflow: wf, param: param, previousScope: "full-display", defaults: ud
+        )
+        controller.cancel()
+        XCTAssertEqual(ud.string(forKey: "rec.screen.scope"), "full-display",
+                       "cancel must revert scope to previousScope")
+    }
+
+    func test_regionPickerController_cancel_does_not_write_region() {
+        let suite = "t.\(UUID().uuidString)"
+        let ud = UserDefaults(suiteName: suite)!
+        let wf = Workflow(name: "rec", description: nil, command: nil, script: "s",
+                          args: nil, env: nil, params: [])
+        let param = WorkflowParam(name: "screen", type: "screen-recording", mode: nil,
+                                   defaultValue: nil, defaultEnv: nil, auto: nil,
+                                   options: nil, extensions: nil, scope: nil, command: nil)
+        let controller = RegionPickerController(
+            workflow: wf, param: param, previousScope: "full-display", defaults: ud
+        )
+        controller.cancel()
+        XCTAssertNil(ud.string(forKey: "rec.screen.region"),
+                     "cancel must not write a region sticky")
+    }
+
     // MARK: - T-20: Stop targets primary acquirer
 
     func test_stop_targets_primary_acquirer_pid_when_multi_acquirer() {
