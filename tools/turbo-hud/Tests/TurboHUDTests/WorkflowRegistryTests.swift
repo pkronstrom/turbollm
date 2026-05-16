@@ -46,4 +46,34 @@ final class WorkflowRegistryTests: XCTestCase {
         XCTAssertEqual(workflows.count, 1)
         XCTAssertEqual(workflows[0].params.count, 0)
     }
+
+    func test_decode_scope_and_command_fields() throws {
+        let json = #"""
+        [
+          {
+            "name": "record-to-obsidian",
+            "description": "Record audio",
+            "command": "turbo record",
+            "params": [
+              {"name": "audio", "type": "audio-recording", "mode": "primary", "scope": "system+mic"}
+            ]
+          },
+          {
+            "name": "date-workflow",
+            "description": "Get date",
+            "command": "turbo run",
+            "params": [
+              {"name": "today", "type": "command", "mode": "background", "command": "date +%Y"}
+            ]
+          }
+        ]
+        """#
+        let data = json.data(using: .utf8)!
+        let workflows = try JSONDecoder.workflow().decode([Workflow].self, from: data)
+        XCTAssertEqual(workflows.count, 2)
+        XCTAssertEqual(workflows[0].params[0].scope, "system+mic")
+        XCTAssertNil(workflows[0].params[0].command)
+        XCTAssertEqual(workflows[1].params[0].command, "date +%Y")
+        XCTAssertNil(workflows[1].params[0].scope)
+    }
 }

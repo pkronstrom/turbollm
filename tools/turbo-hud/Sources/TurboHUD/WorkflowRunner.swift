@@ -1,16 +1,14 @@
 import Foundation
 
-enum WorkflowRunnerError: Error { case acquiredParamMissing(String) }
-
 enum WorkflowRunner {
-    /// Resolve param values: sticky → auto → default_env → default → "".
+    /// Resolve configured param values: sticky → auto → default_env → default → "".
+    /// Acquired params (audio-recording, screenshot-manual, command) are skipped —
+    /// they are resolved by SessionController and merged in before invocation.
     static func resolveParams(_ workflow: Workflow, settings: Settings) throws -> [String: String] {
         var resolved: [String: String] = [:]
         for p in workflow.params {
-            // Acquired param types are Plan 3 territory; the HUD doesn't render them yet.
-            if ["audio-recording", "screenshot-manual", "command"].contains(p.type) {
-                throw WorkflowRunnerError.acquiredParamMissing(p.name)
-            }
+            // Acquired params are handled by SessionController; skip here.
+            if ["audio-recording", "screenshot-manual", "command"].contains(p.type) { continue }
             if let sticky = settings.paramValue(workflow: workflow.name, param: p.name), !sticky.isEmpty {
                 resolved[p.name] = sticky
                 continue

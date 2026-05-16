@@ -51,9 +51,11 @@ struct WorkflowParam: Codable, Equatable {
     let auto: String?
     let options: [String]?
     let extensions: [String]?
+    let scope: String?     // for audio-recording: "system+mic" | "mic-only" | "app+mic"
+    let command: String?   // for command acquirer: shell pipeline string
 
     enum CodingKeys: String, CodingKey {
-        case name, type, mode, options, extensions, auto
+        case name, type, mode, options, extensions, auto, scope, command
         case defaultValue = "default"
         case defaultEnv = "default_env"
     }

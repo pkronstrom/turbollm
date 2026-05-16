@@ -35,4 +35,22 @@ final class ActivityTests: XCTestCase {
         XCTAssertNil(activity.icon)
         XCTAssertNil(activity.color)
     }
+
+    func test_decode_children_absent_defaults_to_empty() throws {
+        let json = #"""
+        {"id":"a","kind":"workflow","label":"L","icon":null,"color":null,"phase":null,"started_at":"2026-01-15T15:30:00Z","owner_pid":1}
+        """#
+        let data = json.data(using: .utf8)!
+        let activity = try JSONDecoder.activity().decode(Activity.self, from: data)
+        XCTAssertEqual(activity.children, [])
+    }
+
+    func test_decode_children_present() throws {
+        let json = #"""
+        {"id":"b","kind":"workflow","label":"L","icon":null,"color":null,"phase":null,"started_at":"2026-01-15T15:30:00Z","owner_pid":1,"children":[1,2,3]}
+        """#
+        let data = json.data(using: .utf8)!
+        let activity = try JSONDecoder.activity().decode(Activity.self, from: data)
+        XCTAssertEqual(activity.children, [1, 2, 3])
+    }
 }
