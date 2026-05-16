@@ -12,6 +12,7 @@ import re as _re
 import shutil as _shutil
 import signal as _signal
 import subprocess as _subprocess
+import time as _time
 
 
 class WorkflowError(Exception):
@@ -126,6 +127,7 @@ def resolve_params(
     workflow_id: str | None = None,
     workflow_name: str | None = None,
     acquirer_bin: str | None = None,
+    t0_ns: int | None = None,
 ) -> dict[str, str]:
     """Resolve each param's value, checking sources in priority order:
     1. `overrides` (typically CLI `--param` flags)
@@ -162,6 +164,7 @@ def resolve_params(
                     p,
                     workflow_id=workflow_id,
                     workflow_name=workflow_name,
+                    t0_ns=t0_ns,
                 )
                 continue
             raise WorkflowError(
@@ -268,6 +271,7 @@ def _spawn_acquirer(
     *,
     workflow_id: str | None,
     workflow_name: str | None = None,
+    t0_ns: int | None = None,
 ) -> str:
     """Spawn turbo-acquirer for the given param; return its stdout (stripped).
 
@@ -278,6 +282,8 @@ def _spawn_acquirer(
     env = dict(_os.environ)
     if workflow_id:
         env["TURBO_WORKFLOW_ID"] = workflow_id
+    if t0_ns is not None:
+        env["TURBO_T0_NS"] = str(t0_ns)
 
     proc = _subprocess.Popen(
         argv,
@@ -347,6 +353,11 @@ def run_workflow(
 
     validate_workflow(name, wf)
 
+    # Capture monotonic origin before spawning any acquirer.
+    # Both acquirers inherit TURBO_T0_NS so their manifests' start_offset_ms fields
+    # can be aligned on a common timeline.
+    t0_ns: int = _time.monotonic_ns()
+
     aid = _activity.start_activity(
         kind="workflow", label=f"Running {name}", icon="play", color="blue",
     )
@@ -358,6 +369,7 @@ def run_workflow(
             workflow_id=aid,
             workflow_name=name,
             acquirer_bin=acquirer_bin,
+            t0_ns=t0_ns,
         )
 
         # Pick the command string: inline or via script reference.

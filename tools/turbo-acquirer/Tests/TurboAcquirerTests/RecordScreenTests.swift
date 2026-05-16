@@ -236,6 +236,68 @@ final class RecordScreenTests: XCTestCase {
         XCTAssertNoThrow(try JSONDecoder().decode(RecordScreenManifest.self, from: data))
     }
 
+    // MARK: - T-7: TURBO_T0_NS start_offset_ms
+
+    func test_compute_start_offset_ms_zero_without_t0_ns() {
+        unsetenv("TURBO_T0_NS")
+        XCTAssertEqual(RecordScreen.computeStartOffsetMs(), 0)
+    }
+
+    func test_compute_start_offset_ms_reflects_delta() {
+        // Set TURBO_T0_NS to 200ms before the current monotonic time.
+        let nowNs = clock_gettime_nsec_np(CLOCK_MONOTONIC_RAW)
+        guard nowNs > 200_000_000 else { return } // skip on very short uptime
+        let t0Ns = nowNs - 200_000_000
+        setenv("TURBO_T0_NS", String(t0Ns), 1)
+        defer { unsetenv("TURBO_T0_NS") }
+
+        let offsetMs = RecordScreen.computeStartOffsetMs()
+        // Should be approximately 200ms (allow 100ms jitter for test overhead).
+        XCTAssertGreaterThanOrEqual(offsetMs, 100,
+            "start_offset_ms should be ≥ 100ms when T0 was 200ms ago, got \(offsetMs)")
+        XCTAssertLessThan(offsetMs, 1000,
+            "start_offset_ms should be < 1000ms in test context, got \(offsetMs)")
+    }
+
+    func test_fake_mode_manifest_includes_start_offset_ms_from_t0_ns() throws {
+        // Verify that fake-mode manifest correctly reflects TURBO_T0_NS.
+        let nowNs = clock_gettime_nsec_np(CLOCK_MONOTONIC_RAW)
+        guard nowNs > 500_000_000 else { return }
+        let t0Ns = nowNs - 500_000_000  // 500ms ago
+        setenv("TURBO_RECORD_SCREEN_FAKE", "1", 1)
+        setenv("TURBO_T0_NS", String(t0Ns), 1)
+        defer {
+            unsetenv("TURBO_RECORD_SCREEN_FAKE")
+            unsetenv("TURBO_T0_NS")
+        }
+
+        let tmpDir = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("record-screen-t0-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let result = RecordScreen.run(outputDir: tmpDir, scope: .fullDisplay)
+        let data = result.data(using: .utf8)!
+        let manifest = try JSONDecoder().decode(RecordScreenManifest.self, from: data)
+        // With T0 set 500ms ago, start_offset_ms should be ≥ 400ms.
+        XCTAssertGreaterThanOrEqual(manifest.startOffsetMs, 400,
+            "start_offset_ms should be ≥ 400 when T0 was 500ms ago, got \(manifest.startOffsetMs)")
+    }
+
+    func test_fake_mode_start_offset_ms_zero_when_no_t0_ns() throws {
+        setenv("TURBO_RECORD_SCREEN_FAKE", "1", 1)
+        unsetenv("TURBO_T0_NS")
+        defer { unsetenv("TURBO_RECORD_SCREEN_FAKE") }
+
+        let tmpDir = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("record-screen-no-t0-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let result = RecordScreen.run(outputDir: tmpDir, scope: .fullDisplay)
+        let data = result.data(using: .utf8)!
+        let manifest = try JSONDecoder().decode(RecordScreenManifest.self, from: data)
+        XCTAssertEqual(manifest.startOffsetMs, 0)
+    }
+
     // MARK: - Helpers
 
     /// Creates a hash that differs from `base` by exactly `distance` bits.

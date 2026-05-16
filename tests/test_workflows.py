@@ -543,3 +543,82 @@ def test_acquirer_argv_screenshot_explicit_output_dir_wins():
     param = {"name": "shot", "type": "screenshot-manual", "output_dir": "/tmp/custom"}
     argv = workflows._acquirer_argv("/x/turbo-acquirer", param)
     assert argv[argv.index("--output-dir") + 1] == "/tmp/custom"
+
+
+# ---------- T-7: TURBO_T0_NS time-origin alignment ----------
+
+
+import time as _time_mod
+
+
+def test_run_workflow_sets_turbo_t0_ns_env(monkeypatch, tmp_path):
+    """run_workflow exports TURBO_T0_NS to acquirer subprocesses."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+
+    # Fake acquirer: dumps $TURBO_T0_NS to stdout so we can verify it was set.
+    _make_fake_acquirer(bin_dir, "turbo-acquirer", """\
+case "$1" in
+  record-audio) printf '%s' "${TURBO_T0_NS:-MISSING}" ;;
+  *) exit 1 ;;
+esac
+""")
+
+    out_file = tmp_path / "marker.txt"
+    wf = {
+        "command": f'echo "{{{{audio}}}}" > "{out_file}"',
+        "params": [{"name": "audio", "type": "audio-recording", "mode": "primary"}],
+    }
+
+    monkeypatch.setenv("TURBO_ACQUIRER_BIN", str(bin_dir / "turbo-acquirer"))
+    from turbollm import activity
+
+    monkeypatch.setattr(activity, "STATE_DIR", tmp_path / "state")
+
+    t_before = _time_mod.monotonic_ns()
+    rc = workflows.run_workflow("t0-test", wf, overrides={}, registry={})
+    t_after = _time_mod.monotonic_ns()
+
+    assert rc == 0
+    t0_value_str = out_file.read_text().strip()
+    assert t0_value_str != "MISSING", "TURBO_T0_NS was not set on the acquirer subprocess"
+    t0_value = int(t0_value_str)
+    assert t_before <= t0_value <= t_after, (
+        f"TURBO_T0_NS={t0_value} should be between t_before={t_before} and t_after={t_after}"
+    )
+
+
+def test_run_workflow_both_acquirers_see_same_t0_ns(monkeypatch, tmp_path):
+    """Both acquirer calls in a multi-acquirer workflow share the same TURBO_T0_NS."""
+    captured_t0s: list[int] = []
+
+    def fake_spawn(binary, param, *, workflow_id, workflow_name=None, t0_ns=None):
+        if t0_ns is not None:
+            captured_t0s.append(t0_ns)
+        return "/fake/path"
+
+    monkeypatch.setattr(workflows, "_spawn_acquirer", fake_spawn)
+    monkeypatch.setenv("TURBO_ACQUIRER_BIN", "/fake/acquirer")
+
+    from turbollm import activity
+
+    monkeypatch.setattr(activity, "STATE_DIR", tmp_path / "state")
+
+    out_file = tmp_path / "out.txt"
+    wf = {
+        "command": f'echo done > "{out_file}"',
+        "params": [
+            {"name": "audio", "type": "audio-recording", "mode": "primary"},
+            # screenshot-manual defaults to "trigger" mode — not a second primary
+            {"name": "screen", "type": "screenshot-manual"},
+        ],
+    }
+
+    rc = workflows.run_workflow("multi-acq-test", wf, overrides={}, registry={})
+    assert rc == 0
+
+    assert len(captured_t0s) == 2, f"Expected 2 acquirer calls, got {len(captured_t0s)}"
+    assert captured_t0s[0] == captured_t0s[1], (
+        f"Both acquirers must see the same TURBO_T0_NS; got {captured_t0s}"
+    )
+    assert captured_t0s[0] > 0, "TURBO_T0_NS must be a positive monotonic timestamp"

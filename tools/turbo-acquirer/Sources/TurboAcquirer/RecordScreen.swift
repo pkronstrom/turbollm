@@ -156,8 +156,18 @@ enum RecordScreen {
             frames: [],
             durationMs: 0,
             droppedOvercap: 0,
-            startOffsetMs: 0
+            startOffsetMs: computeStartOffsetMs()
         ))
+    }
+
+    /// Computes `start_offset_ms` from `TURBO_T0_NS` if set, otherwise returns 0.
+    static func computeStartOffsetMs() -> Int {
+        let nowNs = clock_gettime_nsec_np(CLOCK_MONOTONIC_RAW)
+        if let t0Str = ProcessInfo.processInfo.environment["TURBO_T0_NS"],
+           let t0Ns = UInt64(t0Str), nowNs >= t0Ns {
+            return Int((nowNs - t0Ns) / 1_000_000)
+        }
+        return 0
     }
 
     static func encodeManifest(_ manifest: RecordScreenManifest) -> String {
@@ -184,16 +194,7 @@ enum RecordScreen {
         let resolvedScope = resolveScope(scope)
 
         let startNs = clock_gettime_nsec_np(CLOCK_MONOTONIC_RAW)
-
-        // startOffsetMs: delta from TURBO_T0_NS if set, otherwise 0.
-        let startOffsetMs: Int = {
-            if let t0Str = ProcessInfo.processInfo.environment["TURBO_T0_NS"],
-               let t0Ns = UInt64(t0Str) {
-                let deltaMs = Int((startNs - t0Ns) / 1_000_000)
-                return max(0, deltaMs)
-            }
-            return 0
-        }()
+        let startOffsetMs = computeStartOffsetMs()
 
         // State shared between the callback and stop logic.
         let decider = KeyframeDecider(threshold: threshold, minIntervalMs: minIntervalMs, maxKeyframes: maxKeyframes)
