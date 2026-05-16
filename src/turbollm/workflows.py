@@ -124,6 +124,7 @@ def resolve_params(
     overrides: dict[str, str],
     *,
     workflow_id: str | None = None,
+    workflow_name: str | None = None,
     acquirer_bin: str | None = None,
 ) -> dict[str, str]:
     """Resolve each param's value, checking sources in priority order:
@@ -157,7 +158,10 @@ def resolve_params(
         if ptype in ACQUIRED_TYPES:
             if acquirer_bin is not None:
                 resolved[name] = _spawn_acquirer(
-                    acquirer_bin, p, workflow_id=workflow_id
+                    acquirer_bin,
+                    p,
+                    workflow_id=workflow_id,
+                    workflow_name=workflow_name,
                 )
                 continue
             raise WorkflowError(
@@ -179,29 +183,78 @@ def resolve_params(
     return resolved
 
 
-def _acquirer_argv(binary: str, param: dict) -> list[str]:
+# HUD UserDefaults suite + key convention for per-(workflow, param) sticky
+# overrides written by the scope / input-device submenus in MenuBuilder.swift.
+# These bypass the `workflow.<wf>.param.<name>` convention used by
+# `turbo workflows config`; the HUD writes them directly as
+# `<wf>.<name>.scope` / `<wf>.<name>.input_device`.
+_HUD_DEFAULTS_SUITE = "com.turbollm.hud"
+
+
+def _read_hud_override(workflow_name: str, param_name: str, suffix: str) -> str | None:
+    """Read a HUD-side sticky override for an acquired param.
+
+    Returns ``None`` if the key is not set, the suite is missing, or
+    ``/usr/bin/defaults`` is unavailable (non-macOS environments).
+    """
+    key = f"{workflow_name}.{param_name}.{suffix}"
+    try:
+        result = _subprocess.run(
+            ["/usr/bin/defaults", "read", _HUD_DEFAULTS_SUITE, key],
+            capture_output=True,
+            text=True,
+        )
+    except (FileNotFoundError, OSError):
+        return None
+    if result.returncode != 0:
+        return None
+    return result.stdout.strip() or None
+
+
+def _default_screenshot_dir() -> str:
+    """Default output directory for screenshot acquirers."""
+    from pathlib import Path
+    return str(Path.home() / ".turbollm" / "screenshots")
+
+
+def _acquirer_argv(
+    binary: str,
+    param: dict,
+    *,
+    workflow_name: str | None = None,
+) -> list[str]:
     """Build the turbo-acquirer argv for the given acquired param definition.
 
     Mapping:
     - ``audio-recording`` → ``record-audio [--scope <scope>] [--device-uid <uid>]``
-    - ``screenshot-manual`` → ``screenshot [--output-dir <dir>]``
+    - ``screenshot-manual`` → ``screenshot --output-dir <dir>``
     - ``command`` → ``command --shell <acquire>``
+
+    HUD sticky overrides (when ``workflow_name`` is given): the HUD's scope
+    and input-device submenus write to UserDefaults keys ``<wf>.<param>.scope``
+    and ``<wf>.<param>.input_device`` in suite ``com.turbollm.hud``. These
+    win over the static ``param.scope`` / ``param.device_uid`` from the
+    workflow definition, so a user's HUD selection is honoured whether the
+    workflow is launched from the HUD or from the shell.
     """
     ptype = param.get("type")
+    pname = param.get("name", "")
     if ptype == "audio-recording":
         argv = [binary, "record-audio"]
         scope = param.get("scope")
+        uid = param.get("device_uid")
+        if workflow_name:
+            scope = _read_hud_override(workflow_name, pname, "scope") or scope
+            uid = _read_hud_override(workflow_name, pname, "input_device") or uid
         if scope:
             argv += ["--scope", scope]
-        uid = param.get("device_uid")
         if uid:
             argv += ["--device-uid", uid]
         return argv
     if ptype == "screenshot-manual":
         argv = [binary, "screenshot"]
-        output_dir = param.get("output_dir")
-        if output_dir:
-            argv += ["--output-dir", output_dir]
+        output_dir = param.get("output_dir") or _default_screenshot_dir()
+        argv += ["--output-dir", output_dir]
         return argv
     if ptype == "command":
         acquire = param.get("acquire") or param.get("acquire_script", "")
@@ -214,13 +267,14 @@ def _spawn_acquirer(
     param: dict,
     *,
     workflow_id: str | None,
+    workflow_name: str | None = None,
 ) -> str:
     """Spawn turbo-acquirer for the given param; return its stdout (stripped).
 
     Propagates SIGINT/SIGTERM to the child process. Raises WorkflowError on
     non-zero exit or empty output.
     """
-    argv = _acquirer_argv(binary, param)
+    argv = _acquirer_argv(binary, param, workflow_name=workflow_name)
     env = dict(_os.environ)
     if workflow_id:
         env["TURBO_WORKFLOW_ID"] = workflow_id
@@ -302,6 +356,7 @@ def run_workflow(
             wf.get("params", []),
             overrides,
             workflow_id=aid,
+            workflow_name=name,
             acquirer_bin=acquirer_bin,
         )
 

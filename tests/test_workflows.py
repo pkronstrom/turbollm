@@ -423,3 +423,122 @@ def test_find_acquirer_bin_returns_none_when_not_found(monkeypatch):
     import turbollm.workflows as _wf_mod
     monkeypatch.setattr(_wf_mod._shutil, "which", _which_no_acquirer)
     assert workflows.find_acquirer_bin() is None
+
+
+# ---------- Review fix: HUD UserDefaults override + screenshot default ----------
+
+
+def test_acquirer_argv_uses_hud_scope_override(monkeypatch):
+    """When the HUD has stored a scope sticky in UserDefaults, _acquirer_argv
+    must prefer it over the workflow's static `scope` field."""
+
+    captured = []
+
+    def fake_run(argv, *_, **__):
+        captured.append(argv)
+
+        class _R:
+            returncode = 0
+            stdout = "mic-only\n"
+
+        return _R()
+
+    monkeypatch.setattr(workflows._subprocess, "run", fake_run)
+
+    param = {
+        "name": "audio",
+        "type": "audio-recording",
+        "scope": "system+mic",  # workflow default
+    }
+    argv = workflows._acquirer_argv(
+        "/usr/local/bin/turbo-acquirer",
+        param,
+        workflow_name="record-to-obsidian",
+    )
+
+    # The HUD override "mic-only" must win over the static "system+mic".
+    assert "--scope" in argv
+    assert argv[argv.index("--scope") + 1] == "mic-only"
+    # And the read should have hit the HUD's suite + key convention.
+    keys_read = [a[3] for a in captured if a[:3] == ["/usr/bin/defaults", "read", "com.turbollm.hud"]]
+    assert "record-to-obsidian.audio.scope" in keys_read
+
+
+def test_acquirer_argv_uses_hud_device_uid_override(monkeypatch):
+    """HUD-stored input device UID must override the static device_uid."""
+
+    def fake_run(argv, *_, **__):
+        class _R:
+            returncode = 0
+            stdout = ""
+
+        if argv[:3] == ["/usr/bin/defaults", "read", "com.turbollm.hud"]:
+            if argv[3].endswith(".input_device"):
+                _R.stdout = "BuiltInMicrophoneDevice\n"
+            elif argv[3].endswith(".scope"):
+                _R.returncode = 1  # not set
+        return _R()
+
+    monkeypatch.setattr(workflows._subprocess, "run", fake_run)
+
+    param = {"name": "audio", "type": "audio-recording"}
+    argv = workflows._acquirer_argv(
+        "/usr/local/bin/turbo-acquirer",
+        param,
+        workflow_name="rec",
+    )
+
+    assert "--device-uid" in argv
+    assert argv[argv.index("--device-uid") + 1] == "BuiltInMicrophoneDevice"
+
+
+def test_acquirer_argv_falls_back_to_workflow_scope_when_no_hud_override(monkeypatch):
+    """No HUD sticky → workflow's static scope wins."""
+
+    def fake_run(*_, **__):
+        class _R:
+            returncode = 1  # nothing in UserDefaults
+            stdout = ""
+
+        return _R()
+
+    monkeypatch.setattr(workflows._subprocess, "run", fake_run)
+
+    param = {"name": "audio", "type": "audio-recording", "scope": "system+mic"}
+    argv = workflows._acquirer_argv(
+        "/usr/local/bin/turbo-acquirer",
+        param,
+        workflow_name="rec",
+    )
+    assert argv[argv.index("--scope") + 1] == "system+mic"
+
+
+def test_acquirer_argv_no_hud_lookup_when_workflow_name_absent(monkeypatch):
+    """Calling without workflow_name (e.g. unit tests) must not shell out to defaults."""
+
+    def fail_run(*_, **__):
+        raise AssertionError("defaults read should not be invoked without workflow_name")
+
+    monkeypatch.setattr(workflows._subprocess, "run", fail_run)
+
+    param = {"name": "audio", "type": "audio-recording", "scope": "mic-only"}
+    argv = workflows._acquirer_argv("/x/turbo-acquirer", param)
+    assert argv[argv.index("--scope") + 1] == "mic-only"
+
+
+def test_acquirer_argv_screenshot_default_output_dir():
+    """screenshot-manual without param.output_dir gets a default under ~/.turbollm."""
+    from pathlib import Path
+
+    param = {"name": "shot", "type": "screenshot-manual"}
+    argv = workflows._acquirer_argv("/x/turbo-acquirer", param)
+    assert "--output-dir" in argv
+    output_dir = argv[argv.index("--output-dir") + 1]
+    assert output_dir == str(Path.home() / ".turbollm" / "screenshots")
+
+
+def test_acquirer_argv_screenshot_explicit_output_dir_wins():
+    """An explicit param.output_dir is honoured over the default."""
+    param = {"name": "shot", "type": "screenshot-manual", "output_dir": "/tmp/custom"}
+    argv = workflows._acquirer_argv("/x/turbo-acquirer", param)
+    assert argv[argv.index("--output-dir") + 1] == "/tmp/custom"
