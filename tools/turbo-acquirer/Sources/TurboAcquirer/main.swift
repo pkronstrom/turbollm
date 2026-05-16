@@ -40,14 +40,38 @@ struct App {
     }
 
     static func handleScreenshot(argv: [String]) -> String {
-        "screenshot"
+        guard let outputDir = ScreenshotSubcommand.parseOutputDir(argv: argv) else {
+            fputs("error: --output-dir <dir> is required\n", stderr)
+            exit(1)
+        }
+        let parentId = ProcessInfo.processInfo.environment["TURBO_WORKFLOW_ID"]
+        switch ScreenshotSubcommand.run(outputDir: outputDir, parentId: parentId) {
+        case .success(let path):
+            return path
+        case .cancelled:
+            fputs("userCancelled\n", stderr)
+            exit(1)
+        case .error(let msg):
+            fputs("\(msg)\n", stderr)
+            exit(1)
+        }
     }
 
     static func handleCommand(argv: [String]) -> String {
-        "command"
+        guard let cmd = CommandSubcommand.parseShellArg(argv: argv) else {
+            fputs("error: --shell <cmd> is required\n", stderr)
+            exit(1)
+        }
+        switch CommandSubcommand.run(shellCommand: cmd) {
+        case .success(let stdout):
+            return stdout
+        case .failure(let errMsg, let code):
+            fputs("\(errMsg)\n", stderr)
+            exit(code != 0 ? code : 1)
+        }
     }
 
     static func handlePermissionsState(argv: [String]) -> String {
-        "permissions-state"
+        PermissionsStateCommand.run()
     }
 }
