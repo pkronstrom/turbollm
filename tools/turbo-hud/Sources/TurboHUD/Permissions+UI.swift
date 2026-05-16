@@ -1,4 +1,6 @@
 import AppKit
+import AVFoundation
+import CoreGraphics
 
 // MARK: - Test-only opener injection
 
@@ -57,6 +59,21 @@ final class PermissionsMenuTarget: NSObject {
     }
 
     @objc func openSettings(_ sender: NSMenuItem) {
+        // Actively REQUEST the permission first. Without this, the app never
+        // appears in the relevant System Settings pane — deep-linking alone is
+        // not enough, because TCC only lists apps that have called the
+        // request/preflight API path that registers them.
+        switch kind {
+        case .microphone:
+            AVCaptureDevice.requestAccess(for: .audio) { _ in }
+        case .screenRecording:
+            // Triggers macOS's "TurboHUD would like to record this computer's
+            // screen and audio." dialog AND registers the binary in TCC so it
+            // shows up in Settings → Privacy & Security → Screen & System Audio
+            // Recording. Returns immediately with the previously-known answer.
+            _ = CGRequestScreenCaptureAccess()
+        }
+        // Open Settings as a follow-up so the user can flip the toggle.
         Permissions.openSystemSettings(for: kind)
     }
 }

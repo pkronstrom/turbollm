@@ -1,7 +1,7 @@
 import AppKit
 
 @main
-class App: NSObject, NSApplicationDelegate {
+class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var statusItem: NSStatusItem!
     let state = AppState()
     var watcher: HudStateWatcher!
@@ -24,6 +24,11 @@ class App: NSObject, NSApplicationDelegate {
         // Wire SessionController so it can update AppState during sessions.
         Task { @MainActor in
             SessionController.shared.appState = self.state
+        }
+
+        // Refresh menu state when the user picks a scope/device from a submenu.
+        MenuTarget.shared.onSettingsChanged = { [weak self] in
+            self?.refreshMenu()
         }
 
         let stateDir = FileManager.default.homeDirectoryForCurrentUser
@@ -57,14 +62,35 @@ class App: NSObject, NSApplicationDelegate {
             guard let self else { return }
             self.state.workflows = workflows
             self.state.workflowsError = error
-            self.statusItem.menu = MenuBuilder.build(state: self.state, settings: self.settings,
-                                                     onRunWorkflow: { [weak self] wf in
-                                                         self?.runWorkflow(wf)
-                                                     },
-                                                     onEditParam: { [weak self] wf, p in
-                                                         self?.editParam(wf, p)
-                                                     })
+            self.rebuildMenuFromState()
         }
+    }
+
+    /// Synchronous rebuild from the workflows already cached in state. Used by
+    /// menuNeedsUpdate so the user sees current scope / permission / sticky
+    /// values without waiting on a registry round-trip.
+    private func rebuildMenuFromState() {
+        let menu = MenuBuilder.build(state: self.state, settings: self.settings,
+                                      onRunWorkflow: { [weak self] wf in
+                                          self?.runWorkflow(wf)
+                                      },
+                                      onEditParam: { [weak self] wf, p in
+                                          self?.editParam(wf, p)
+                                      })
+        // Re-set delegate every rebuild — MenuBuilder returns a new NSMenu.
+        menu.delegate = self
+        self.statusItem.menu = menu
+    }
+
+    // MARK: - NSMenuDelegate
+
+    /// Called by macOS before the menu (or any submenu) is displayed. We use
+    /// it on the top-level menu only to rebuild from cached state so changes
+    /// made while the menu was closed (scope/device selection, granted
+    /// permissions) show up immediately.
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        guard menu === statusItem.menu else { return }
+        rebuildMenuFromState()
     }
 
     func runWorkflow(_ wf: Workflow) {

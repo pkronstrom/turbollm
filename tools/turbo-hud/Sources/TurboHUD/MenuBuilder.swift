@@ -144,8 +144,13 @@ enum MenuBuilder {
     // MARK: - Scope submenu
 
     private static func makeScopeSubmenuItem(param: WorkflowParam, workflow: Workflow, settings: Settings) -> NSMenuItem {
-        let currentScope = settings.paramValue(workflow: workflow.name, param: "\(param.name).scope")
-            ?? param.scope ?? "mic-only"
+        // Read using the same raw-key format that selectScope writes and that
+        // SessionController.buildAcquirers reads. (Earlier code routed display
+        // through Settings.paramValue, which prepends "workflow.…param.…" and
+        // does not match the writer — clicks looked silently ignored.)
+        let scopeKey = "\(workflow.name).\(param.name).scope"
+        let currentScope = UserDefaults(suiteName: Settings.defaultSuiteName)?
+            .string(forKey: scopeKey) ?? param.scope ?? "mic-only"
         let item = NSMenuItem(title: "scope: \(currentScope) ▸", action: nil, keyEquivalent: "")
         let sub = NSMenu()
         sub.autoenablesItems = false
@@ -224,6 +229,10 @@ final class MenuTarget: NSObject {
     static let shared = MenuTarget()
     var onRun: ((Workflow) -> Void)?
     var onEdit: ((Workflow, WorkflowParam) -> Void)?
+    /// Invoked when a sticky setting changes via the menu (scope, input device).
+    /// App.swift wires this to refreshMenu so the title and checkmarks reflect
+    /// the new state next time the menu opens.
+    var onSettingsChanged: (() -> Void)?
 
     @objc func runWorkflow(_ sender: NSMenuItem) {
         guard let wf = sender.representedObject as? Workflow else { return }
@@ -245,11 +254,14 @@ final class MenuTarget: NSObject {
         guard let b = sender.representedObject as? ScopeBinding else { return }
         UserDefaults(suiteName: Settings.defaultSuiteName)?
             .set(b.scope, forKey: "\(b.workflow.name).\(b.param.name).scope")
+        onSettingsChanged?()
     }
 
     @objc func selectInputDevice(_ sender: NSMenuItem) {
         guard let b = sender.representedObject as? DeviceBinding else { return }
         UserDefaults(suiteName: Settings.defaultSuiteName)?
             .set(b.device.uid, forKey: "\(b.workflow.name).\(b.param.name).input_device")
+        onSettingsChanged?()
     }
+
 }
