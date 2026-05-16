@@ -336,16 +336,16 @@ turbo transcribe "$1" \
 
 [scripts.summarize-to-obsidian]
 description = "Transcribe, summarize, save to Obsidian Meetings folder"
-usage = "FILE [TITLE]"
+usage = "FILE"
 # Set $OBSIDIAN_VAULT to your vault root (defaults to ~/Documents/Obsidian).
-# Writes $VAULT/Meetings/YYYY-MM-DD-<title>.md with YAML frontmatter.
-# Title defaults to the audio filename minus extension.
+# Writes $VAULT/Meetings/<audio-basename>.md with YAML frontmatter. Rename
+# manually in Obsidian once you've reviewed the content.
 command = """
 set -euo pipefail
 vault="${OBSIDIAN_VAULT:-$HOME/Documents/Obsidian}"
 bn="${1##*/}"
-title="${2:-${bn%.*}}"
-out="$vault/Meetings/$(date +%Y-%m-%d)-$title.md"
+slug="${bn%.*}"
+out="$vault/Meetings/$slug.md"
 mkdir -p "$(dirname "$out")"
 
 # Capture the transcript once, then both summarize it AND embed it in the
@@ -362,7 +362,7 @@ summary="$(printf '%s' "$transcript" | pi --no-extensions \
   printf 'tags: [meeting, auto-transcribed]\n'
   printf 'model: parakeet-v3 + local-llm\n'
   printf -- '---\n\n'
-  printf '# %s\n\n' "$title"
+  printf '# %s\n\n' "$slug"
   printf '%s\n\n' "$summary"
   printf -- '---\n\n## Raw transcript\n\n'
   printf '%s\n' "$transcript"
@@ -390,7 +390,7 @@ extensions = ["m4a", "wav", "mp3", "flac"]
 [workflows.record-to-obsidian]
 description = "Record audio, summarize, save to Obsidian (HUD-only: needs audio-recording acquirer)"
 script = "summarize-to-obsidian"
-args = ["{{audio}}", "{{title}}"]
+args = ["{{audio}}"]
 # Plumb the resolved `vault` param through so the HUD's vault picker steers
 # output instead of being cosmetic. The script reads $OBSIDIAN_VAULT (with a
 # $HOME/Documents/Obsidian fallback).
@@ -401,11 +401,6 @@ name = "audio"
 type = "audio-recording"
 mode = "primary"
 scope = "system+mic"
-
-[[workflows.record-to-obsidian.params]]
-name = "title"
-type = "string"
-auto = "{{date:%Y-%m-%d-%H%M}}"
 
 [[workflows.record-to-obsidian.params]]
 name = "vault"
