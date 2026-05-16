@@ -12,7 +12,7 @@ final class AudioRecorderTests: XCTestCase {
             paramName: "audio",
             scope: .micOnly,
             inputDeviceUID: nil,
-            outputDir: URL(fileURLWithPath: NSTemporaryDirectory())
+            sessionDir: URL(fileURLWithPath: NSTemporaryDirectory())
         )
         XCTAssertEqual(rec.mode, .primary)
         XCTAssertEqual(rec.paramName, "audio")
@@ -72,7 +72,7 @@ final class AudioRecorderTests: XCTestCase {
             paramName: "audio",
             scope: .systemPlusMic,
             inputDeviceUID: nil,
-            outputDir: URL(fileURLWithPath: NSTemporaryDirectory())
+            sessionDir: URL(fileURLWithPath: NSTemporaryDirectory())
         )
         XCTAssertEqual(rec.mode, .primary)
     }
@@ -115,7 +115,7 @@ final class AudioRecorderTests: XCTestCase {
             paramName: "audio",
             scope: .micOnly,
             inputDeviceUID: nil,
-            outputDir: customDir
+            sessionDir: customDir
         )
         // We verify by checking the type is initialized correctly (acquire() is not called
         // to avoid starting the audio engine in tests).

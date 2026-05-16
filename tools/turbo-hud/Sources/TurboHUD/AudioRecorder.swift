@@ -26,7 +26,12 @@ final class AudioRecorder: Acquirer {
 
     private let scope: AudioScope
     private let inputDeviceUID: String?
-    private let outputDir: URL
+    /// Session directory shared with other acquirers in the same workflow run.
+    /// When set, the recording is written here as `audio.wav` so all per-run
+    /// artifacts cluster together. When nil, the recording lands in the
+    /// user-visible inbox/fallback with a timestamped filename so successive
+    /// runs do not clobber each other.
+    private let sessionDir: URL?
 
     private let engine = AVAudioEngine()
     private var audioFile: AVAudioFile?
@@ -39,11 +44,11 @@ final class AudioRecorder: Acquirer {
 
     // MARK: Init
 
-    init(paramName: String, scope: AudioScope, inputDeviceUID: String?, outputDir: URL) {
+    init(paramName: String, scope: AudioScope, inputDeviceUID: String?, sessionDir: URL? = nil) {
         self.paramName = paramName
         self.scope = scope
         self.inputDeviceUID = inputDeviceUID
-        self.outputDir = outputDir
+        self.sessionDir = sessionDir
     }
 
     // MARK: - Output path (pure, testable)
@@ -74,14 +79,13 @@ final class AudioRecorder: Acquirer {
     // MARK: - Acquirer
 
     func acquire() async throws -> AcquirerResult {
-        // Ensure output directory exists.
-        // T-fix-3: pass the constructor's outputDir as sessionDir so the recorder
-        // always writes under the dir specified at init time, rather than falling
-        // back to $TURBO_AUDIO_INBOX / ~/Recordings/turbo unconditionally.
+        // When the caller bundles multiple acquirers under one session dir,
+        // write audio.wav inside it. Otherwise the path is timestamped, so
+        // successive runs do not overwrite a single audio.wav.
         let outURL = Self.outputPath(for: Workflow(
             name: paramName, description: nil, command: nil,
             script: nil, args: nil, env: nil, params: []
-        ), sessionDir: outputDir)
+        ), sessionDir: sessionDir)
         try FileManager.default.createDirectory(
             at: outURL.deletingLastPathComponent(),
             withIntermediateDirectories: true

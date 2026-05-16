@@ -207,7 +207,10 @@ final class SessionController {
     func buildAcquirers(for workflow: Workflow, settings: Settings) -> [any Acquirer] {
         var result: [any Acquirer] = []
 
-        let outputBase = FileManager.default.homeDirectoryForCurrentUser
+        // Screenshot trigger acquirer needs a place to write per-screenshot PNGs.
+        // Audio uses its own path resolution (env/inbox/timestamped fallback) and
+        // does not share a directory with screenshots.
+        let screenshotsDir = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Recordings/turbo", isDirectory: true)
 
         for param in workflow.params {
@@ -224,18 +227,22 @@ final class SessionController {
                 let inputDeviceUID = UserDefaults(suiteName: Settings.defaultSuiteName)?
                     .string(forKey: deviceKey)
 
+                // No sessionDir: AudioRecorder writes a timestamped file in the
+                // $TURBO_AUDIO_INBOX or ~/Recordings/turbo fallback. Bundling
+                // multiple per-run artifacts under one dir is a future workflow
+                // shape; today every record-* workflow has audio as the only
+                // file output.
                 let recorder = AudioRecorder(
                     paramName: param.name,
                     scope: scope,
-                    inputDeviceUID: inputDeviceUID,
-                    outputDir: outputBase
+                    inputDeviceUID: inputDeviceUID
                 )
                 result.append(recorder)
 
             case "screenshot-manual":
                 let screenshotter = ScreenshotManual(
                     paramName: param.name,
-                    outputDir: outputBase
+                    outputDir: screenshotsDir
                 )
                 result.append(screenshotter)
 
