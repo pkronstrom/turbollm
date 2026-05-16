@@ -41,9 +41,12 @@ struct App {
         let (scope, deviceUID, outputPathStr) = RecordAudio.parseArgs(argv: argv)
         let outputURL = RecordAudio.outputPath(explicitPath: outputPathStr)
         let parentId = ProcessInfo.processInfo.environment["TURBO_WORKFLOW_ID"]
+        // Capture start offset before the blocking run() so it reflects when
+        // recording began, not when it ended.
+        let startOffsetMs = RecordAudio.computeStartOffsetMs()
         do {
             try RecordAudio.run(scope: scope, deviceUID: deviceUID, outputURL: outputURL, parentId: parentId)
-            return outputURL.path
+            return RecordAudio.encodeManifest(path: outputURL.path, startOffsetMs: startOffsetMs)
         } catch RecordAudioError.permissionDenied(let resource) {
             fputs("permissionDenied(\"\(resource)\")\n", stderr)
             exit(1)

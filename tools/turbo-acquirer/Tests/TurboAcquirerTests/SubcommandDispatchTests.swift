@@ -10,9 +10,13 @@ final class SubcommandDispatchTests: XCTestCase {
         defer { unsetenv("TURBO_AUDIO_INBOX") }
 
         let result = App.dispatch(argv: ["turbo-acquirer", "record-audio"])
-        // In fake mode, returns the output WAV path (a .wav file in TURBO_AUDIO_INBOX).
-        XCTAssertTrue(result.hasSuffix(".wav"),
-                      "record-audio dispatch in fake mode must return a .wav path, got: \(result)")
+        // In fake mode, returns a JSON manifest with "path" (a .wav) and "start_offset_ms".
+        XCTAssertTrue(result.contains("\"path\""),
+                      "record-audio dispatch must return a JSON manifest with 'path', got: \(result)")
+        XCTAssertTrue(result.contains(".wav"),
+                      "record-audio manifest path must reference a .wav file, got: \(result)")
+        XCTAssertTrue(result.contains("\"start_offset_ms\""),
+                      "record-audio manifest must include 'start_offset_ms', got: \(result)")
     }
 
     func test_dispatch_screenshot() {

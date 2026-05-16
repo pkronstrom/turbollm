@@ -391,8 +391,8 @@ echo "Wrote: $raw_out" >&2
 
 [scripts.summarize-to-obsidian-bundled]
 description = "Transcribe audio + embed screen keyframes, save bundled notes to Obsidian"
-usage = "AUDIO_FILE MANIFEST_JSON"
-# $1 — path to audio file (from audio acquirer)
+usage = "AUDIO_MANIFEST_JSON SCREEN_MANIFEST_JSON"
+# $1 — audio manifest JSON: {"path":"...","start_offset_ms":N}  (from audio acquirer)
 # $2 — screen recording manifest JSON string (from record-screen acquirer)
 # Writes three artifacts:
 #   $VAULT/Meetings/<slug>.md           — frontmatter + summary (no image refs)
@@ -402,8 +402,10 @@ usage = "AUDIO_FILE MANIFEST_JSON"
 command = """
 set -euo pipefail
 vault="${OBSIDIAN_VAULT:-$HOME/Documents/Obsidian}"
-audio_file="$1"
+audio_manifest_json="$1"
 manifest_json="$2"
+# Extract audio file path from the audio manifest JSON via Python.
+audio_file="$(printf '%s' "$audio_manifest_json" | python3 -c "import json,sys; print(json.load(sys.stdin)['path'])")"
 bn="${audio_file##*/}"
 slug="${bn%.*}"
 out="$vault/Meetings/$slug.md"
@@ -437,6 +439,7 @@ summary="$(printf '%s' "$transcript" | pi --no-extensions \
 # Copy PNGs to attachments dir, then delete temp source dir, then write .raw.md.
 SEGMENTS_JSON="$segments_json" \
 MANIFEST_JSON="$manifest_json" \
+AUDIO_MANIFEST_JSON="$audio_manifest_json" \
 ATTACHMENTS="$attachments" \
 SLUG="$slug" \
 OUT="$out" \
@@ -446,15 +449,19 @@ SUMMARY="$summary" \
 python3 << 'PYEOF'
 import json, os, shutil, math, sys, datetime
 
-segs     = json.loads(os.environ['SEGMENTS_JSON'])
-manifest = json.loads(os.environ['MANIFEST_JSON'])
-att_dir  = os.environ['ATTACHMENTS']
-slug     = os.environ['SLUG']
-raw_out  = os.environ['RAW_OUT']
-audio    = os.environ['AUDIO_FILE']
-summary  = os.environ['SUMMARY']
+segs          = json.loads(os.environ['SEGMENTS_JSON'])
+manifest      = json.loads(os.environ['MANIFEST_JSON'])
+audio_manifest = json.loads(os.environ['AUDIO_MANIFEST_JSON'])
+att_dir       = os.environ['ATTACHMENTS']
+slug          = os.environ['SLUG']
+raw_out       = os.environ['RAW_OUT']
+audio         = os.environ['AUDIO_FILE']
+summary       = os.environ['SUMMARY']
 
-start_offset_ms = manifest.get('start_offset_ms', 0)
+# Screen keyframe time origin relative to T0.
+screen_start_offset_ms = manifest.get('start_offset_ms', 0)
+# Audio segment time origin relative to T0.
+audio_start_offset_ms = audio_manifest.get('start_offset_ms', 0)
 
 # Copy PNGs and collect keyframe entries.
 entries = []
@@ -463,7 +470,7 @@ for frame in manifest.get('frames', []):
     basename = os.path.basename(src)
     dst = os.path.join(att_dir, basename)
     shutil.copy2(src, dst)
-    wf_t_ms = frame['t_offset_ms'] + start_offset_ms
+    wf_t_ms = frame['t_offset_ms'] + screen_start_offset_ms
     entries.append({'wf_t_ms': wf_t_ms, 'kind': 'frame', 'basename': basename})
 
 # Delete the temp source directory (parent of the first frame path).
@@ -472,10 +479,10 @@ if manifest.get('frames'):
     if os.path.isdir(src_dir):
         shutil.rmtree(src_dir)
 
-# Add segment entries.
+# Add segment entries — shift by audio start offset so they land at workflow time.
 for seg in segs:
     start_s = seg.get('start') or 0
-    wf_t_ms = int(start_s * 1000)
+    wf_t_ms = int(start_s * 1000) + audio_start_offset_ms
     text = seg.get('text', '').strip()
     mm = math.floor(start_s / 60)
     ss = math.floor(start_s % 60)

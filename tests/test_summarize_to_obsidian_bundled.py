@@ -1,8 +1,8 @@
-"""Tests for the `summarize-to-obsidian-bundled` script — T-14.
+"""Tests for the `summarize-to-obsidian-bundled` script — T-14 / T-fix-6.
 
 The script lives in models.toml under [scripts.summarize-to-obsidian-bundled].
 It accepts TWO positional arguments:
-  $1 — audio file path (from the audio acquirer)
+  $1 — audio manifest JSON: {"path":"...","start_offset_ms":N}  (from audio acquirer)
   $2 — screen recording manifest JSON string (from the record-screen acquirer)
 
 It produces THREE artifacts:
@@ -92,10 +92,16 @@ def _make_manifest(src_dir: Path) -> tuple[str, list[Path]]:
     return json.dumps(manifest), [src_dir / n for n in names]
 
 
+def _make_audio_manifest(audio_path: Path, start_offset_ms: int = 0) -> str:
+    """Build the audio manifest JSON string that record-audio now emits."""
+    return json.dumps({"path": str(audio_path), "start_offset_ms": start_offset_ms})
+
+
 def _run_bundled_script(
     tmp_path: Path,
     segments_json: str = INTERLEAVE_SEGMENTS,
     summary_text: str = SUMMARY_TEXT,
+    audio_start_offset_ms: int = 0,
 ) -> dict:
     """Run the summarize-to-obsidian-bundled script with stub binaries.
 
@@ -123,6 +129,9 @@ esac
     audio = tmp_path / "my-meeting.wav"
     audio.write_bytes(b"RIFF")
 
+    # $1 is now an audio manifest JSON (not a bare path).
+    audio_manifest_json = _make_audio_manifest(audio, start_offset_ms=audio_start_offset_ms)
+
     src_dir = tmp_path / "frames-src"
     manifest_json, _frame_paths = _make_manifest(src_dir)
 
@@ -135,7 +144,7 @@ esac
     script_cmd = _script_command()
     result = subprocess.run(
         ["bash", "-c", script_cmd, "summarize-to-obsidian-bundled",
-         str(audio), manifest_json],
+         audio_manifest_json, manifest_json],
         env=env,
         capture_output=True,
         text=True,
@@ -223,3 +232,41 @@ def test_temp_dir_is_cleaned_after_success(tmp_path):
     assert not paths["src_dir"].exists(), (
         f"Temp source dir still exists after script ran: {paths['src_dir']}"
     )
+
+
+def test_audio_start_offset_shifts_segment_times(tmp_path):
+    """T-fix-6: non-zero audio start_offset_ms shifts transcript segments in .raw.md.
+
+    Audio starts 2000 ms after T0 (start_offset_ms=2000).
+    Screen keyframes have start_offset_ms=0 (screen started at T0).
+
+    Segments at audio-relative 0.0 s, 5.0 s, 12.0 s become workflow-t
+    2000, 7000, 14000 ms respectively.
+    Screen keyframes at t_offset_ms 3200 and 14500 ms stay at 3200 and 14500 ms.
+
+    Expected interleaved order:
+      [00:00] First.    (wf_t=2000)
+      ![[...001...]]    (wf_t=3200)
+      [00:05] Second.   (wf_t=7000)
+      [00:12] Third.    (wf_t=14000)
+      ![[...002...]]    (wf_t=14500)
+    """
+    paths = _run_bundled_script(tmp_path, audio_start_offset_ms=2000)
+    raw_text = paths["raw_md"].read_text()
+
+    # Strip YAML frontmatter.
+    content = re.sub(r'^---\n.*?\n---\n\n?', '', raw_text, flags=re.DOTALL)
+    content_lines = [l for l in content.splitlines() if l.strip()]
+
+    slug = paths["slug"]
+    assert len(content_lines) == 5, (
+        f"Expected 5 interleaved lines, got {len(content_lines)}:\n"
+        + "\n".join(content_lines)
+    )
+    # Segments are shifted: 0s+2000ms → wf_t=2000ms ([00:00] label uses audio-relative time)
+    # Note: the [mm:ss] label uses the segment's audio-relative start time, not workflow_t.
+    assert content_lines[0] == "[00:00] First.",       f"Line 0: {content_lines[0]!r}"
+    assert content_lines[1] == f"![[{slug}/001-T+3200.png]]",  f"Line 1: {content_lines[1]!r}"
+    assert content_lines[2] == "[00:05] Second.",      f"Line 2: {content_lines[2]!r}"
+    assert content_lines[3] == "[00:12] Third.",       f"Line 3: {content_lines[3]!r}"
+    assert content_lines[4] == f"![[{slug}/002-T+14500.png]]", f"Line 4: {content_lines[4]!r}"

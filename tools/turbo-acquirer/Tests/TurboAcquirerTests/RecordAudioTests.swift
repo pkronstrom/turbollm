@@ -152,6 +152,31 @@ final class RecordAudioTests: XCTestCase {
         )
     }
 
+    // MARK: - T-fix-6: start_offset_ms manifest
+
+    func test_computeStartOffsetMs_returns_zero_without_t0_env() {
+        unsetenv("TURBO_T0_NS")
+        XCTAssertEqual(RecordAudio.computeStartOffsetMs(), 0)
+    }
+
+    func test_computeStartOffsetMs_returns_positive_ms_when_t0_is_in_past() {
+        let nowNs = clock_gettime_nsec_np(CLOCK_MONOTONIC_RAW)
+        let t0Ns = nowNs - 5_000_000_000  // 5 s ago
+        setenv("TURBO_T0_NS", "\(t0Ns)", 1)
+        defer { unsetenv("TURBO_T0_NS") }
+
+        let result = RecordAudio.computeStartOffsetMs()
+        XCTAssertGreaterThan(result, 4_000, "Expected ≥ 4000 ms for a 5 s past T0")
+        XCTAssertLessThan(result, 8_000, "Sanity upper bound: must be < 8000 ms")
+    }
+
+    func test_encodeManifest_produces_json_with_path_and_offset() throws {
+        let json = RecordAudio.encodeManifest(path: "/tmp/recording.wav", startOffsetMs: 123)
+        let decoded = try JSONSerialization.jsonObject(with: json.data(using: .utf8)!) as! [String: Any]
+        XCTAssertEqual(decoded["path"] as? String, "/tmp/recording.wav")
+        XCTAssertEqual(decoded["start_offset_ms"] as? Int, 123)
+    }
+
     // MARK: - Fake mode test (T-9 Step 1 — ensures signal handlers installed before engine)
 
     func test_fake_mode_creates_output_file_and_returns() throws {

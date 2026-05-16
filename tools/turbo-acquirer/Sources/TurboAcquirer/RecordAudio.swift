@@ -172,6 +172,39 @@ enum RecordAudio {
         return baseDir.appendingPathComponent("\(timestamp).wav")
     }
 
+    // MARK: - Manifest
+
+    /// Computes `start_offset_ms` from `TURBO_T0_NS` if set, otherwise returns 0.
+    /// Mirrors RecordScreen.computeStartOffsetMs() — both derive from the same time origin.
+    static func computeStartOffsetMs() -> Int {
+        let nowNs = clock_gettime_nsec_np(CLOCK_MONOTONIC_RAW)
+        if let t0Str = ProcessInfo.processInfo.environment["TURBO_T0_NS"],
+           let t0Ns = UInt64(t0Str), nowNs >= t0Ns {
+            return Int((nowNs - t0Ns) / 1_000_000)
+        }
+        return 0
+    }
+
+    /// Encodes a manifest JSON string: `{"path":"...","start_offset_ms":N}`.
+    static func encodeManifest(path: String, startOffsetMs: Int) -> String {
+        struct _M: Codable {
+            let path: String
+            let startOffsetMs: Int
+            enum CodingKeys: String, CodingKey {
+                case path
+                case startOffsetMs = "start_offset_ms"
+            }
+        }
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        if let data = try? encoder.encode(_M(path: path, startOffsetMs: startOffsetMs)),
+           let str = String(data: data, encoding: .utf8) {
+            return str
+        }
+        // Defensive fallback (path is a filesystem path — no special JSON chars expected).
+        return "{\"path\":\"\(path)\",\"start_offset_ms\":\(startOffsetMs)}"
+    }
+
     // MARK: - Arg parsing
 
     /// Parses argv for the `record-audio` subcommand.
