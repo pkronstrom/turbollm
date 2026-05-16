@@ -14,9 +14,26 @@
       "subtitle": "Pick from list",
       "description": "List and run turbollm workflows",
       "mode": "view"
+    },
+    {
+      "name": "running-workflows",
+      "title": "Running Workflows",
+      "subtitle": "In-flight activities",
+      "description": "List in-flight acquirer activities with Stop actions",
+      "mode": "view"
     }
   ],
-  "preferences": [],
+  "preferences": [
+    {
+      "name": "turboPath",
+      "title": "Turbo binary path",
+      "description": "Absolute path to the `turbo` binary. Leave blank to auto-detect via PATH.",
+      "type": "textfield",
+      "required": false,
+      "default": "",
+      "placeholder": "/Users/you/.local/bin/turbo"
+    }
+  ],
   "dependencies": {
     "@raycast/api": "^1.79.0"
   },

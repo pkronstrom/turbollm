@@ -18,9 +18,12 @@ describe("extension scaffold", () => {
     };
     expect(pkg.name).toBe("turbollm");
     expect(Array.isArray(pkg.commands)).toBe(true);
-    expect(pkg.commands).toHaveLength(1);
-    expect(pkg.commands[0].name).toBe("run-workflow");
-    expect(pkg.commands[0].mode).toBe("view");
+    // Fixed commands: run-workflow + running-workflows (plus any per-workflow commands added by turbo raycast sync)
+    const fixedNames = pkg.commands.map((c: { name: string }) => c.name);
+    expect(fixedNames).toContain("run-workflow");
+    expect(fixedNames).toContain("running-workflows");
+    const runWorkflow = pkg.commands.find((c: { name: string }) => c.name === "run-workflow");
+    expect(runWorkflow.mode).toBe("view");
   });
 
   it("tsconfig.json is valid JSON", () => {
