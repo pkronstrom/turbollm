@@ -185,67 +185,85 @@ def resolve_params(
             )
             _background_procs[name] = (proc, p)
 
-    # Main loop: resolve params sequentially; skip backgrounds (handled below).
-    for p in params:
-        name = p["name"]
-        ptype = p.get("type")
+    # Main loop + post-flight wrapped in try/finally so background processes are
+    # always terminated even when the primary raises (prevents leaked children).
+    try:
+        # Main loop: resolve params sequentially; skip backgrounds (handled below).
+        for p in params:
+            name = p["name"]
+            ptype = p.get("type")
 
-        if name in overrides:
-            resolved[name] = overrides[name]
-            continue
-
-        if name in _background_procs:
-            # Will be resolved after the primary exits.
-            continue
-
-        if ptype in ACQUIRED_TYPES:
-            if acquirer_bin is not None:
-                resolved[name] = _spawn_acquirer(
-                    acquirer_bin,
-                    p,
-                    workflow_id=workflow_id,
-                    workflow_name=workflow_name,
-                    t0_ns=t0_ns,
-                )
+            if name in overrides:
+                resolved[name] = overrides[name]
                 continue
-            raise WorkflowError(
-                f"acquired param '{name}' (type={ptype}) requires --param {name}=<value> "
-                "when running from the CLI; the HUD performs acquisition natively"
-            )
 
-        if "auto" in p:
-            resolved[name] = expand_template(p["auto"], params=resolved)
-            continue
+            if name in _background_procs:
+                # Will be resolved after the primary exits.
+                continue
 
-        env_var = p.get("default_env")
-        if env_var and _os.environ.get(env_var):
-            resolved[name] = _os.environ[env_var]
-            continue
+            if ptype in ACQUIRED_TYPES:
+                if acquirer_bin is not None:
+                    resolved[name] = _spawn_acquirer(
+                        acquirer_bin,
+                        p,
+                        workflow_id=workflow_id,
+                        workflow_name=workflow_name,
+                        t0_ns=t0_ns,
+                    )
+                    continue
+                raise WorkflowError(
+                    f"acquired param '{name}' (type={ptype}) requires --param {name}=<value> "
+                    "when running from the CLI; the HUD performs acquisition natively"
+                )
 
-        resolved[name] = p.get("default", "")
+            if "auto" in p:
+                resolved[name] = expand_template(p["auto"], params=resolved)
+                continue
 
-    # After primary(ies) have returned: SIGTERM all backgrounds and collect output.
-    if _background_procs:
+            env_var = p.get("default_env")
+            if env_var and _os.environ.get(env_var):
+                resolved[name] = _os.environ[env_var]
+                continue
+
+            resolved[name] = p.get("default", "")
+
+        # After primary(ies) have returned: SIGTERM all backgrounds and collect output.
+        if _background_procs:
+            for _name, (proc, _p) in _background_procs.items():
+                try:
+                    proc.send_signal(_signal.SIGTERM)
+                except ProcessLookupError:
+                    pass
+
+            for name, (proc, p) in _background_procs.items():
+                stdout, stderr = proc.communicate()
+                # Accept clean exit (0) or killed by SIGTERM (-signal.SIGTERM on Unix).
+                if proc.returncode not in (0, -_signal.SIGTERM):
+                    raise WorkflowError(
+                        f"background acquirer exited {proc.returncode} for param '{p['name']}': "
+                        f"{stderr.strip()}"
+                    )
+                value = stdout.strip()
+                if not value:
+                    raise WorkflowError(
+                        f"background acquirer returned empty output for param '{p['name']}'"
+                    )
+                resolved[name] = value
+    finally:
+        # Terminate any background procs that are still alive.  On the normal
+        # success path the post-flight loop already called communicate() so
+        # proc.poll() will be non-None and this block is a no-op.  On an
+        # exception path this tears down children before the error propagates.
         for _name, (proc, _p) in _background_procs.items():
-            try:
-                proc.send_signal(_signal.SIGTERM)
-            except ProcessLookupError:
-                pass
-
-        for name, (proc, p) in _background_procs.items():
-            stdout, stderr = proc.communicate()
-            # Accept clean exit (0) or killed by SIGTERM (-signal.SIGTERM on Unix).
-            if proc.returncode not in (0, -_signal.SIGTERM):
-                raise WorkflowError(
-                    f"background acquirer exited {proc.returncode} for param '{p['name']}': "
-                    f"{stderr.strip()}"
-                )
-            value = stdout.strip()
-            if not value:
-                raise WorkflowError(
-                    f"background acquirer returned empty output for param '{p['name']}'"
-                )
-            resolved[name] = value
+            if proc.poll() is None:
+                try:
+                    proc.terminate()
+                except OSError:
+                    pass
+                try:
+                    proc.communicate(timeout=5)
+                except Exception:
+                    proc.kill()
 
     return resolved
 

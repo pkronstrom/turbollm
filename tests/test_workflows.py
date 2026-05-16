@@ -774,3 +774,60 @@ esac
     assert '"duration_ms": 2000' in screen_value or '"duration_ms":2000' in screen_value, (
         f"Expected screen manifest in output, got: {screen_value!r}"
     )
+
+
+def test_primary_failure_terminates_background_acquirer(monkeypatch, tmp_path):
+    """When the primary acquirer fails, background acquirers are still terminated.
+
+    Regression test for T-fix-1: a WorkflowError from the primary must not
+    leak background child processes.
+    """
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+
+    sigterm_file = tmp_path / "sigterm_received.txt"
+
+    # Fake acquirer:
+    #   record-audio  → exits non-zero so resolve_params raises WorkflowError
+    #   record-screen → loops until SIGTERM; writes a marker file on SIGTERM
+    _make_fake_acquirer(
+        bin_dir,
+        "turbo-acquirer",
+        f"""\
+case "$1" in
+  record-audio)
+    exit 2
+    ;;
+  record-screen)
+    trap 'touch "{sigterm_file}"; exit 0' TERM INT
+    while true; do sleep 0.05; done
+    ;;
+  *) exit 1 ;;
+esac
+""",
+    )
+
+    wf = {
+        "command": "echo done",
+        "params": [
+            {"name": "audio", "type": "audio-recording", "mode": "primary", "scope": "system+mic"},
+            {"name": "screen", "type": "screen-recording", "mode": "background"},
+        ],
+    }
+
+    monkeypatch.setenv("TURBO_ACQUIRER_BIN", str(bin_dir / "turbo-acquirer"))
+    from turbollm import activity
+
+    monkeypatch.setattr(activity, "STATE_DIR", tmp_path / "state")
+
+    with pytest.raises(workflows.WorkflowError):
+        workflows.run_workflow("primary-fail-test", wf, overrides={}, registry={})
+
+    # Give the background process a moment to handle SIGTERM.
+    import time
+    time.sleep(0.2)
+
+    assert sigterm_file.exists(), (
+        "Background acquirer was not terminated after primary failure; "
+        "leaked child process detected"
+    )
