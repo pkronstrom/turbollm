@@ -1,6 +1,7 @@
 import json
 import os
 import subprocess
+import sys
 import tempfile
 import time
 import urllib.request
@@ -462,8 +463,8 @@ _AUDIO_MIME = {
               help="Model alias or HF repo. Defaults to the running server's model, else parakeet-v3.")
 @click.option("--language", "-l", default=None, help="ISO language code (e.g. en, fi). Optional.")
 @click.option("--format", "-f", "response_format",
-              type=click.Choice(["text", "json", "srt", "vtt", "verbose_json"]),
-              default="text", help="Response format (default: text).")
+              type=click.Choice(["text", "json", "srt", "vtt", "verbose_json", "segments"]),
+              default="text", help="Response format (default: text). Use 'segments' for JSON array with timestamps.")
 @click.option("--port", "-p", default=None, type=int, help="Port (default: 8899).")
 def transcribe(audio_file, model, language, response_format, port):
     """Transcribe an audio file via mlx-audio. Auto-starts server if needed.
@@ -471,7 +472,6 @@ def transcribe(audio_file, model, language, response_format, port):
     Transcript goes to stdout; status to stderr. Pipe-friendly:
         turbo transcribe meeting.m4a | pi -p "summarize this"
     """
-    import sys
     err = Console(stderr=True)
 
     defaults = get_defaults()
@@ -531,7 +531,9 @@ def transcribe(audio_file, model, language, response_format, port):
         mime = "audio/wav"
 
     def _do(_m, p):
-        fields = {"model": model_id, "response_format": response_format}
+        # Always request verbose_json internally so we have both text and
+        # segments available regardless of the user-facing --format flag.
+        fields = {"model": model_id, "response_format": "verbose_json"}
         if language:
             fields["language"] = language
         body, ctype = _build_multipart(fields, "file", send_name, mime, file_bytes)
@@ -547,15 +549,27 @@ def transcribe(audio_file, model, language, response_format, port):
         except urllib.error.HTTPError as e:
             err.print(f"[red]HTTP {e.code}:[/red] {e.read().decode('utf-8', 'replace')}")
             raise SystemExit(1) from None
-        # mlx-audio's server ignores response_format and always returns JSON
-        # {"text": "..."}. For --format text, unwrap that on the client side
-        # so transcripts pipe cleanly into LLM summarizers etc.
+        # Parse the JSON response (mlx-audio always returns JSON).
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError:
+            data = {"text": raw}
+
         if response_format == "text":
-            try:
-                sys.stdout.write(json.loads(raw).get("text", raw).rstrip() + "\n")
-            except json.JSONDecodeError:
-                sys.stdout.write(raw.rstrip() + "\n")
+            # Default behaviour: emit concatenated text, pipe-friendly.
+            sys.stdout.write(data.get("text", raw).rstrip() + "\n")
+        elif response_format == "segments":
+            # Emit the segments array as pretty-printed JSON.
+            segments = data.get("segments")
+            if segments is None:
+                # Older mlx-audio versions may not return verbose_json segments.
+                sys.stderr.write(
+                    "warning: mlx-audio did not return verbose_json segments\n"
+                )
+                segments = [{"start": 0, "end": None, "text": data.get("text", "")}]
+            sys.stdout.write(json.dumps(segments, indent=2, ensure_ascii=False) + "\n")
         else:
+            # Legacy passthroughs: json, srt, vtt, verbose_json — emit raw response.
             sys.stdout.write(raw)
         sys.stdout.flush()
         return 0
