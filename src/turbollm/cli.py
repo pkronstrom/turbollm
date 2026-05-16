@@ -967,6 +967,109 @@ def workflows_run(name, params):
     raise SystemExit(rc)
 
 
+_WORKFLOWS_CONFIG_SUITE = "com.turbollm.hud"
+_WORKFLOWS_CONFIG_KEY_PREFIX = "workflow"
+
+
+def _defaults_key(workflow: str, param: str) -> str:
+    return f"{_WORKFLOWS_CONFIG_KEY_PREFIX}.{workflow}.param.{param}"
+
+
+def _defaults_read(suite: str, key: str) -> str | None:
+    """Read a UserDefaults key from the given suite via /usr/bin/defaults."""
+    result = subprocess.run(
+        ["/usr/bin/defaults", "read", suite, key],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        return None
+    return result.stdout.strip() or None
+
+
+def _defaults_write(suite: str, key: str, value: str) -> None:
+    """Write a UserDefaults string key to the given suite via /usr/bin/defaults."""
+    subprocess.run(
+        ["/usr/bin/defaults", "write", suite, key, "-string", value],
+        check=True,
+    )
+
+
+def _defaults_delete(suite: str, key: str) -> None:
+    """Delete a UserDefaults key from the given suite via /usr/bin/defaults."""
+    subprocess.run(
+        ["/usr/bin/defaults", "delete", suite, key],
+        capture_output=True,  # ignore errors if key doesn't exist
+    )
+
+
+def _defaults_read_all_for_workflow(suite: str, workflow: str) -> dict[str, str]:
+    """Read all param sticky values for a workflow from UserDefaults."""
+    prefix = f"{_WORKFLOWS_CONFIG_KEY_PREFIX}.{workflow}.param."
+    result = subprocess.run(
+        ["/usr/bin/defaults", "read", suite],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        return {}
+    items: dict[str, str] = {}
+    # Parse plist-style output: each line is "    key = value ;" or similar.
+    # Use a simple line-by-line scan; full plist parsing is overkill here.
+    for line in result.stdout.splitlines():
+        stripped = line.strip().rstrip(";").strip()
+        if "=" not in stripped:
+            continue
+        k, _, v = stripped.partition(" = ")
+        k = k.strip().strip('"')
+        v = v.strip().strip('"')
+        if k.startswith(prefix):
+            param = k[len(prefix):]
+            items[param] = v
+    return items
+
+
+@workflows_grp.command(name="config")
+@click.argument("workflow_name")
+@click.argument("assignments", nargs=-1, metavar="[PARAM=VALUE]...")
+def workflows_config(workflow_name, assignments):
+    """Read or write sticky param values for a workflow.
+
+    \b
+    Examples:
+      turbo workflows config record-to-obsidian          # list all stickies
+      turbo workflows config record-to-obsidian vault=/my/vault  # set one
+      turbo workflows config record-to-obsidian vault=   # clear one
+    """
+    suite = _WORKFLOWS_CONFIG_SUITE
+
+    if not assignments:
+        # List all sticky values for this workflow.
+        stickies = _defaults_read_all_for_workflow(suite, workflow_name)
+        if not stickies:
+            console.print(f"[dim]No sticky values for workflow '{workflow_name}'.[/dim]")
+            return
+        for param, value in sorted(stickies.items()):
+            console.print(f"{param} = {value}")
+        return
+
+    for spec in assignments:
+        if "=" not in spec:
+            console.print(
+                f"[red]Invalid assignment '{spec}'.[/red] Expected PARAM=VALUE or PARAM= to clear."
+            )
+            raise SystemExit(2)
+        param, _, value = spec.partition("=")
+        param = param.strip()
+        key = _defaults_key(workflow_name, param)
+        if value:
+            _defaults_write(suite, key, value)
+            console.print(f"Set {param} = {value}")
+        else:
+            _defaults_delete(suite, key)
+            console.print(f"Cleared {param}")
+
+
 # ---------------------------------------------------------------------------
 # Activities (HUD state visibility)
 # ---------------------------------------------------------------------------
