@@ -2,49 +2,11 @@ import { describe, expect, it, vi } from "vitest";
 import { readFileSync } from "fs";
 import { join } from "path";
 
-// Mock @raycast/api so all transitive imports work without the Raycast runtime.
-vi.mock("@raycast/api", () => ({
-  List: Object.assign(
-    (props: Record<string, unknown>) => props,
-    { Item: (props: Record<string, unknown>) => props }
-  ),
-  Detail: (props: Record<string, unknown>) => props,
-  Action: Object.assign(
-    (props: Record<string, unknown>) => props,
-    { SubmitForm: (props: Record<string, unknown>) => props }
-  ),
-  ActionPanel: (props: Record<string, unknown>) => props,
-  Form: Object.assign(
-    (props: Record<string, unknown>) => props,
-    {
-      TextField: (props: Record<string, unknown>) => props,
-      TextArea: (props: Record<string, unknown>) => props,
-      Dropdown: Object.assign(
-        (props: Record<string, unknown>) => props,
-        { Item: (props: Record<string, unknown>) => props }
-      ),
-      FilePicker: (props: Record<string, unknown>) => props,
-      Description: (props: Record<string, unknown>) => props,
-    }
-  ),
-  showToast: vi.fn(),
-  Toast: { Style: { Animated: "animated", Success: "success", Failure: "failure" } },
-  useNavigation: () => ({ pop: vi.fn(), push: vi.fn() }),
-  LocalStorage: {
-    getItem: vi.fn(),
-    setItem: vi.fn(),
-    removeItem: vi.fn(),
-    allItems: vi.fn(),
-  },
-  getPreferenceValues: vi.fn(() => ({})),
-}));
-
+// @raycast/api is aliased to test/__mocks__/raycast-api.ts via vitest.config.ts.
+// child_process is mocked so importing run-workflow.tsx doesn't error.
 vi.mock("child_process", () => ({
   exec: vi.fn(),
-  spawn: vi.fn(() => ({
-    stderr: { on: vi.fn() },
-    on: vi.fn(),
-  })),
+  spawn: vi.fn(() => ({ stderr: { on: vi.fn() }, on: vi.fn() })),
 }));
 
 describe("extension scaffold", () => {
