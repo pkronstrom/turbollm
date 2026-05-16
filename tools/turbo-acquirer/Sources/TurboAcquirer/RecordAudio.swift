@@ -278,14 +278,31 @@ enum RecordAudio {
         engine.attach(mixer)
         engine.attach(player)
 
-        // Connect mic input → mixer bus 0. Use the input node's native hardware
-        // format on the mic side; the mixer down-mixes/resamples to the target format.
+        // Two sources fanning into one mixer require explicit input bus
+        // indices — `engine.connect(src, to: mixer, format:)` defaults to
+        // mixer.bus 0 for every call, so the second connection would
+        // silently clobber the first.
         let inputNode = engine.inputNode
         let nativeMicFormat = inputNode.outputFormat(forBus: 0)
-        engine.connect(inputNode, to: mixer, format: nativeMicFormat)
-        // Connect player → mixer bus 1.
-        engine.connect(player, to: mixer, format: targetFormat)
-        // Tap mixer output → file.
+        engine.connect(inputNode, to: mixer, fromBus: 0, toBus: 0, format: nativeMicFormat)
+        engine.connect(player, to: mixer, fromBus: 0, toBus: 1, format: targetFormat)
+
+        // AVAudioEngine refuses to start any input chain that does not
+        // ultimately reach `outputNode` — the AUGraph validator throws
+        // kAudioUnitErr_FormatNotSupported (-10868) inside
+        // `AUGraphParser::InitializeActiveNodesInInputChain` with no
+        // useful detail beyond "input chain not connected". Wire the
+        // mixer to the main mixer (→ outputNode) to satisfy the
+        // topology, and mute the main mixer so the mic does not loop
+        // back through the speakers. The tap on `mixer` still captures
+        // the full mix because it sits upstream of the muted sink.
+        // Manual smoke (T-33) caught this in CLI context; the original
+        // HUD code suffered the same bug but presumably hadn't been
+        // exercised against `system+mic` since the b22c9cd fix landed.
+        engine.connect(mixer, to: engine.mainMixerNode, format: targetFormat)
+        engine.mainMixerNode.outputVolume = 0
+
+        // Tap mixer output → file. Sits upstream of the muted main mixer.
         mixer.installTap(onBus: 0, bufferSize: 4096, format: targetFormat) { buffer, _ in
             try? audioFile.write(from: buffer)
         }

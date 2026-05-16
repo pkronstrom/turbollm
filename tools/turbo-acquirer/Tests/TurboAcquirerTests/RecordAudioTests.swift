@@ -77,6 +77,30 @@ final class RecordAudioTests: XCTestCase {
 
     // MARK: - Tap-format contract assertion (T-9 Step 1)
     //
+    /// Source-level guard for the T-33 smoke fix: the system+mic graph
+    /// must terminate at `mainMixerNode` (which runs to outputNode), or
+    /// AVAudioEngine refuses to start with kAudioUnitErr_FormatNotSupported
+    /// (-10868) inside `AUGraphParser::InitializeActiveNodesInInputChain`.
+    /// The `mainMixerNode.outputVolume = 0` line mutes the speaker output
+    /// to prevent mic→speaker feedback. Without both lines, every
+    /// `system+mic` recording exits 1 the moment `engine.start()` is called.
+    func test_system_plus_mic_terminates_input_chain_at_muted_mainMixer() throws {
+        let sourceURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("Sources/TurboAcquirer/RecordAudio.swift")
+        let source = try String(contentsOf: sourceURL, encoding: .utf8)
+        XCTAssertTrue(
+            source.contains("engine.connect(mixer, to: engine.mainMixerNode"),
+            "system+mic graph must wire mixer to mainMixerNode to satisfy AUGraph input-chain validation."
+        )
+        XCTAssertTrue(
+            source.contains("engine.mainMixerNode.outputVolume = 0"),
+            "Main mixer must be muted to prevent mic→speaker feedback."
+        )
+    }
+
     // We cannot start AVAudioEngine in a unit test environment (no real hardware I/O).
     // Instead, verify the architectural invariant in RecordAudio.swift: the code
     // must reference `inputNode.outputFormat(forBus: 0)` for the tap format, NOT a
