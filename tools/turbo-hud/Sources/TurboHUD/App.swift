@@ -21,11 +21,6 @@ class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         iconController = StatusIconController(statusItem: statusItem, state: state)
 
-        // Wire SessionController so it can update AppState during sessions.
-        Task { @MainActor in
-            SessionController.shared.appState = self.state
-        }
-
         // Refresh menu state when the user picks a scope/device from a submenu.
         MenuTarget.shared.onSettingsChanged = { [weak self] in
             self?.refreshMenu()
@@ -40,20 +35,8 @@ class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
             self?.refreshMenu()
         }
 
-        URLSchemeHandler.install { [weak self] parsed in
-            guard let self else { return }
-            guard let wf = self.state.workflows.first(where: { $0.name == parsed.workflowName }) else {
-                // surface "unknown workflow" via menu notification — Plan 3 polish
-                return
-            }
-            // URL params write through to sticky settings (per spec.md "URL scheme handoff").
-            // The user's intent in sending a URL is "use these values"; making them
-            // sticky also lets the user re-run the same workflow from the menu later.
-            for (k, v) in parsed.params {
-                self.settings.setParamValue(workflow: wf.name, param: k, value: v)
-            }
-            self.runWorkflow(wf)
-        }
+        // T-21/B-G: URLSchemeHandler now shells out to turbo workflows run directly.
+        URLSchemeHandler.install()
 
         refreshMenu()
     }
@@ -94,27 +77,21 @@ class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
         rebuildMenuFromState()
     }
 
+    /// T-21: Shell out to `turbo workflows run <name>` unconditionally.
+    /// All param resolution (configured, acquired) is now performed by the CLI.
     func runWorkflow(_ wf: Workflow) {
-        let acquiredTypes: Set<String> = ["audio-recording", "screenshot-manual", "command"]
-        let hasAcquiredParam = wf.params.contains { acquiredTypes.contains($0.type) }
-        if hasAcquiredParam {
-            // Route through SessionController — it manages acquirers, session state,
-            // and spawns the workflow command after all params are collected.
-            let settings = self.settings
-            Task { @MainActor in
-                await SessionController.shared.start(workflow: wf, settings: settings)
-            }
-        } else {
-            // Configured-only workflow: existing Plan 2 path.
-            Task.detached { [weak self] in
-                guard let settings = self?.settings else { return }
-                do {
-                    try WorkflowRunner.run(wf, settings: settings)
-                } catch {
-                    NSLog("workflow run failed: \(error)")
-                }
+        var args = ["turbo", "workflows", "run", wf.name]
+        // Pass any pre-resolved sticky params so the CLI can skip prompts.
+        for p in wf.params where p.type != "audio-recording" && p.type != "screenshot-manual" && p.type != "command" {
+            if let sticky = settings.paramValue(workflow: wf.name, param: p.name), !sticky.isEmpty {
+                args.append("--param")
+                args.append("\(p.name)=\(sticky)")
             }
         }
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        proc.arguments = args
+        try? proc.run()
     }
 
     func editParam(_ wf: Workflow, _ p: WorkflowParam) {

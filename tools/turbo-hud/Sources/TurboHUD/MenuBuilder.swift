@@ -1,6 +1,101 @@
 import AppKit
 import AVFoundation
+import CoreGraphics
 import Foundation
+
+// MARK: - Permissions types (absorbed from deleted Permissions.swift + Permissions+UI.swift)
+
+enum PermissionKind {
+    case microphone
+    case screenRecording
+}
+
+struct PermissionState {
+    var microphone: AVAuthorizationStatus
+    var screenRecording: Bool
+}
+
+/// Thin helpers for TCC state queries and grant menu items.
+/// Permissions.swift and Permissions+UI.swift were deleted in T-22;
+/// the types they provided are inlined here (T-27).
+enum Permissions {
+    private static var cachedState: PermissionState?
+    private static var lastPollDate: Date?
+
+    static var openerOverride: ((URL) -> Void)? = nil
+
+    static func state() -> PermissionState {
+        let now = Date()
+        if let cached = cachedState, let lastPoll = lastPollDate,
+           now.timeIntervalSince(lastPoll) < 1.0 {
+            return cached
+        }
+        let fresh = PermissionState(
+            microphone: AVCaptureDevice.authorizationStatus(for: .audio),
+            screenRecording: CGPreflightScreenCaptureAccess()
+        )
+        cachedState = fresh
+        lastPollDate = now
+        return fresh
+    }
+
+    static func settingsURL(for kind: PermissionKind) -> URL {
+        switch kind {
+        case .microphone:
+            return URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")!
+        case .screenRecording:
+            return URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!
+        }
+    }
+
+    static func openSystemSettings(for kind: PermissionKind) {
+        let url = settingsURL(for: kind)
+        if let override = openerOverride {
+            override(url)
+        } else {
+            NSWorkspace.shared.open(url)
+        }
+    }
+
+    static func grantMenuItem(for kind: PermissionKind) -> NSMenuItem {
+        let title: String
+        switch kind {
+        case .microphone:        title = "⚠ Grant Microphone access…"
+        case .screenRecording:   title = "⚠ Grant Screen Recording access…"
+        }
+        let item = NSMenuItem(
+            title: title,
+            action: #selector(PermissionsMenuTarget.openSettings(_:)),
+            keyEquivalent: ""
+        )
+        let target = PermissionsMenuTarget(kind: kind)
+        item.representedObject = target
+        item.target = target
+        item.isEnabled = true
+        return item
+    }
+}
+
+/// Action target for grant-permission menu items.
+final class PermissionsMenuTarget: NSObject {
+    let kind: PermissionKind
+
+    init(kind: PermissionKind) {
+        self.kind = kind
+    }
+
+    @objc func openSettings(_ sender: NSMenuItem) {
+        switch kind {
+        case .microphone:
+            AVCaptureDevice.requestAccess(for: .audio) { _ in }
+        case .screenRecording:
+            _ = CGRequestScreenCaptureAccess()
+        }
+        Permissions.openSystemSettings(for: kind)
+    }
+}
+
+// MARK: - MenuBuilder
 
 enum MenuBuilder {
     private static let acquiredTypes: Set<String> = ["audio-recording", "screenshot-manual", "command"]
@@ -311,12 +406,6 @@ final class MenuTarget: NSObject {
     @objc func stopAcquirer(_ sender: NSMenuItem) {
         guard let pidNumber = sender.representedObject as? NSNumber else { return }
         _ = killFunction(pid_t(pidNumber.intValue), SIGTERM)
-    }
-
-    @objc func stopSession(_ sender: NSMenuItem) {
-        Task { @MainActor in
-            SessionController.shared.cancel()
-        }
     }
 
     @objc func selectScope(_ sender: NSMenuItem) {

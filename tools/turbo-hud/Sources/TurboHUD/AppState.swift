@@ -8,6 +8,4 @@ final class AppState {
     var workflows: [Workflow] = []
     var workflowsError: String? = nil
     var currentAcquirerActivity: Activity? = nil
-    /// Legacy: kept for SessionController compile compatibility; deleted with SessionController in B-G.
-    var activeSession: SessionState? = nil
 }
