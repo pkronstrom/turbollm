@@ -100,3 +100,29 @@ describe("getAllowedExtensions", () => {
     expect(getAllowedExtensions(param)).toBeUndefined();
   });
 });
+
+// ── T-21: acquired-param handling ─────────────────────────────────────────────
+
+describe("acquired param handling", () => {
+  it("acquired params absent from values produce no --param flags", () => {
+    // Acquired params (audio-recording, screen-recording, etc.) render as
+    // Form.Description — no form field, so they don't appear in submit values.
+    const args = buildArgsForSubmit("record-to-obsidian", {
+      vault: "/vault",
+      // no "audio" key — it was an acquired param with no form field
+    });
+    expect(args).not.toContain("audio");
+    expect(args).toEqual([
+      "workflows",
+      "run",
+      "record-to-obsidian",
+      "--param",
+      "vault=/vault",
+    ]);
+  });
+
+  it("submit with only acquired params (no user-fillable fields) produces minimal args", () => {
+    const args = buildArgsForSubmit("record-only", {});
+    expect(args).toEqual(["workflows", "run", "record-only"]);
+  });
+});
