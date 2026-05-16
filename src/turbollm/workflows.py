@@ -351,8 +351,14 @@ def _acquirer_argv(
         threshold = param.get("keyframe_threshold")
         min_interval = param.get("min_interval_ms")
         max_kf = param.get("max_keyframes")
+        if workflow_name:
+            scope = _read_hud_override(workflow_name, pname, "scope") or scope
         if scope:
             argv += ["--scope", scope]
+        if scope == "region" and workflow_name:
+            region = _read_hud_override(workflow_name, pname, "region")
+            if region:
+                argv += ["--region", region]
         if threshold is not None:
             argv += ["--keyframe-threshold", str(threshold)]
         if min_interval is not None:

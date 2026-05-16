@@ -545,6 +545,114 @@ def test_acquirer_argv_screenshot_explicit_output_dir_wins():
     assert argv[argv.index("--output-dir") + 1] == "/tmp/custom"
 
 
+# ---------- T-fix-2: screen-recording argv reads HUD scope/region stickies ----------
+
+
+def test_acquirer_argv_screen_recording_uses_hud_scope_override(monkeypatch):
+    """HUD scope sticky wins over the static TOML scope for screen-recording."""
+
+    captured = []
+
+    def fake_run(argv, *_, **__):
+        captured.append(argv)
+
+        class _R:
+            returncode = 0
+            stdout = "display\n"
+
+        return _R()
+
+    monkeypatch.setattr(workflows._subprocess, "run", fake_run)
+
+    param = {
+        "name": "screen",
+        "type": "screen-recording",
+        "scope": "window",  # workflow default, should be overridden
+    }
+    argv = workflows._acquirer_argv(
+        "/usr/local/bin/turbo-acquirer",
+        param,
+        workflow_name="record-meeting-with-screen",
+    )
+
+    assert "--scope" in argv
+    assert argv[argv.index("--scope") + 1] == "display"
+    # The HUD suite+key convention must have been queried.
+    keys_read = [
+        a[3]
+        for a in captured
+        if a[:3] == ["/usr/bin/defaults", "read", "com.turbollm.hud"]
+    ]
+    assert "record-meeting-with-screen.screen.scope" in keys_read
+
+
+def test_acquirer_argv_screen_recording_region_scope_includes_region(monkeypatch):
+    """When scope==region, the HUD region sticky must be passed as --region."""
+
+    def fake_run(argv, *_, **__):
+        class _R:
+            returncode = 0
+            stdout = ""
+
+        if argv[:3] == ["/usr/bin/defaults", "read", "com.turbollm.hud"]:
+            if argv[3].endswith(".scope"):
+                _R.stdout = "region\n"
+            elif argv[3].endswith(".region"):
+                _R.stdout = "100,200,800,600\n"
+        return _R()
+
+    monkeypatch.setattr(workflows._subprocess, "run", fake_run)
+
+    param = {"name": "screen", "type": "screen-recording"}
+    argv = workflows._acquirer_argv(
+        "/usr/local/bin/turbo-acquirer",
+        param,
+        workflow_name="record-meeting-with-screen",
+    )
+
+    assert "--scope" in argv
+    assert argv[argv.index("--scope") + 1] == "region"
+    assert "--region" in argv
+    assert argv[argv.index("--region") + 1] == "100,200,800,600"
+
+
+def test_acquirer_argv_screen_recording_no_hud_lookup_without_workflow_name(monkeypatch):
+    """Calling without workflow_name must not shell out to defaults (screen-recording)."""
+
+    def fail_run(*_, **__):
+        raise AssertionError("defaults read must not be called without workflow_name")
+
+    monkeypatch.setattr(workflows._subprocess, "run", fail_run)
+
+    param = {"name": "screen", "type": "screen-recording", "scope": "display"}
+    argv = workflows._acquirer_argv("/x/turbo-acquirer", param)
+    assert "--scope" in argv
+    assert argv[argv.index("--scope") + 1] == "display"
+    # No --region without workflow_name even if scope were region.
+
+
+def test_acquirer_argv_screen_recording_falls_back_to_workflow_scope(monkeypatch):
+    """No HUD scope sticky → static workflow scope is used for screen-recording."""
+
+    def fake_run(*_, **__):
+        class _R:
+            returncode = 1
+            stdout = ""
+
+        return _R()
+
+    monkeypatch.setattr(workflows._subprocess, "run", fake_run)
+
+    param = {"name": "screen", "type": "screen-recording", "scope": "window"}
+    argv = workflows._acquirer_argv(
+        "/x/turbo-acquirer",
+        param,
+        workflow_name="some-workflow",
+    )
+    assert "--scope" in argv
+    assert argv[argv.index("--scope") + 1] == "window"
+
+
 # ---------- T-7: TURBO_T0_NS time-origin alignment ----------
 
 
