@@ -1,0 +1,36 @@
+{
+  "$schema": "https://www.raycast.com/schemas/extension.json",
+  "name": "turbollm",
+  "title": "Turbollm Workflows",
+  "description": "Run and monitor turbollm workflows from Raycast",
+  "icon": "assets/command-icon.png",
+  "author": "turbollm",
+  "categories": ["Productivity"],
+  "license": "MIT",
+  "commands": [
+    {
+      "name": "run-workflow",
+      "title": "Run Turbollm Workflow",
+      "subtitle": "Pick from list",
+      "description": "List and run turbollm workflows",
+      "mode": "view"
+    }
+  ],
+  "preferences": [],
+  "dependencies": {
+    "@raycast/api": "^1.79.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "@types/react": "^18.3.0",
+    "react": "^18.3.0",
+    "typescript": "^5.4.0",
+    "vitest": "^1.6.0"
+  },
+  "scripts": {
+    "build": "ray build -e dist",
+    "dev": "ray develop",
+    "lint": "ray lint",
+    "test": "vitest run"
+  }
+}
