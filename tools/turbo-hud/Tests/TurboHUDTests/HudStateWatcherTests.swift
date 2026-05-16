@@ -8,8 +8,11 @@ final class HudStateWatcherTests: XCTestCase {
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: dir) }
 
+        // Use a recent timestamp so the entry is not GC'd by the 24h staleness purge.
+        let formatter = ISO8601DateFormatter()
+        let startedAt = formatter.string(from: Date())
         let f1 = dir.appendingPathComponent("activity-x.json")
-        try #"{"id":"x","kind":"workflow","label":"L1","icon":null,"color":null,"phase":null,"started_at":"2026-01-15T10:00:00Z","owner_pid":\#(ProcessInfo.processInfo.processIdentifier)}"#.write(to: f1, atomically: true, encoding: .utf8)
+        try #"{"id":"x","kind":"workflow","label":"L1","icon":null,"color":null,"phase":null,"started_at":"\#(startedAt)","owner_pid":\#(ProcessInfo.processInfo.processIdentifier)}"#.write(to: f1, atomically: true, encoding: .utf8)
 
         let watcher = HudStateWatcher(stateDir: dir)
         let activities = watcher.loadCurrent()
@@ -150,9 +153,12 @@ final class HudStateWatcherTests: XCTestCase {
         defer { sleepProc.terminate() }
 
         // Write an activity file with a live owner PID (the current process) and the child.
+        // Use a recent timestamp so the entry is not GC'd by the 24h staleness purge.
         let livePid = ProcessInfo.processInfo.processIdentifier
+        let formatter = ISO8601DateFormatter()
+        let startedAt = formatter.string(from: Date())
         let f = dir.appendingPathComponent("activity-live.json")
-        try #"{"id":"live","kind":"workflow","label":"L","icon":null,"color":null,"phase":null,"started_at":"2026-01-15T10:00:00Z","owner_pid":\#(livePid),"children":[\#(childPid)]}"#.write(to: f, atomically: true, encoding: .utf8)
+        try #"{"id":"live","kind":"workflow","label":"L","icon":null,"color":null,"phase":null,"started_at":"\#(startedAt)","owner_pid":\#(livePid),"children":[\#(childPid)]}"#.write(to: f, atomically: true, encoding: .utf8)
 
         let watcher = HudStateWatcher(stateDir: dir)
         _ = watcher.loadCurrent()
