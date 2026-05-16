@@ -153,19 +153,105 @@ final class MenuBuilderTests: XCTestCase {
         XCTAssertFalse(appMicItem!.isEnabled, "app+mic must be disabled (v2)")
     }
 
-    func test_stop_row_appears_when_session_active() {
+    func test_stop_row_appears_when_acquirer_active() {
         let state = AppState()
-        let wf = Workflow(name: "rec", description: nil, command: nil, script: nil,
-                          args: nil, env: nil, params: [])
-        state.activeSession = SessionState(id: UUID(), workflow: wf,
-                                           startedAt: Date(), phase: "Running")
+        state.currentAcquirerActivity = Activity(
+            id: "acq-1", kind: "acquirer", label: "audio (mic-only)",
+            icon: nil, color: nil, phase: nil,
+            startedAt: Date(), ownerPid: 41010, children: [], parentId: nil)
         let menu = MenuBuilder.build(state: state, settings: Settings(suiteName: "t.\(UUID().uuidString)"),
                                      onRunWorkflow: { _ in }, onEditParam: { _, _ in })
         let stopItem = menu.items.first
         XCTAssertNotNil(stopItem)
-        XCTAssertTrue(stopItem!.title.hasPrefix("⏹ Stop recording"),
-                      "When a session is active, the first menu item must be the Stop row.")
-        XCTAssertTrue(stopItem!.title.contains("rec"))
+        XCTAssertTrue(stopItem!.title.hasPrefix("⏹ Stop"),
+                      "When an acquirer is active, the first menu item must be the Stop row.")
+        XCTAssertTrue(stopItem!.title.contains("audio (mic-only)"),
+                      "Stop row title must include the acquirer label.")
+    }
+
+    // MARK: - T-19: Stop row sends SIGTERM to acquirer PID
+
+    func test_stop_row_action_calls_kill_with_acquirer_pid() {
+        let state = AppState()
+        state.currentAcquirerActivity = Activity(
+            id: "acq-2", kind: "acquirer", label: "audio (mic-only)",
+            icon: nil, color: nil, phase: nil,
+            startedAt: Date(), ownerPid: 41010, children: [], parentId: nil)
+        let menu = MenuBuilder.build(state: state, settings: Settings(suiteName: "t.\(UUID().uuidString)"),
+                                     onRunWorkflow: { _ in }, onEditParam: { _, _ in })
+        let stopItem = menu.items.first!
+        XCTAssertEqual(stopItem.action, #selector(MenuTarget.stopAcquirer(_:)))
+
+        var killedPid: pid_t = 0
+        var killedSig: Int32 = 0
+        MenuTarget.shared.killFunction = { pid, sig in
+            killedPid = pid
+            killedSig = sig
+            return 0
+        }
+        defer { MenuTarget.shared.killFunction = { pid, sig in kill(pid, sig) } }
+
+        _ = stopItem.target?.perform(stopItem.action!, with: stopItem)
+
+        XCTAssertEqual(killedPid, 41010, "Stop must send SIGTERM to the acquirer's PID")
+        XCTAssertEqual(killedSig, SIGTERM, "Stop must send SIGTERM specifically")
+    }
+
+    // MARK: - T-20: Permissions via test seam
+
+    func test_permissions_seam_mic_denied_shows_grant_row() {
+        // Use the test seam to avoid a real subprocess call
+        MenuBuilder.permissionsStateOverride = PermissionState(
+            microphone: .denied,
+            screenRecording: true
+        )
+        defer { MenuBuilder.permissionsStateOverride = nil }
+
+        let state = AppState()
+        state.workflows = [
+            Workflow(name: "rec", description: nil, command: nil, script: "s", args: nil, env: nil,
+                     params: [
+                        WorkflowParam(name: "audio", type: "audio-recording", mode: "primary",
+                                      defaultValue: nil, defaultEnv: nil, auto: nil,
+                                      options: nil, extensions: nil,
+                                      scope: "mic-only", command: nil)
+                     ])
+        ]
+        let menu = MenuBuilder.build(state: state, settings: Settings(suiteName: "t.\(UUID().uuidString)"),
+                                     onRunWorkflow: { _ in }, onEditParam: { _, _ in })
+        let wfItem = menu.items.first(where: { $0.title == "rec" })
+        let submenuItems = wfItem?.submenu?.items ?? []
+        let grantItem = submenuItems.first(where: { $0.title.contains("Grant Microphone") })
+        XCTAssertNotNil(grantItem, "Grant Microphone row must appear when mic is denied (via seam).")
+        let runItem = submenuItems.first(where: { $0.title.hasPrefix("▶ Run") })
+        XCTAssertFalse(runItem?.isEnabled ?? true, "Run must be disabled when mic is denied.")
+    }
+
+    func test_permissions_seam_all_granted_no_grant_rows() {
+        MenuBuilder.permissionsStateOverride = PermissionState(
+            microphone: .authorized,
+            screenRecording: true
+        )
+        defer { MenuBuilder.permissionsStateOverride = nil }
+
+        let state = AppState()
+        state.workflows = [
+            Workflow(name: "rec", description: nil, command: nil, script: "s", args: nil, env: nil,
+                     params: [
+                        WorkflowParam(name: "audio", type: "audio-recording", mode: "primary",
+                                      defaultValue: nil, defaultEnv: nil, auto: nil,
+                                      options: nil, extensions: nil,
+                                      scope: "mic-only", command: nil)
+                     ])
+        ]
+        let menu = MenuBuilder.build(state: state, settings: Settings(suiteName: "t.\(UUID().uuidString)"),
+                                     onRunWorkflow: { _ in }, onEditParam: { _, _ in })
+        let wfItem = menu.items.first(where: { $0.title == "rec" })
+        let submenuItems = wfItem?.submenu?.items ?? []
+        let grantItem = submenuItems.first(where: { $0.title.contains("Grant") })
+        XCTAssertNil(grantItem, "No grant rows when all permissions are authorized.")
+        let runItem = submenuItems.first(where: { $0.title.hasPrefix("▶ Run") })
+        XCTAssertTrue(runItem?.isEnabled ?? false, "Run must be enabled when all permissions are authorized.")
     }
 
     func test_mic_denied_shows_grant_row_and_disables_run() {

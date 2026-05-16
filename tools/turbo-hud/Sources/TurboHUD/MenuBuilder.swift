@@ -1,8 +1,68 @@
 import AppKit
 import AVFoundation
+import Foundation
 
 enum MenuBuilder {
     private static let acquiredTypes: Set<String> = ["audio-recording", "screenshot-manual", "command"]
+
+    // MARK: - T-20: permissions via subprocess
+
+    /// Test seam: override to avoid spawning turbo-acquirer during unit tests.
+    static var permissionsStateOverride: PermissionState? = nil
+
+    /// Reads TCC state by running `turbo-acquirer permissions-state`.
+    /// Falls back to direct TCC query if the binary is not found.
+    /// Results are cached inside `turbo-acquirer` itself (1-second file TTL).
+    static func permissionsState() -> PermissionState {
+        if let override = permissionsStateOverride {
+            return override
+        }
+        return runPermissionsStateSubprocess() ?? Permissions.state()
+    }
+
+    private static func runPermissionsStateSubprocess() -> PermissionState? {
+        // Locate turbo-acquirer: prefer ~/.local/bin (sidecar symlink), then PATH.
+        let candidates = [
+            FileManager.default.homeDirectoryForCurrentUser
+                .appendingPathComponent(".local/bin/turbo-acquirer").path,
+            "/usr/local/bin/turbo-acquirer",
+        ]
+        guard let binaryPath = candidates.first(where: { FileManager.default.isExecutableFile(atPath: $0) }) else {
+            return nil
+        }
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: binaryPath)
+        proc.arguments = ["permissions-state"]
+        let pipe = Pipe()
+        proc.standardOutput = pipe
+        proc.standardError = Pipe()
+        do {
+            try proc.run()
+            proc.waitUntilExit()
+        } catch {
+            return nil
+        }
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        return parsePermissionsJSON(data)
+    }
+
+    private static func parsePermissionsJSON(_ data: Data) -> PermissionState? {
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let micString = json["microphone"] as? String,
+              let screenRecording = json["screenRecording"] as? Bool else {
+            return nil
+        }
+        let mic: AVAuthorizationStatus
+        switch micString {
+        case "authorized":   mic = .authorized
+        case "denied":       mic = .denied
+        case "restricted":   mic = .restricted
+        default:             mic = .notDetermined
+        }
+        return PermissionState(microphone: mic, screenRecording: screenRecording)
+    }
+
+    // MARK: - Menu build
 
     static func build(state: AppState,
                       settings: Settings,
@@ -14,13 +74,14 @@ enum MenuBuilder {
         // resolve. Disable auto-enable here and on every submenu we attach.
         menu.autoenablesItems = false
 
-        // Stop row — appears when a session is active.
-        if let session = state.activeSession {
+        // Stop row — appears when an acquirer is active.
+        if let acquirer = state.currentAcquirerActivity {
             let stopItem = NSMenuItem(
-                title: "⏹ Stop recording \(session.workflow.name)",
-                action: #selector(MenuTarget.stopSession(_:)),
+                title: "⏹ Stop \(acquirer.label)",
+                action: #selector(MenuTarget.stopAcquirer(_:)),
                 keyEquivalent: ""
             )
+            stopItem.representedObject = NSNumber(value: acquirer.ownerPid)
             stopItem.target = MenuTarget.shared
             stopItem.isEnabled = true
             menu.addItem(stopItem)
@@ -52,7 +113,7 @@ enum MenuBuilder {
             item.isEnabled = false
             menu.addItem(item)
         } else {
-            let permState = Permissions.state()
+            let permState = permissionsState()
             for wf in state.workflows {
                 let item = NSMenuItem(title: wf.name, action: nil, keyEquivalent: "")
                 item.toolTip = wf.description
@@ -242,6 +303,14 @@ final class MenuTarget: NSObject {
     @objc func editParam(_ sender: NSMenuItem) {
         guard let b = sender.representedObject as? WorkflowParamBinding else { return }
         onEdit?(b.workflow, b.param)
+    }
+
+    /// T-19 test seam: allows tests to intercept the kill call.
+    var killFunction: (pid_t, Int32) -> Int32 = { pid, sig in kill(pid, sig) }
+
+    @objc func stopAcquirer(_ sender: NSMenuItem) {
+        guard let pidNumber = sender.representedObject as? NSNumber else { return }
+        _ = killFunction(pid_t(pidNumber.intValue), SIGTERM)
     }
 
     @objc func stopSession(_ sender: NSMenuItem) {
