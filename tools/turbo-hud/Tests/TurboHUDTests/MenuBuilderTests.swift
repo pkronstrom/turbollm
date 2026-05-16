@@ -8,7 +8,7 @@ final class MenuBuilderTests: XCTestCase {
         state.activities = [
             Activity(id: "a1", kind: "workflow", label: "Running x",
                      icon: nil, color: nil, phase: nil,
-                     startedAt: Date(), ownerPid: 1, children: [])
+                     startedAt: Date(), ownerPid: 1, children: [], parentId: nil)
         ]
         state.workflows = [
             Workflow(name: "transcribe-file", description: "Transcribe", command: nil,

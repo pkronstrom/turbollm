@@ -10,11 +10,13 @@ struct Activity: Identifiable, Equatable {
     let startedAt: Date
     let ownerPid: Int
     let children: [Int]
+    let parentId: String?
 
     enum CodingKeys: String, CodingKey {
         case id, kind, label, icon, color, phase, children
         case startedAt = "started_at"
         case ownerPid = "owner_pid"
+        case parentId = "parent_id"
     }
 }
 
@@ -30,6 +32,7 @@ extension Activity: Codable {
         startedAt = try c.decode(Date.self, forKey: .startedAt)
         ownerPid = try c.decode(Int.self, forKey: .ownerPid)
         children = try c.decodeIfPresent([Int].self, forKey: .children) ?? []
+        parentId = try c.decodeIfPresent(String.self, forKey: .parentId)
     }
 }
 

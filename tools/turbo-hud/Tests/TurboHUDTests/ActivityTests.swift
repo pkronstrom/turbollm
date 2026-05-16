@@ -53,4 +53,31 @@ final class ActivityTests: XCTestCase {
         let activity = try JSONDecoder.activity().decode(Activity.self, from: data)
         XCTAssertEqual(activity.children, [1, 2, 3])
     }
+
+    func test_decode_parent_id_absent_defaults_to_nil() throws {
+        let json = #"""
+        {"id":"c","kind":"acquirer","label":"audio (mic-only)","icon":null,"color":null,"phase":null,"started_at":"2026-01-15T15:30:00Z","owner_pid":42}
+        """#
+        let data = json.data(using: .utf8)!
+        let activity = try JSONDecoder.activity().decode(Activity.self, from: data)
+        XCTAssertNil(activity.parentId)
+    }
+
+    func test_decode_parent_id_present() throws {
+        let json = #"""
+        {"id":"d","kind":"acquirer","label":"audio (mic-only)","icon":null,"color":null,"phase":null,"started_at":"2026-01-15T15:30:00Z","owner_pid":42,"parent_id":"workflow-uuid-123"}
+        """#
+        let data = json.data(using: .utf8)!
+        let activity = try JSONDecoder.activity().decode(Activity.self, from: data)
+        XCTAssertEqual(activity.parentId, "workflow-uuid-123")
+    }
+
+    func test_decode_parent_id_null_is_nil() throws {
+        let json = #"""
+        {"id":"e","kind":"acquirer","label":"audio","icon":null,"color":null,"phase":null,"started_at":"2026-01-15T15:30:00Z","owner_pid":42,"parent_id":null}
+        """#
+        let data = json.data(using: .utf8)!
+        let activity = try JSONDecoder.activity().decode(Activity.self, from: data)
+        XCTAssertNil(activity.parentId)
+    }
 }
