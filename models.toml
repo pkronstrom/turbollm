@@ -348,20 +348,23 @@ title="${2:-${bn%.*}}"
 out="$vault/Meetings/$(date +%Y-%m-%d)-$title.md"
 mkdir -p "$(dirname "$out")"
 
-summary="$(turbo transcribe "$1" | pi --no-extensions -p 'Summarize this meeting transcript. Output markdown with sections: Summary, Decisions, Action items (owner if mentioned), Open questions.')"
+# Capture the transcript once, then both summarize it AND embed it in the
+# output. Lets the user compare summary vs. ASR truth.
+transcript="$(turbo transcribe "$1")"
+summary="$(printf '%s' "$transcript" | pi --no-extensions -p 'You are given a meeting transcript on stdin. Summarize it. Output markdown with sections: Summary, Decisions, Action items (owner if mentioned), Open questions. Base every claim on the transcript text only; if a section has no content, write "None".')"
 
-cat > "$out" <<EOF
----
-date: $(date -Iseconds)
-source: $1
-tags: [meeting, auto-transcribed]
-model: parakeet-v3 + local-llm
----
-
-# $title
-
-$summary
-EOF
+{
+  printf -- '---\n'
+  printf 'date: %s\n' "$(date -Iseconds)"
+  printf 'source: %s\n' "$1"
+  printf 'tags: [meeting, auto-transcribed]\n'
+  printf 'model: parakeet-v3 + local-llm\n'
+  printf -- '---\n\n'
+  printf '# %s\n\n' "$title"
+  printf '%s\n\n' "$summary"
+  printf -- '---\n\n## Raw transcript\n\n'
+  printf '%s\n' "$transcript"
+} > "$out"
 
 echo "Wrote: $out" >&2
 """
