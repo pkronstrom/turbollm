@@ -15,12 +15,14 @@ struct Activity: Codable {
     let ownerPid: Int
     let children: [Int]
     let parentId: String?
+    let screenFrames: [String]
 
     enum CodingKeys: String, CodingKey {
         case id, kind, label, icon, color, phase, children
         case startedAt = "started_at"
         case ownerPid = "owner_pid"
         case parentId = "parent_id"
+        case screenFrames = "screen_frames"
     }
 
     init(from decoder: Decoder) throws {
@@ -35,6 +37,7 @@ struct Activity: Codable {
         ownerPid = try c.decode(Int.self, forKey: .ownerPid)
         children = try c.decodeIfPresent([Int].self, forKey: .children) ?? []
         parentId = try c.decodeIfPresent(String.self, forKey: .parentId)
+        screenFrames = try c.decodeIfPresent([String].self, forKey: .screenFrames) ?? []
     }
 }
 

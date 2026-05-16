@@ -175,4 +175,68 @@ final class ActivityFileTests: XCTestCase {
         let activity = try JSONDecoder.activity().decode(Activity.self, from: readData)
         XCTAssertNil(activity.parentId)
     }
+
+    // MARK: - screen_frames field (T-2)
+
+    func test_decode_screen_frames_absent_defaults_to_empty() throws {
+        let json = #"""
+        {
+          "id": "screen-uuid-1",
+          "kind": "acquirer",
+          "label": "screen",
+          "icon": null,
+          "color": null,
+          "phase": null,
+          "started_at": "2026-01-15T15:30:00Z",
+          "owner_pid": 42
+        }
+        """#
+        let data = json.data(using: .utf8)!
+        let activity = try JSONDecoder.activity().decode(Activity.self, from: data)
+        XCTAssertEqual(activity.screenFrames, [])
+    }
+
+    func test_decode_screen_frames_present() throws {
+        let json = #"""
+        {
+          "id": "screen-uuid-2",
+          "kind": "acquirer",
+          "label": "screen",
+          "icon": null,
+          "color": null,
+          "phase": null,
+          "started_at": "2026-01-15T15:30:00Z",
+          "owner_pid": 42,
+          "screen_frames": ["/tmp/frames/001-T+0.png", "/tmp/frames/002-T+1500.png"]
+        }
+        """#
+        let data = json.data(using: .utf8)!
+        let activity = try JSONDecoder.activity().decode(Activity.self, from: data)
+        XCTAssertEqual(activity.screenFrames, [
+            "/tmp/frames/001-T+0.png",
+            "/tmp/frames/002-T+1500.png"
+        ])
+    }
+
+    func test_decode_old_activity_file_without_screen_frames_is_forward_compatible() throws {
+        // Phase 1 activity files have no screen_frames key — must decode cleanly.
+        let json = #"""
+        {
+          "id": "phase1-acquirer-uuid",
+          "kind": "acquirer",
+          "label": "audio (mic-only)",
+          "icon": null,
+          "color": null,
+          "phase": null,
+          "started_at": "2026-01-15T15:30:00Z",
+          "owner_pid": 77,
+          "parent_id": "wf-uuid-xyz"
+        }
+        """#
+        let data = json.data(using: .utf8)!
+        let activity = try JSONDecoder.activity().decode(Activity.self, from: data)
+        XCTAssertEqual(activity.screenFrames, [],
+            "Phase 1 activity files must decode with screenFrames == []")
+        XCTAssertEqual(activity.parentId, "wf-uuid-xyz")
+    }
 }

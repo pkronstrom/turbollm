@@ -11,12 +11,33 @@ struct Activity: Identifiable, Equatable {
     let ownerPid: Int
     let children: [Int]
     let parentId: String?
+    let screenFrames: [String]
+
+    /// Memberwise initialiser with a backward-compatible default for `screenFrames`.
+    init(id: String, kind: String, label: String,
+         icon: String?, color: String?, phase: String?,
+         startedAt: Date, ownerPid: Int,
+         children: [Int], parentId: String?,
+         screenFrames: [String] = []) {
+        self.id = id
+        self.kind = kind
+        self.label = label
+        self.icon = icon
+        self.color = color
+        self.phase = phase
+        self.startedAt = startedAt
+        self.ownerPid = ownerPid
+        self.children = children
+        self.parentId = parentId
+        self.screenFrames = screenFrames
+    }
 
     enum CodingKeys: String, CodingKey {
         case id, kind, label, icon, color, phase, children
         case startedAt = "started_at"
         case ownerPid = "owner_pid"
         case parentId = "parent_id"
+        case screenFrames = "screen_frames"
     }
 }
 
@@ -33,6 +54,7 @@ extension Activity: Codable {
         ownerPid = try c.decode(Int.self, forKey: .ownerPid)
         children = try c.decodeIfPresent([Int].self, forKey: .children) ?? []
         parentId = try c.decodeIfPresent(String.self, forKey: .parentId)
+        screenFrames = try c.decodeIfPresent([String].self, forKey: .screenFrames) ?? []
     }
 }
 

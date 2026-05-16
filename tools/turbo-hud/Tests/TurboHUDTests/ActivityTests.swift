@@ -80,4 +80,44 @@ final class ActivityTests: XCTestCase {
         let activity = try JSONDecoder.activity().decode(Activity.self, from: data)
         XCTAssertNil(activity.parentId)
     }
+
+    // MARK: - screen_frames field (T-2)
+
+    func test_decode_screen_frames_absent_defaults_to_empty() throws {
+        let json = #"""
+        {"id":"f","kind":"acquirer","label":"screen","icon":null,"color":null,"phase":null,"started_at":"2026-01-15T15:30:00Z","owner_pid":42}
+        """#
+        let data = json.data(using: .utf8)!
+        let activity = try JSONDecoder.activity().decode(Activity.self, from: data)
+        XCTAssertEqual(activity.screenFrames, [])
+    }
+
+    func test_decode_screen_frames_present() throws {
+        let json = #"""
+        {"id":"g","kind":"acquirer","label":"screen","icon":null,"color":null,"phase":null,"started_at":"2026-01-15T15:30:00Z","owner_pid":42,"screen_frames":["/tmp/001.png","/tmp/002.png"]}
+        """#
+        let data = json.data(using: .utf8)!
+        let activity = try JSONDecoder.activity().decode(Activity.self, from: data)
+        XCTAssertEqual(activity.screenFrames, ["/tmp/001.png", "/tmp/002.png"])
+    }
+
+    func test_decode_old_activity_file_without_screen_frames_is_forward_compatible() throws {
+        // Phase 1 files have no screen_frames key — must decode cleanly with empty array.
+        let json = #"""
+        {
+          "id": "phase1-activity",
+          "kind": "workflow",
+          "label": "Running record-to-obsidian",
+          "icon": "play",
+          "color": "blue",
+          "phase": null,
+          "started_at": "2026-01-15T15:30:00Z",
+          "owner_pid": 99
+        }
+        """#
+        let data = json.data(using: .utf8)!
+        let activity = try JSONDecoder.activity().decode(Activity.self, from: data)
+        XCTAssertEqual(activity.screenFrames, [],
+            "Phase 1 activity file must decode with screenFrames == []")
+    }
 }
