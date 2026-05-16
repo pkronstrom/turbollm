@@ -657,6 +657,12 @@ def _read_log_tail(path: str, max_lines: int = 80) -> str:
 
 
 def _run_with_server(m: dict, port: int, launch_fn):
+    # Route every status/error line through stderr. The function's only data
+    # path is launch_fn's return value (and whatever launch_fn writes to
+    # stdout). Server-startup messages on stdout would otherwise leak into
+    # pipelines like `turbo transcribe file.wav | pi -p '…'`, where the LLM
+    # mistakes them for transcript content.
+    console = Console(stderr=True)
     """Start turbo server (or reuse running one) and run launch_fn(m, port).
 
     Handles server lifecycle: starts if needed, waits for ready,

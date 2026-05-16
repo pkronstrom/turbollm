@@ -51,6 +51,11 @@ def test_run_with_server_prints_backend_log_when_startup_fails(capsys):
         with pytest.raises(SystemExit):
             turbo_cli._run_with_server(model, 8899, lambda _m, _p: None)
 
-    out = capsys.readouterr().out
-    assert "Backend log" in out
-    assert "bind: address already in use" in out
+    captured = capsys.readouterr()
+    # _run_with_server routes all status/error lines to stderr so they cannot
+    # leak into stdout-piping callers (e.g. `turbo transcribe | pi`). Backend
+    # log dumps go through the same stderr console.
+    err = captured.err
+    assert captured.out == ""
+    assert "Backend log" in err
+    assert "bind: address already in use" in err
