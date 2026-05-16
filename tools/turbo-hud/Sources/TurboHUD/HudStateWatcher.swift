@@ -3,7 +3,7 @@ import Foundation
 final class HudStateWatcher {
     let stateDir: URL
     private var dirSource: DispatchSourceFileSystemObject?
-    private(set) var onChange: ((_ activities: [Activity]) -> Void)?
+    private(set) var onChange: ((_ activities: [Activity], _ acquirerActivity: Activity?) -> Void)?
 
     init(stateDir: URL) {
         self.stateDir = stateDir
@@ -44,7 +44,7 @@ final class HudStateWatcher {
         return live
     }
 
-    func startWatching(onChange: @escaping ([Activity]) -> Void) {
+    func startWatching(onChange: @escaping ([Activity], Activity?) -> Void) {
         self.onChange = onChange
         let fd = open(stateDir.path, O_EVTONLY)
         guard fd >= 0 else { return }
@@ -55,7 +55,8 @@ final class HudStateWatcher {
         )
         src.setEventHandler { [weak self] in
             guard let self else { return }
-            self.onChange?(self.loadCurrent())
+            let activities = self.loadCurrent()
+            self.onChange?(activities, Self.acquirerActivity(from: activities))
         }
         src.setCancelHandler {
             close(fd)
@@ -63,7 +64,18 @@ final class HudStateWatcher {
         src.resume()
         dirSource = src
         // Emit initial snapshot
-        onChange(loadCurrent())
+        let initial = loadCurrent()
+        onChange(initial, Self.acquirerActivity(from: initial))
+    }
+
+    /// Extracts the single acquirer activity from the live activity set.
+    /// Assumption: only one acquirer is in flight at a time; if multiple exist
+    /// (e.g. after a crash without cleanup), the newest `startedAt` wins.
+    static func acquirerActivity(from activities: [Activity]) -> Activity? {
+        activities
+            .filter { $0.kind == "acquirer" }
+            .sorted { $0.startedAt > $1.startedAt }
+            .first
     }
 
     func stop() {

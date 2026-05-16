@@ -92,6 +92,50 @@ final class HudStateWatcherTests: XCTestCase {
         XCTAssertEqual(kill(pid_t(childPid), 0), -1, "Child process should be dead after SIGTERM")
     }
 
+    // MARK: - T-17: acquirerActivity extraction
+
+    func test_acquirerActivity_returns_nil_when_no_acquirer_activities() throws {
+        let activities: [Activity] = [
+            Activity(id: "w1", kind: "workflow", label: "Running x",
+                     icon: nil, color: nil, phase: nil,
+                     startedAt: Date(), ownerPid: Int(ProcessInfo.processInfo.processIdentifier),
+                     children: [], parentId: nil)
+        ]
+        let result = HudStateWatcher.acquirerActivity(from: activities)
+        XCTAssertNil(result, "acquirerActivity should be nil when no acquirer activities exist")
+    }
+
+    func test_acquirerActivity_returns_acquirer_kind_activity() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let pid = ProcessInfo.processInfo.processIdentifier
+        let f = dir.appendingPathComponent("activity-acq.json")
+        try #"{"id":"acq1","kind":"acquirer","label":"audio (mic-only)","icon":null,"color":null,"phase":null,"started_at":"2026-01-15T08:00:00Z","owner_pid":\#(pid)}"#
+            .write(to: f, atomically: true, encoding: .utf8)
+
+        let watcher = HudStateWatcher(stateDir: dir)
+        let activities = watcher.loadCurrent()
+        let acquirer = HudStateWatcher.acquirerActivity(from: activities)
+        XCTAssertNotNil(acquirer, "acquirerActivity should find the acquirer-kind activity")
+        XCTAssertEqual(acquirer?.id, "acq1")
+        XCTAssertEqual(acquirer?.label, "audio (mic-only)")
+    }
+
+    func test_acquirerActivity_picks_newest_when_multiple_acquirers() throws {
+        let older = Activity(id: "old", kind: "acquirer", label: "audio (mic-only)",
+                             icon: nil, color: nil, phase: nil,
+                             startedAt: Date().addingTimeInterval(-10),
+                             ownerPid: 1, children: [], parentId: nil)
+        let newer = Activity(id: "new", kind: "acquirer", label: "screenshot",
+                             icon: nil, color: nil, phase: nil,
+                             startedAt: Date(),
+                             ownerPid: 2, children: [], parentId: nil)
+        let result = HudStateWatcher.acquirerActivity(from: [older, newer])
+        XCTAssertEqual(result?.id, "new", "Newest-started acquirer wins when multiple are present")
+    }
+
     func test_loadCurrent_does_not_kill_children_of_live_owner() throws {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)

@@ -34,8 +34,9 @@ class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let stateDir = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".turbollm").appendingPathComponent("state")
         watcher = HudStateWatcher(stateDir: stateDir)
-        watcher.startWatching { [weak self] activities in
+        watcher.startWatching { [weak self] activities, acquirerActivity in
             self?.state.activities = activities
+            self?.state.currentAcquirerActivity = acquirerActivity
             self?.refreshMenu()
         }
 
