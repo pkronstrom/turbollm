@@ -1179,11 +1179,35 @@ def _hud_dir() -> Path:
     return Path(__file__).resolve().parent.parent.parent / "tools" / "turbo-hud"
 
 
+def _acquirer_dir() -> Path:
+    """Locate the tools/turbo-acquirer/ directory next to the turbollm source tree."""
+    return Path(__file__).resolve().parent.parent.parent / "tools" / "turbo-acquirer"
+
+
+def _local_bin() -> Path:
+    """Return ~/.local/bin/, creating it if necessary."""
+    p = Path.home() / ".local" / "bin"
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
+
+def _swift_build_product_path(package_dir: Path, product: str) -> Path:
+    """Return the expected debug binary path for a Swift package product."""
+    return package_dir / ".build" / "debug" / product
+
+
+def _refresh_symlink(link_path: Path, target_path: Path) -> None:
+    """Create or refresh a symlink at link_path → target_path."""
+    if link_path.is_symlink():
+        link_path.unlink()
+    link_path.symlink_to(target_path)
+
+
 @cli.command(name="sidecar")
 @click.option("--build/--no-build", default=True,
               help="Run `swift build` before launching (default: yes).")
 def sidecar_cmd(build):
-    """Launch the Turbo HUD (Swift menu-bar app) via `swift run`."""
+    """Build turbo-acquirer + TurboHUD, symlink both, then launch the HUD."""
     hud_dir = _hud_dir()
     if not hud_dir.exists() or not (hud_dir / "Package.swift").exists():
         console.print(
@@ -1191,6 +1215,27 @@ def sidecar_cmd(build):
             "Implement the package (Plan 2) before invoking turbo sidecar."
         )
         raise SystemExit(1)
+
+    acquirer_dir = _acquirer_dir()
+    has_acquirer = acquirer_dir.exists() and (acquirer_dir / "Package.swift").exists()
+
+    if build:
+        # Build turbo-acquirer first (independent; fails gracefully if absent).
+        if has_acquirer:
+            console.print(f"[dim]Building turbo-acquirer in {acquirer_dir}...[/dim]")
+            result = subprocess.run(["swift", "build"], cwd=acquirer_dir)
+            if result.returncode != 0:
+                console.print("[yellow]Warning: turbo-acquirer build failed — skipping.[/yellow]")
+                has_acquirer = False
+
+        # Refresh turbo-acquirer symlink if build succeeded.
+        if has_acquirer:
+            acq_bin = _swift_build_product_path(acquirer_dir, "turbo-acquirer")
+            if acq_bin.exists():
+                link = _local_bin() / "turbo-acquirer"
+                _refresh_symlink(link, acq_bin)
+                console.print(f"[dim]Symlinked turbo-acquirer → {acq_bin}[/dim]")
+
     args = ["swift", "run"] if build else ["swift", "run", "--skip-build"]
     console.print(f"[dim]Launching HUD via `swift run` in {hud_dir}...[/dim]")
     subprocess.run(args, cwd=hud_dir)
