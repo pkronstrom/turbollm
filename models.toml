@@ -389,6 +389,129 @@ echo "Wrote: $out" >&2
 echo "Wrote: $raw_out" >&2
 """
 
+[scripts.summarize-to-obsidian-bundled]
+description = "Transcribe audio + embed screen keyframes, save bundled notes to Obsidian"
+usage = "AUDIO_FILE MANIFEST_JSON"
+# $1 — path to audio file (from audio acquirer)
+# $2 — screen recording manifest JSON string (from record-screen acquirer)
+# Writes three artifacts:
+#   $VAULT/Meetings/<slug>.md           — frontmatter + summary (no image refs)
+#   $VAULT/Meetings/<slug>.raw.md       — frontmatter + interleaved [mm:ss] and ![[...]] lines
+#   $VAULT/Meetings/attachments/<slug>/ — PNG copies of keyframes
+# Deletes the temp source directory after copying PNGs.
+command = """
+set -euo pipefail
+vault="${OBSIDIAN_VAULT:-$HOME/Documents/Obsidian}"
+audio_file="$1"
+manifest_json="$2"
+bn="${audio_file##*/}"
+slug="${bn%.*}"
+out="$vault/Meetings/$slug.md"
+raw_out="$vault/Meetings/$slug.raw.md"
+attachments="$vault/Meetings/attachments/$slug"
+mkdir -p "$(dirname "$out")" "$attachments"
+
+# Capture plain-text transcript for the summary LLM prompt.
+transcript="$(turbo transcribe "$audio_file")"
+
+# Capture segmented transcript (JSON array) for interleaving.
+segments_json="$(turbo transcribe --format segments "$audio_file")"
+
+# Summarise.
+summary="$(printf '%s' "$transcript" | pi --no-extensions \
+  --system-prompt 'You are a note-taking assistant. The user records audio of varied content: meetings, lectures, voice memos, brainstorms, interviews, walking thoughts. Produce a faithful markdown summary that will land in their Obsidian vault. The transcript on stdin is authoritative ground truth — base every claim on it. Never reference yourself, the user, "the workspace", "the message", "the snippet", or your own context. Output markdown only, with no preamble or sign-off.' \
+  -p 'Summarize the transcript. Choose section headings that fit the actual content — do NOT force a fixed structure. Prefer concrete bullet points where they fit, prose where they do not. Use shapes like Decisions / Action items / Open questions / Key points / Notable quotes / Topics ONLY when the content genuinely contains them. Detect the transcript language and write the summary in that same language; do not translate.')"
+
+# Write .md (no image references).
+{
+  printf -- '---\n'
+  printf 'date: %s\n' "$(date -Iseconds)"
+  printf 'source: %s\n' "$audio_file"
+  printf 'tags: [meeting, auto-transcribed]\n'
+  printf 'model: parakeet-v3 + local-llm\n'
+  printf -- '---\n\n'
+  printf '# %s\n\n' "$slug"
+  printf '%s\n' "$summary"
+} > "$out"
+
+# Copy PNGs to attachments dir, then delete temp source dir, then write .raw.md.
+SEGMENTS_JSON="$segments_json" \
+MANIFEST_JSON="$manifest_json" \
+ATTACHMENTS="$attachments" \
+SLUG="$slug" \
+OUT="$out" \
+RAW_OUT="$raw_out" \
+AUDIO_FILE="$audio_file" \
+SUMMARY="$summary" \
+python3 << 'PYEOF'
+import json, os, shutil, math, sys, datetime
+
+segs     = json.loads(os.environ['SEGMENTS_JSON'])
+manifest = json.loads(os.environ['MANIFEST_JSON'])
+att_dir  = os.environ['ATTACHMENTS']
+slug     = os.environ['SLUG']
+raw_out  = os.environ['RAW_OUT']
+audio    = os.environ['AUDIO_FILE']
+summary  = os.environ['SUMMARY']
+
+start_offset_ms = manifest.get('start_offset_ms', 0)
+
+# Copy PNGs and collect keyframe entries.
+entries = []
+for frame in manifest.get('frames', []):
+    src = frame['path']
+    basename = os.path.basename(src)
+    dst = os.path.join(att_dir, basename)
+    shutil.copy2(src, dst)
+    wf_t_ms = frame['t_offset_ms'] + start_offset_ms
+    entries.append({'wf_t_ms': wf_t_ms, 'kind': 'frame', 'basename': basename})
+
+# Delete the temp source directory (parent of the first frame path).
+if manifest.get('frames'):
+    src_dir = os.path.dirname(manifest['frames'][0]['path'])
+    if os.path.isdir(src_dir):
+        shutil.rmtree(src_dir)
+
+# Add segment entries.
+for seg in segs:
+    start_s = seg.get('start') or 0
+    wf_t_ms = int(start_s * 1000)
+    text = seg.get('text', '').strip()
+    mm = math.floor(start_s / 60)
+    ss = math.floor(start_s % 60)
+    entries.append({'wf_t_ms': wf_t_ms, 'kind': 'segment',
+                    'label': f'[{mm:02d}:{ss:02d}] {text}'})
+
+# Sort by workflow time; segments before frames on tie.
+entries.sort(key=lambda e: (e['wf_t_ms'], 0 if e['kind'] == 'segment' else 1))
+
+# Build raw lines.
+lines = []
+for e in entries:
+    if e['kind'] == 'segment':
+        lines.append(e['label'])
+    else:
+        lines.append(f"![[{slug}/{e['basename']}]]")
+
+# Write .raw.md with frontmatter.
+now = datetime.datetime.now().astimezone().isoformat(timespec='seconds')
+with open(raw_out, 'w') as fh:
+    print('---', file=fh)
+    print('date: ' + now, file=fh)
+    print('source: ' + audio, file=fh)
+    print('tags: [meeting, auto-transcribed]', file=fh)
+    print('model: parakeet-v3 + local-llm', file=fh)
+    print('---', file=fh)
+    print('', file=fh)
+    for line in lines:
+        print(line, file=fh)
+PYEOF
+
+echo "Wrote: $out" >&2
+echo "Wrote: $raw_out" >&2
+echo "Wrote: $attachments" >&2
+"""
+
 
 # --- Workflows ----------------------------------------------------------------
 # HUD-renderable named actions with typed params. Surfaced via
@@ -421,6 +544,32 @@ mode = "primary"
 scope = "system+mic"
 
 [[workflows.record-to-obsidian.params]]
+name = "vault"
+type = "directory"
+default_env = "OBSIDIAN_VAULT"
+
+
+[workflows.record-meeting-with-screen]
+description = "Record audio + screen, transcribe, summarize, bundle into Obsidian"
+script = "summarize-to-obsidian-bundled"
+args = ["{{audio}}", "{{screen}}"]
+env = { OBSIDIAN_VAULT = "{{vault}}" }
+
+[[workflows.record-meeting-with-screen.params]]
+name = "audio"
+type = "audio-recording"
+mode = "primary"
+scope = "system+mic"
+
+[[workflows.record-meeting-with-screen.params]]
+name = "screen"
+type = "screen-recording"
+mode = "background"
+keyframe_threshold = 12
+min_interval_ms = 1500
+max_keyframes = 200
+
+[[workflows.record-meeting-with-screen.params]]
 name = "vault"
 type = "directory"
 default_env = "OBSIDIAN_VAULT"
