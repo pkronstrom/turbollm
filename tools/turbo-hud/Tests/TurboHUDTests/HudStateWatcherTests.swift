@@ -127,6 +127,7 @@ final class HudStateWatcherTests: XCTestCase {
     }
 
     func test_acquirerActivity_picks_newest_when_multiple_acquirers() throws {
+        // T-20: audio-labelled acquirer is primary regardless of start order.
         let older = Activity(id: "old", kind: "acquirer", label: "audio (mic-only)",
                              icon: nil, color: nil, phase: nil,
                              startedAt: Date().addingTimeInterval(-10),
@@ -136,7 +137,38 @@ final class HudStateWatcherTests: XCTestCase {
                              startedAt: Date(),
                              ownerPid: 2, children: [], parentId: nil)
         let result = HudStateWatcher.acquirerActivity(from: [older, newer])
-        XCTAssertEqual(result?.id, "new", "Newest-started acquirer wins when multiple are present")
+        XCTAssertEqual(result?.id, "old", "Audio-labelled acquirer wins as primary even when it started earlier")
+    }
+
+    // MARK: - T-20: primary acquirer selection
+
+    func test_acquirerActivity_prefers_audio_label_as_primary() {
+        // Two acquirers sharing a parent workflow: audio is primary, screen is background.
+        let screenAcq = Activity(id: "screen", kind: "acquirer", label: "screen (full-display)",
+                                 icon: nil, color: nil, phase: nil,
+                                 startedAt: Date(),
+                                 ownerPid: 102, children: [], parentId: "wf-1")
+        let audioAcq = Activity(id: "audio", kind: "acquirer", label: "audio (mic-only)",
+                                icon: nil, color: nil, phase: nil,
+                                startedAt: Date().addingTimeInterval(-2),
+                                ownerPid: 101, children: [], parentId: "wf-1")
+        let result = HudStateWatcher.acquirerActivity(from: [screenAcq, audioAcq])
+        XCTAssertEqual(result?.id, "audio", "acquirerActivity must pick the audio acquirer as primary")
+        XCTAssertEqual(result?.ownerPid, 101, "Stop must target the audio primary PID, not the screen background")
+    }
+
+    func test_acquirerActivity_falls_back_to_newest_when_no_audio() {
+        // Without an audio acquirer, newest-started wins.
+        let older = Activity(id: "old", kind: "acquirer", label: "screenshot",
+                             icon: nil, color: nil, phase: nil,
+                             startedAt: Date().addingTimeInterval(-5),
+                             ownerPid: 201, children: [], parentId: nil)
+        let newer = Activity(id: "new", kind: "acquirer", label: "screen (full-display)",
+                             icon: nil, color: nil, phase: nil,
+                             startedAt: Date(),
+                             ownerPid: 202, children: [], parentId: nil)
+        let result = HudStateWatcher.acquirerActivity(from: [older, newer])
+        XCTAssertEqual(result?.id, "new", "Newest-started acquirer wins when no audio acquirer is present")
     }
 
     func test_loadCurrent_does_not_kill_children_of_live_owner() throws {

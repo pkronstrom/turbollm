@@ -68,14 +68,20 @@ final class HudStateWatcher {
         onChange(initial, Self.acquirerActivity(from: initial))
     }
 
-    /// Extracts the single acquirer activity from the live activity set.
-    /// Assumption: only one acquirer is in flight at a time; if multiple exist
-    /// (e.g. after a crash without cleanup), the newest `startedAt` wins.
+    /// Extracts the primary acquirer activity from the live activity set.
+    ///
+    /// T-20: In multi-acquirer workflows (e.g. audio + screen), the audio-labelled
+    /// acquirer is designated "primary" and is the Stop target. For single-acquirer
+    /// workflows the only acquirer is returned; when no audio acquirer exists the
+    /// newest-started one wins (backwards-compatible fallback).
     static func acquirerActivity(from activities: [Activity]) -> Activity? {
-        activities
-            .filter { $0.kind == "acquirer" }
-            .sorted { $0.startedAt > $1.startedAt }
-            .first
+        let acquirers = activities.filter { $0.kind == "acquirer" }
+        // Prefer audio-labelled acquirer as the primary target.
+        if let audioPrimary = acquirers.first(where: { $0.label.hasPrefix("audio") }) {
+            return audioPrimary
+        }
+        // Fallback: newest-started acquirer (single-acquirer workflows, non-audio primary).
+        return acquirers.sorted { $0.startedAt > $1.startedAt }.first
     }
 
     func stop() {
