@@ -296,6 +296,199 @@ final class MenuBuilderTests: XCTestCase {
         XCTAssertFalse(runItem?.isEnabled ?? true, "Run must be disabled when mic is denied.")
     }
 
+    // MARK: - T-17: screen-recording scope picker
+
+    func test_screen_recording_param_shows_scope_submenu() {
+        let suite = "t.\(UUID().uuidString)"
+        let state = AppState()
+        state.workflows = [
+            Workflow(name: "rec-screen", description: nil, command: nil, script: "s", args: nil, env: nil,
+                     params: [
+                        WorkflowParam(name: "screen", type: "screen-recording", mode: nil,
+                                      defaultValue: nil, defaultEnv: nil, auto: nil,
+                                      options: nil, extensions: nil,
+                                      scope: nil, command: nil)
+                     ])
+        ]
+        let menu = MenuBuilder.build(state: state, settings: Settings(suiteName: suite),
+                                     onRunWorkflow: { _ in }, onEditParam: { _, _ in })
+        let wfItem = menu.items.first(where: { $0.title == "rec-screen" })
+        let submenuItems = wfItem?.submenu?.items ?? []
+        let scopeItem = submenuItems.first(where: { $0.title.hasPrefix("scope:") })
+        XCTAssertNotNil(scopeItem, "screen-recording param must show a scope submenu item")
+        XCTAssertNotNil(scopeItem?.submenu, "scope item must have a submenu")
+    }
+
+    func test_screen_recording_scope_submenu_has_three_values() {
+        let suite = "t.\(UUID().uuidString)"
+        let state = AppState()
+        state.workflows = [
+            Workflow(name: "rec-screen", description: nil, command: nil, script: "s", args: nil, env: nil,
+                     params: [
+                        WorkflowParam(name: "screen", type: "screen-recording", mode: nil,
+                                      defaultValue: nil, defaultEnv: nil, auto: nil,
+                                      options: nil, extensions: nil,
+                                      scope: nil, command: nil)
+                     ])
+        ]
+        let menu = MenuBuilder.build(state: state, settings: Settings(suiteName: suite),
+                                     onRunWorkflow: { _ in }, onEditParam: { _, _ in })
+        let wfItem = menu.items.first(where: { $0.title == "rec-screen" })
+        let scopeItem = wfItem?.submenu?.items.first(where: { $0.title.hasPrefix("scope:") })
+        let scopeOptions = scopeItem?.submenu?.items.map(\.title) ?? []
+        XCTAssertTrue(scopeOptions.contains("full-display"))
+        XCTAssertTrue(scopeOptions.contains("region"))
+        XCTAssertTrue(scopeOptions.contains("active-window"))
+    }
+
+    func test_screen_recording_scope_persists_selection() {
+        let suite = "t.\(UUID().uuidString)"
+        let ud = UserDefaults(suiteName: suite)
+        ud?.set("region", forKey: "rec-screen.screen.scope")
+        let state = AppState()
+        state.workflows = [
+            Workflow(name: "rec-screen", description: nil, command: nil, script: "s", args: nil, env: nil,
+                     params: [
+                        WorkflowParam(name: "screen", type: "screen-recording", mode: nil,
+                                      defaultValue: nil, defaultEnv: nil, auto: nil,
+                                      options: nil, extensions: nil,
+                                      scope: nil, command: nil)
+                     ])
+        ]
+        let menu = MenuBuilder.build(state: state, settings: Settings(suiteName: suite),
+                                     onRunWorkflow: { _ in }, onEditParam: { _, _ in })
+        let wfItem = menu.items.first(where: { $0.title == "rec-screen" })
+        let scopeItem = wfItem?.submenu?.items.first(where: { $0.title.hasPrefix("scope:") })
+        XCTAssertEqual(scopeItem?.title, "scope: region ▸", "Title must reflect the stored scope")
+        let regionOption = scopeItem?.submenu?.items.first(where: { $0.title == "region" })
+        XCTAssertEqual(regionOption?.state, .on, "region option must have checkmark")
+    }
+
+    func test_select_screen_scope_writes_user_defaults() {
+        let suite = "t.\(UUID().uuidString)"
+        let ud = UserDefaults(suiteName: suite)
+        let wf = Workflow(name: "wf", description: nil, command: nil, script: "s", args: nil, env: nil, params: [])
+        let param = WorkflowParam(name: "scr", type: "screen-recording", mode: nil,
+                                   defaultValue: nil, defaultEnv: nil, auto: nil,
+                                   options: nil, extensions: nil, scope: nil, command: nil)
+
+        // Temporarily use the test suite for the scope write.
+        // We can't inject the suite into MenuTarget easily, so we override the binding target key
+        // via direct key write and then verify indirectly via MenuBuilder rebuild.
+        // Instead, test the UserDefaults write by simulating the action.
+        let binding = ScreenScopeBinding(workflow: wf, param: param, scope: "active-window")
+        let item = NSMenuItem()
+        item.representedObject = binding
+        MenuTarget.shared.selectScreenScope(item)
+
+        // The action writes to the default suite; verify via the global default suite.
+        let scopeKey = "\(wf.name).\(param.name).scope"
+        let written = UserDefaults(suiteName: Settings.defaultSuiteName)?.string(forKey: scopeKey)
+        XCTAssertEqual(written, "active-window", "selectScreenScope must write scope to UserDefaults")
+        // Cleanup
+        UserDefaults(suiteName: Settings.defaultSuiteName)?.removeObject(forKey: scopeKey)
+    }
+
+    // MARK: - T-19: Re-pick region action
+
+    func test_repick_region_item_absent_when_scope_not_region() {
+        let suite = "t.\(UUID().uuidString)"
+        let state = AppState()
+        state.workflows = [
+            Workflow(name: "rec", description: nil, command: nil, script: "s", args: nil, env: nil,
+                     params: [
+                        WorkflowParam(name: "screen", type: "screen-recording", mode: nil,
+                                      defaultValue: nil, defaultEnv: nil, auto: nil,
+                                      options: nil, extensions: nil, scope: nil, command: nil)
+                     ])
+        ]
+        // scope = full-display (default), no region sticky
+        let menu = MenuBuilder.build(state: state, settings: Settings(suiteName: suite),
+                                     onRunWorkflow: { _ in }, onEditParam: { _, _ in })
+        let wfItem = menu.items.first(where: { $0.title == "rec" })
+        let scopeItem = wfItem?.submenu?.items.first(where: { $0.title.hasPrefix("scope:") })
+        let repickItem = scopeItem?.submenu?.items.first(where: { $0.title == "Re-pick region…" })
+        XCTAssertNil(repickItem, "Re-pick region must not appear when scope is not region")
+    }
+
+    func test_repick_region_item_absent_when_scope_region_but_no_sticky() {
+        let suite = "t.\(UUID().uuidString)"
+        let ud = UserDefaults(suiteName: suite)
+        ud?.set("region", forKey: "rec.screen.scope")
+        // No region sticky written.
+        let state = AppState()
+        state.workflows = [
+            Workflow(name: "rec", description: nil, command: nil, script: "s", args: nil, env: nil,
+                     params: [
+                        WorkflowParam(name: "screen", type: "screen-recording", mode: nil,
+                                      defaultValue: nil, defaultEnv: nil, auto: nil,
+                                      options: nil, extensions: nil, scope: nil, command: nil)
+                     ])
+        ]
+        let menu = MenuBuilder.build(state: state, settings: Settings(suiteName: suite),
+                                     onRunWorkflow: { _ in }, onEditParam: { _, _ in })
+        let wfItem = menu.items.first(where: { $0.title == "rec" })
+        let scopeItem = wfItem?.submenu?.items.first(where: { $0.title.hasPrefix("scope:") })
+        let repickItem = scopeItem?.submenu?.items.first(where: { $0.title == "Re-pick region…" })
+        XCTAssertNil(repickItem, "Re-pick region must not appear when scope=region but no sticky exists")
+    }
+
+    func test_repick_region_item_present_when_scope_region_and_sticky_exists() {
+        // Use the production suite (same as the MenuBuilder writes to).
+        let scopeKey = "repick-test-wf.screen.scope"
+        let regionKey = "repick-test-wf.screen.region"
+        let ud = UserDefaults(suiteName: Settings.defaultSuiteName)
+        ud?.set("region", forKey: scopeKey)
+        ud?.set("100,100,300,200", forKey: regionKey)
+        defer {
+            ud?.removeObject(forKey: scopeKey)
+            ud?.removeObject(forKey: regionKey)
+        }
+
+        let state = AppState()
+        state.workflows = [
+            Workflow(name: "repick-test-wf", description: nil, command: nil, script: "s", args: nil, env: nil,
+                     params: [
+                        WorkflowParam(name: "screen", type: "screen-recording", mode: nil,
+                                      defaultValue: nil, defaultEnv: nil, auto: nil,
+                                      options: nil, extensions: nil, scope: nil, command: nil)
+                     ])
+        ]
+        let menu = MenuBuilder.build(state: state, settings: Settings(),
+                                     onRunWorkflow: { _ in }, onEditParam: { _, _ in })
+        let wfItem = menu.items.first(where: { $0.title == "repick-test-wf" })
+        let scopeItem = wfItem?.submenu?.items.first(where: { $0.title.hasPrefix("scope:") })
+        let repickItem = scopeItem?.submenu?.items.first(where: { $0.title == "Re-pick region…" })
+        XCTAssertNotNil(repickItem, "Re-pick region must appear when scope=region and sticky exists")
+        XCTAssertTrue(repickItem?.isEnabled ?? false, "Re-pick region must be enabled")
+    }
+
+    func test_repick_region_action_clears_sticky() {
+        let regionKey = "repick-action-wf.scr.region"
+        let ud = UserDefaults(suiteName: Settings.defaultSuiteName)
+        ud?.set("100,100,300,200", forKey: regionKey)
+        defer { ud?.removeObject(forKey: regionKey) }
+
+        let wf = Workflow(name: "repick-action-wf", description: nil, command: nil, script: "s",
+                          args: nil, env: nil, params: [])
+        let param = WorkflowParam(name: "scr", type: "screen-recording", mode: nil,
+                                   defaultValue: nil, defaultEnv: nil, auto: nil,
+                                   options: nil, extensions: nil, scope: nil, command: nil)
+        let binding = ScreenScopeBinding(workflow: wf, param: param, scope: "region")
+        let item = NSMenuItem()
+        item.representedObject = binding
+
+        // Capture the onOpenRegionPicker call.
+        var pickerOpenedFor: (Workflow, WorkflowParam)? = nil
+        MenuTarget.shared.onOpenRegionPicker = { wf, p in pickerOpenedFor = (wf, p) }
+        defer { MenuTarget.shared.onOpenRegionPicker = nil }
+
+        MenuTarget.shared.repickRegion(item)
+
+        XCTAssertNil(ud?.string(forKey: regionKey), "Re-pick must clear the region sticky")
+        XCTAssertNotNil(pickerOpenedFor, "Re-pick must invoke onOpenRegionPicker")
+    }
+
     // MARK: - T-fix-5: system+mic with Screen Recording denied disables Run
 
     func test_system_plus_mic_scope_screen_recording_denied_disables_run() {

@@ -269,6 +269,10 @@ enum MenuBuilder {
                             // Input device submenu
                             submenu.addItem(makeDeviceSubmenuItem(param: p, workflow: wf, settings: settings))
                             submenu.addItem(NSMenuItem.separator())
+                        } else if p.type == "screen-recording" {
+                            // T-17: Scope submenu for screen-recording params.
+                            submenu.addItem(makeScreenScopeSubmenuItem(param: p, workflow: wf, settings: settings))
+                            submenu.addItem(NSMenuItem.separator())
                         } else if acquiredTypes.contains(p.type) {
                             // Other acquired types: read-only row
                             let label = "\(p.name): (recording)"
@@ -358,6 +362,55 @@ enum MenuBuilder {
         item.submenu = sub
         return item
     }
+
+    // MARK: - Screen scope submenu (T-17, T-19)
+
+    private static let screenScopeValues = ["full-display", "region", "active-window"]
+
+    private static func makeScreenScopeSubmenuItem(
+        param: WorkflowParam, workflow: Workflow, settings: Settings
+    ) -> NSMenuItem {
+        let scopeKey = "\(workflow.name).\(param.name).scope"
+        let currentScope = settings.rawString(forKey: scopeKey) ?? "full-display"
+        let item = NSMenuItem(title: "scope: \(currentScope) ▸", action: nil, keyEquivalent: "")
+        let sub = NSMenu()
+        sub.autoenablesItems = false
+
+        for scope in screenScopeValues {
+            let si = NSMenuItem(
+                title: scope,
+                action: #selector(MenuTarget.selectScreenScope(_:)),
+                keyEquivalent: ""
+            )
+            si.representedObject = ScreenScopeBinding(workflow: workflow, param: param, scope: scope)
+            si.target = MenuTarget.shared
+            si.state = currentScope == scope ? .on : .off
+            si.isEnabled = true
+            sub.addItem(si)
+        }
+
+        // T-19: "Re-pick region…" visible when scope=region and sticky exists.
+        if currentScope == "region" {
+            let regionKey = "\(workflow.name).\(param.name).region"
+            if settings.rawString(forKey: regionKey) != nil {
+                sub.addItem(NSMenuItem.separator())
+                let repickItem = NSMenuItem(
+                    title: "Re-pick region…",
+                    action: #selector(MenuTarget.repickRegion(_:)),
+                    keyEquivalent: ""
+                )
+                repickItem.representedObject = ScreenScopeBinding(
+                    workflow: workflow, param: param, scope: "region"
+                )
+                repickItem.target = MenuTarget.shared
+                repickItem.isEnabled = true
+                sub.addItem(repickItem)
+            }
+        }
+
+        item.submenu = sub
+        return item
+    }
 }
 
 // MARK: - Binding types
@@ -368,6 +421,12 @@ struct WorkflowParamBinding {
 }
 
 struct ScopeBinding {
+    let workflow: Workflow
+    let param: WorkflowParam
+    let scope: String
+}
+
+struct ScreenScopeBinding {
     let workflow: Workflow
     let param: WorkflowParam
     let scope: String
@@ -419,6 +478,33 @@ final class MenuTarget: NSObject {
         guard let b = sender.representedObject as? DeviceBinding else { return }
         UserDefaults(suiteName: Settings.defaultSuiteName)?
             .set(b.device.uid, forKey: "\(b.workflow.name).\(b.param.name).input_device")
+        onSettingsChanged?()
+    }
+
+    /// T-17: Callback wired by App.swift to open the region picker when scope=region is selected
+    /// and no region sticky exists yet.
+    var onOpenRegionPicker: ((Workflow, WorkflowParam) -> Void)?
+
+    /// T-17: Invoked when the user selects a screen-recording scope option.
+    @objc func selectScreenScope(_ sender: NSMenuItem) {
+        guard let b = sender.representedObject as? ScreenScopeBinding else { return }
+        let ud = UserDefaults(suiteName: Settings.defaultSuiteName)
+        ud?.set(b.scope, forKey: "\(b.workflow.name).\(b.param.name).scope")
+        if b.scope == "region" {
+            let regionKey = "\(b.workflow.name).\(b.param.name).region"
+            if ud?.string(forKey: regionKey) == nil {
+                onOpenRegionPicker?(b.workflow, b.param)
+            }
+        }
+        onSettingsChanged?()
+    }
+
+    /// T-19: Invoked when the user selects "Re-pick region…".
+    @objc func repickRegion(_ sender: NSMenuItem) {
+        guard let b = sender.representedObject as? ScreenScopeBinding else { return }
+        let ud = UserDefaults(suiteName: Settings.defaultSuiteName)
+        ud?.removeObject(forKey: "\(b.workflow.name).\(b.param.name).region")
+        onOpenRegionPicker?(b.workflow, b.param)
         onSettingsChanged?()
     }
 

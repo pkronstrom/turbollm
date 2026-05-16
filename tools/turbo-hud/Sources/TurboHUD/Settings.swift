@@ -28,4 +28,9 @@ final class Settings {
             defaults.removeObject(forKey: k)
         }
     }
+
+    /// Read any raw key from this settings suite (used for scope/region/device stickies).
+    func rawString(forKey key: String) -> String? {
+        defaults.string(forKey: key)
+    }
 }
