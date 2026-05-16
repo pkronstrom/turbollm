@@ -51,8 +51,12 @@ struct WorkflowParam: Codable, Equatable {
     let auto: String?
     let options: [String]?
     let extensions: [String]?
-    let scope: String?     // for audio-recording: "system+mic" | "mic-only" | "app+mic"
-    let command: String?   // for command acquirer: shell pipeline string
+    let scope: String?     // for audio-recording: "system+mic" | "mic-only" | "app+mic".
+                           // Read by MenuBuilder to set default scope for the picker submenu.
+    let command: String?   // for command acquirer: shell pipeline string.
+                           // Decoded from JSON but not used by the HUD post-extraction;
+                           // the Python CLI reads it at run time. Kept so the JSON decoder
+                           // accepts workflows that still carry the field.
 
     enum CodingKeys: String, CodingKey {
         case name, type, mode, options, extensions, auto, scope, command

@@ -3,11 +3,12 @@ import Foundation
 enum WorkflowRunner {
     /// Resolve configured param values: sticky → auto → default_env → default → "".
     /// Acquired params (audio-recording, screenshot-manual, command) are skipped —
-    /// they are resolved by SessionController and merged in before invocation.
+    /// they are resolved by `turbo-acquirer` and the Python CLI at run time.
+    /// Used by ParamEditor to display current sticky values in the edit popover.
     static func resolveParams(_ workflow: Workflow, settings: Settings) throws -> [String: String] {
         var resolved: [String: String] = [:]
         for p in workflow.params {
-            // Acquired params are handled by SessionController; skip here.
+            // Acquired params are handled by turbo-acquirer at runtime; skip here.
             if ["audio-recording", "screenshot-manual", "command"].contains(p.type) { continue }
             if let sticky = settings.paramValue(workflow: workflow.name, param: p.name), !sticky.isEmpty {
                 resolved[p.name] = sticky
