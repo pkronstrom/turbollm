@@ -1,4 +1,5 @@
 import AppKit
+import UserNotifications
 
 @main
 class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
@@ -38,7 +39,53 @@ class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // T-21/B-G: URLSchemeHandler now shells out to turbo workflows run directly.
         URLSchemeHandler.install()
 
+        // T-24: Post a one-time migration notification when turbo-acquirer
+        // hasn't been granted TCC permissions yet (microphone = notDetermined).
+        postMigrationNoticeIfNeeded()
+
         refreshMenu()
+    }
+
+    // MARK: - T-24: TCC migration notification
+
+    /// UserDefaults flag key — set after the migration notification is posted once.
+    static let migrationNoticeFlagKey = "migration_notice_shown_v1"
+
+    /// Posts a UNUserNotificationCenter notification the first time the HUD
+    /// launches after the two-binary architecture is deployed, iff
+    /// `turbo-acquirer permissions-state` reports `microphone: "notDetermined"`.
+    /// Sets the `migration_notice_shown_v1` flag so subsequent launches skip this.
+    func postMigrationNoticeIfNeeded() {
+        let defaults = UserDefaults.standard
+        guard !defaults.bool(forKey: App.migrationNoticeFlagKey) else { return }
+
+        // Check permissions-state asynchronously to avoid blocking launch.
+        DispatchQueue.global(qos: .utility).async {
+            let state = MenuBuilder.permissionsState()
+            guard state.microphone == .notDetermined else {
+                // Already granted (or denied) — no migration notice needed.
+                UserDefaults.standard.set(true, forKey: App.migrationNoticeFlagKey)
+                return
+            }
+            // Request notification authorization if not yet granted, then post.
+            let center = UNUserNotificationCenter.current()
+            center.requestAuthorization(options: [.alert]) { granted, _ in
+                guard granted else {
+                    UserDefaults.standard.set(true, forKey: App.migrationNoticeFlagKey)
+                    return
+                }
+                let content = UNMutableNotificationContent()
+                content.title = "Turbo: Recording permissions update"
+                content.body = "Turbo's recording backend moved to a new binary. You'll be asked to grant Microphone (and Screen Recording, if you use system+mic scope) on first recording."
+                let request = UNNotificationRequest(
+                    identifier: "com.turbollm.migration-notice-v1",
+                    content: content,
+                    trigger: nil   // deliver immediately
+                )
+                center.add(request) { _ in }
+                UserDefaults.standard.set(true, forKey: App.migrationNoticeFlagKey)
+            }
+        }
     }
 
     func refreshMenu() {
