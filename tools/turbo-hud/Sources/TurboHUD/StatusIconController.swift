@@ -28,18 +28,16 @@ final class StatusIconController: @unchecked Sendable {
     }
 
     func update() {
-        // Active recording session takes priority over activity count.
-        if let session = state.activeSession {
-            let hasAudio = session.workflow.params.contains { $0.type == "audio-recording" }
-            if hasAudio {
+        // Acquirer activity takes priority over generic activity count.
+        if let acquirer = state.currentAcquirerActivity {
+            if acquirer.label.contains("audio") {
                 statusItem.button?.title = "🔴"
-                statusItem.button?.toolTip = "Recording \(session.workflow.name) — \(elapsedString(since: session.startedAt))"
-                return
+                statusItem.button?.toolTip = "Recording — \(acquirer.label)"
             } else {
                 statusItem.button?.title = "🟢"
-                statusItem.button?.toolTip = "Session active: \(session.workflow.name)"
-                return
+                statusItem.button?.toolTip = acquirer.label
             }
+            return
         }
 
         let count = state.activities.count
