@@ -1,7 +1,8 @@
-"""Tests for `turbo raycast sync` CLI subcommand (T-12)."""
+"""Tests for `turbo raycast sync` CLI subcommand (T-12, T-fix-5)."""
 from __future__ import annotations
 
 import json
+import os
 from unittest.mock import patch
 
 import pytest
@@ -248,3 +249,164 @@ def test_raycast_sync_with_no_workflows_keeps_only_fixed(tmp_path):
     assert "some-workflow" not in names
     assert "run-workflow" in names
     assert "running-workflows" in names
+
+
+# ---------------------------------------------------------------------------
+# T-fix-5: per-workflow symlinks
+# ---------------------------------------------------------------------------
+
+def test_raycast_sync_creates_workflow_symlinks(tmp_path):
+    """sync creates src/<slug>.tsx → run-workflow.tsx symlinks for each workflow."""
+    src_dir = tmp_path / "src"
+    src_dir.mkdir()
+    pkg_path = tmp_path / "package.json"
+    pkg_path.write_text(json.dumps(_make_package_json(_FIXED_COMMANDS), indent=2) + "\n")
+
+    runner = CliRunner()
+    with patch("turbollm.cli.load_registry", return_value=_FAKE_REGISTRY):
+        result = runner.invoke(turbo_cli.cli, ["raycast", "sync", "--extension-dir", str(tmp_path)])
+
+    assert result.exit_code == 0, result.output
+    transcribe = src_dir / "transcribe-file.tsx"
+    record = src_dir / "record-to-obsidian.tsx"
+    assert transcribe.is_symlink(), "expected a symlink for transcribe-file"
+    assert os.readlink(str(transcribe)) == "run-workflow.tsx"
+    assert record.is_symlink(), "expected a symlink for record-to-obsidian"
+    assert os.readlink(str(record)) == "run-workflow.tsx"
+
+
+def test_raycast_sync_creates_src_dir_if_missing(tmp_path):
+    """sync creates the src/ directory if it does not exist yet."""
+    pkg_path = tmp_path / "package.json"
+    pkg_path.write_text(json.dumps(_make_package_json(_FIXED_COMMANDS), indent=2) + "\n")
+    # Deliberately do NOT create src/
+
+    runner = CliRunner()
+    with patch("turbollm.cli.load_registry", return_value=_FAKE_REGISTRY):
+        result = runner.invoke(turbo_cli.cli, ["raycast", "sync", "--extension-dir", str(tmp_path)])
+
+    assert result.exit_code == 0, result.output
+    assert (tmp_path / "src").is_dir()
+    assert (tmp_path / "src" / "transcribe-file.tsx").is_symlink()
+
+
+def test_raycast_sync_removes_orphan_symlinks(tmp_path):
+    """sync removes src/<slug>.tsx symlinks for workflows that no longer exist."""
+    src_dir = tmp_path / "src"
+    src_dir.mkdir()
+    orphan = src_dir / "old-workflow.tsx"
+    orphan.symlink_to("run-workflow.tsx")
+
+    pkg_path = tmp_path / "package.json"
+    pkg_path.write_text(json.dumps(_make_package_json(_FIXED_COMMANDS), indent=2) + "\n")
+
+    runner = CliRunner()
+    with patch("turbollm.cli.load_registry", return_value=_FAKE_REGISTRY):
+        result = runner.invoke(turbo_cli.cli, ["raycast", "sync", "--extension-dir", str(tmp_path)])
+
+    assert result.exit_code == 0, result.output
+    assert not orphan.is_symlink(), "orphan symlink should have been removed"
+    assert not orphan.exists()
+
+
+def test_raycast_sync_does_not_remove_real_tsx_files(tmp_path):
+    """sync does not remove real (non-symlink) .tsx files in src/."""
+    src_dir = tmp_path / "src"
+    src_dir.mkdir()
+    real_file = src_dir / "run-workflow.tsx"
+    real_file.write_text("// real file\n")
+
+    pkg_path = tmp_path / "package.json"
+    pkg_path.write_text(json.dumps(_make_package_json(_FIXED_COMMANDS), indent=2) + "\n")
+
+    runner = CliRunner()
+    with patch("turbollm.cli.load_registry", return_value=_FAKE_REGISTRY):
+        result = runner.invoke(turbo_cli.cli, ["raycast", "sync", "--extension-dir", str(tmp_path)])
+
+    assert result.exit_code == 0, result.output
+    assert real_file.exists()
+    assert not real_file.is_symlink(), "real file must not have been turned into a symlink"
+
+
+def test_raycast_sync_symlinks_are_idempotent(tmp_path):
+    """Running sync twice produces the same symlinks."""
+    src_dir = tmp_path / "src"
+    src_dir.mkdir()
+    pkg_path = tmp_path / "package.json"
+    pkg_path.write_text(json.dumps(_make_package_json(_FIXED_COMMANDS), indent=2) + "\n")
+
+    runner = CliRunner()
+    with patch("turbollm.cli.load_registry", return_value=_FAKE_REGISTRY):
+        runner.invoke(turbo_cli.cli, ["raycast", "sync", "--extension-dir", str(tmp_path)])
+        runner.invoke(turbo_cli.cli, ["raycast", "sync", "--extension-dir", str(tmp_path)])
+
+    transcribe = src_dir / "transcribe-file.tsx"
+    assert transcribe.is_symlink()
+    assert os.readlink(str(transcribe)) == "run-workflow.tsx"
+
+
+# ---------------------------------------------------------------------------
+# T-fix-5: _generated_commands.ts generation
+# ---------------------------------------------------------------------------
+
+def test_raycast_sync_writes_generated_commands_ts(tmp_path):
+    """sync writes src/_generated_commands.ts with a workflow-name map."""
+    pkg_path = tmp_path / "package.json"
+    pkg_path.write_text(json.dumps(_make_package_json(_FIXED_COMMANDS), indent=2) + "\n")
+
+    runner = CliRunner()
+    with patch("turbollm.cli.load_registry", return_value=_FAKE_REGISTRY):
+        result = runner.invoke(turbo_cli.cli, ["raycast", "sync", "--extension-dir", str(tmp_path)])
+
+    assert result.exit_code == 0, result.output
+    gen_path = tmp_path / "src" / "_generated_commands.ts"
+    assert gen_path.exists(), "_generated_commands.ts must be written"
+    content = gen_path.read_text()
+    assert "GENERATED_COMMANDS" in content
+    assert '"transcribe-file": "transcribe-file"' in content
+    assert '"record-to-obsidian": "record-to-obsidian"' in content
+
+
+def test_raycast_sync_generated_commands_ts_valid_structure(tmp_path):
+    """The generated _generated_commands.ts has the expected TypeScript structure."""
+    pkg_path = tmp_path / "package.json"
+    pkg_path.write_text(json.dumps(_make_package_json(_FIXED_COMMANDS), indent=2) + "\n")
+
+    runner = CliRunner()
+    with patch("turbollm.cli.load_registry", return_value=_FAKE_REGISTRY):
+        runner.invoke(turbo_cli.cli, ["raycast", "sync", "--extension-dir", str(tmp_path)])
+
+    content = (tmp_path / "src" / "_generated_commands.ts").read_text()
+    assert content.startswith("// Auto-generated"), "should start with auto-generated comment"
+    assert "export const GENERATED_COMMANDS: Record<string, string> = {" in content
+    assert content.strip().endswith("};"), "should end with closing brace-semicolon"
+
+
+def test_raycast_sync_generated_commands_ts_empty_when_no_workflows(tmp_path):
+    """_generated_commands.ts has an empty map when no workflows are configured."""
+    pkg_path = tmp_path / "package.json"
+    pkg_path.write_text(json.dumps(_make_package_json(_FIXED_COMMANDS), indent=2) + "\n")
+
+    runner = CliRunner()
+    with patch("turbollm.cli.load_registry", return_value={}):
+        runner.invoke(turbo_cli.cli, ["raycast", "sync", "--extension-dir", str(tmp_path)])
+
+    content = (tmp_path / "src" / "_generated_commands.ts").read_text()
+    assert "GENERATED_COMMANDS" in content
+    # With no workflows, the map body should be empty.
+    assert '": "' not in content
+
+
+def test_raycast_sync_generated_commands_ts_is_sorted(tmp_path):
+    """Workflow entries in _generated_commands.ts are sorted alphabetically."""
+    pkg_path = tmp_path / "package.json"
+    pkg_path.write_text(json.dumps(_make_package_json(_FIXED_COMMANDS), indent=2) + "\n")
+
+    runner = CliRunner()
+    with patch("turbollm.cli.load_registry", return_value=_FAKE_REGISTRY):
+        runner.invoke(turbo_cli.cli, ["raycast", "sync", "--extension-dir", str(tmp_path)])
+
+    content = (tmp_path / "src" / "_generated_commands.ts").read_text()
+    record_idx = content.index("record-to-obsidian")
+    transcribe_idx = content.index("transcribe-file")
+    assert record_idx < transcribe_idx, "entries should be sorted alphabetically"

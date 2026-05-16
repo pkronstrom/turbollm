@@ -64,3 +64,10 @@ export const LocalStorage = {
 };
 
 export const getPreferenceValues = vi.fn(<T>(): T => ({} as T));
+
+// ── Environment ────────────────────────────────────────────────────────────────
+// Mutable object so tests can override `commandName` per-test.
+
+export const environment = {
+  commandName: "run-workflow",
+};

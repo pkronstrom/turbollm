@@ -3,12 +3,27 @@ import {
   ActionPanel,
   Detail,
   List,
+  environment,
   useNavigation,
 } from "@raycast/api";
 import { useEffect, useState } from "react";
 import { WorkflowForm } from "./components/workflow-form";
 import { getBinaryPath } from "./lib/binary-path";
 import { Workflow, listWorkflows } from "./lib/workflows";
+import { GENERATED_COMMANDS } from "./_generated_commands";
+
+/**
+ * Resolve whether the current command was launched as a per-workflow shortcut.
+ *
+ * Returns the workflow name to preselect, or null if this is the generic
+ * "run-workflow" command (where the user should see the full list).
+ */
+export function resolvePreselectedWorkflow(
+  commandName: string,
+  commands: Record<string, string>
+): string | null {
+  return commands[commandName] ?? null;
+}
 
 export default function RunWorkflow() {
   const [workflows, setWorkflows] = useState<Workflow[] | null>(null);
@@ -16,9 +31,21 @@ export default function RunWorkflow() {
   const [turboPath, setTurboPath] = useState<string>("");
   const { push } = useNavigation();
 
+  const preselectedName = resolvePreselectedWorkflow(environment.commandName, GENERATED_COMMANDS);
+
   useEffect(() => {
     load();
   }, []);
+
+  // When launched from a per-workflow command, push the form as soon as data is ready.
+  useEffect(() => {
+    if (preselectedName && workflows !== null && turboPath) {
+      const wf = workflows.find((w) => w.name === preselectedName);
+      if (wf) {
+        push(<WorkflowForm workflow={wf} turboPath={turboPath} />);
+      }
+    }
+  }, [workflows, turboPath, preselectedName]);
 
   async function load() {
     setError(null);
