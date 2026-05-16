@@ -351,7 +351,9 @@ mkdir -p "$(dirname "$out")"
 # Capture the transcript once, then both summarize it AND embed it in the
 # output. Lets the user compare summary vs. ASR truth.
 transcript="$(turbo transcribe "$1")"
-summary="$(printf '%s' "$transcript" | pi --no-extensions -p 'You are given a meeting transcript on stdin. Summarize it. Output markdown with sections: Summary, Decisions, Action items (owner if mentioned), Open questions. Base every claim on the transcript text only; if a section has no content, write "None".')"
+summary="$(printf '%s' "$transcript" | pi --no-extensions \
+  --system-prompt 'You are a note-taking assistant. The user records audio of varied content: meetings, lectures, voice memos, brainstorms, interviews, walking thoughts. Produce a faithful markdown summary that will land in their Obsidian vault. The transcript on stdin is authoritative ground truth — base every claim on it. Never reference yourself, the user, "the workspace", "the message", "the snippet", or your own context. Output markdown only, with no preamble or sign-off.' \
+  -p 'Summarize the transcript. Choose section headings that fit the actual content — do NOT force a fixed structure. Prefer concrete bullet points where they fit, prose where they do not. Use shapes like Decisions / Action items / Open questions / Key points / Notable quotes / Topics ONLY when the content genuinely contains them. Detect the transcript language and write the summary in that same language; do not translate.')"
 
 {
   printf -- '---\n'
