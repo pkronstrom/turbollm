@@ -84,25 +84,48 @@ final class RecordAudioTests: XCTestCase {
     // correct pattern. This is a documentation test — it will catch a regression if
     // someone replaces the native-format tap with a hardcoded one.
     func test_record_audio_uses_native_hw_format_for_tap_not_hardcoded_16khz() throws {
-        // Read RecordAudio.swift from the bundle's source. In test context we check
-        // that the implementation uses outputFormat(forBus: 0) as the tap format.
-        //
-        // This test validates the anti-regression requirement from spec:
+        // Anti-regression source-level check per spec:
         // "The tap-install code path uses inputNode.outputFormat(forBus: 0) rather
-        //  than a hardcoded format (the Plan-3 production bug; Phase 1's tests must
-        //  catch a regression)."
+        //  than a hardcoded format (the Plan-3 production bug; Phase 1's tests
+        //  must catch a regression)."
         //
-        // Since we can't inspect compiled code, we assert by calling the RecordAudio
-        // module's symbol structure: if `outputPath(explicitPath:)` and `parseArgs(argv:)`
-        // compile and run correctly, the file's architecture is intact. The real guard
-        // is code review + the fact that using a hardcoded 16kHz tap format would cause
-        // a crash in any audio test environment.
-        //
-        // More concretely: verify the startMicOnly path doesn't use the targetFormat
-        // for the tap by checking that AVAudioConverter is used. If the test environment
-        // has no audio hardware, we can't actually run the engine — but we can verify
-        // the code structure through successful compilation.
-        XCTAssertTrue(true, "RecordAudio compiles with native-format tap + AVAudioConverter")
+        // We can't drive AVAudioEngine in CI (no audio hardware), so we read the
+        // RecordAudio.swift source file and assert on the tap-install patterns
+        // directly. This catches the exact regression the spec warns about: a
+        // future edit that "simplifies" startMicOnly to install the tap with
+        // targetFormat (16 kHz mono) and re-introduces the NSException crash.
+        let sourceURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()        // .../Tests/TurboAcquirerTests
+            .deletingLastPathComponent()        // .../Tests
+            .deletingLastPathComponent()        // .../turbo-acquirer
+            .appendingPathComponent("Sources/TurboAcquirer/RecordAudio.swift")
+        let source = try String(contentsOf: sourceURL, encoding: .utf8)
+
+        // Must consult the input node's native hardware format for the tap.
+        XCTAssertTrue(
+            source.contains("inputNode.outputFormat(forBus: 0)"),
+            "RecordAudio.swift must read the input node's native HW format via `inputNode.outputFormat(forBus: 0)`."
+        )
+
+        // The mic-only tap install line must use `format: nativeFormat`, not the
+        // hardcoded 16 kHz `targetFormat`. We grep for the tap-install pattern
+        // and require the literal `nativeFormat` reference within the same line.
+        let lines = source.components(separatedBy: "\n")
+        let tapInstalls = lines.filter { $0.contains("inputNode.installTap") }
+        XCTAssertFalse(tapInstalls.isEmpty, "Expected at least one inputNode.installTap(...) call.")
+        for line in tapInstalls {
+            XCTAssertTrue(
+                line.contains("format: nativeFormat"),
+                "Tap install must use `format: nativeFormat`, never `targetFormat` directly. Offending line: \(line)"
+            )
+        }
+
+        // And AVAudioConverter must be set up so the buffers reach the file in
+        // the target 16 kHz mono format.
+        XCTAssertTrue(
+            source.contains("AVAudioConverter(from: nativeFormat, to: targetFormat)"),
+            "RecordAudio.swift must convert native→target via AVAudioConverter."
+        )
     }
 
     // MARK: - Fake mode test (T-9 Step 1 — ensures signal handlers installed before engine)
@@ -125,31 +148,58 @@ final class RecordAudioTests: XCTestCase {
 
     // MARK: - T-10: system+mic permission check
 
-    // Note: Real system+mic recording requires SCStream permission (Screen Recording TCC).
-    // We can test the permission preflight in isolation.
-    func test_run_system_plus_mic_fails_when_screen_recording_denied() {
-        // This test can only verify the denied case if Screen Recording IS denied.
-        // In environments where it's granted, we just verify the code compiles and
-        // the enum branches exist.
-        //
-        // The spec-required test seam: `run(scope: .systemPlusMic, ...)` must throw
-        // `RecordAudioError.permissionDenied("Screen Recording")` when access is denied.
-        //
-        // We can't control TCC in tests. So: if Screen Recording is denied, verify the
-        // error; if granted, just verify the function signature exists.
-        let permState = Permissions.state()
-        if !permState.screenRecording {
-            // Screen Recording denied — verify that run() would throw permissionDenied.
-            // We can't call the async SCStream path synchronously, but we can verify
-            // the guard clause is correct by checking the permission preflight directly.
-            XCTAssertFalse(permState.screenRecording,
-                           "Screen Recording is denied in this environment")
-            // The production code path: CGPreflightScreenCaptureAccess() → false → throw
-            // This assertion documents the expected behavior for code reviewers.
-        } else {
-            // Screen Recording granted — test just verifies the code structure is intact.
-            XCTAssertTrue(permState.screenRecording,
-                          "Screen Recording is granted; system+mic path would proceed")
+    /// Spec requirement: when Screen Recording is denied, `run(scope: .systemPlusMic, …)`
+    /// throws `RecordAudioError.permissionDenied("Screen Recording")` *before*
+    /// touching SCStream. We exercise that guard deterministically via the
+    /// `screenRecordingPermissionOverride` test seam — no TCC dependency, no
+    /// engine startup, no audio hardware required.
+    func test_run_system_plus_mic_throws_permission_denied_when_seam_says_denied() throws {
+        let tmpDir = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("record-tests-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: tmpDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+        let outputURL = tmpDir.appendingPathComponent("out.wav")
+
+        RecordAudio.screenRecordingPermissionOverride = false
+        defer { RecordAudio.screenRecordingPermissionOverride = nil }
+
+        do {
+            try RecordAudio.run(
+                scope: .systemPlusMic,
+                deviceUID: nil,
+                outputURL: outputURL,
+                parentId: nil
+            )
+            XCTFail("Expected RecordAudioError.permissionDenied when seam reports denied")
+        } catch let RecordAudioError.permissionDenied(reason) {
+            XCTAssertEqual(reason, "Screen Recording")
+        } catch {
+            XCTFail("Expected RecordAudioError.permissionDenied; got \(error)")
         }
+
+        // Output file must not have been created — the guard fires before any IO.
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: outputURL.path),
+            "permissionDenied must short-circuit before creating the WAV."
+        )
+    }
+
+    /// When the seam reports `true` (granted), mic-only still works as before — proving
+    /// the seam only affects the system+mic preflight and does not leak into other paths.
+    func test_screen_recording_seam_does_not_affect_mic_only_path() throws {
+        setenv("TURBO_RECORD_AUDIO_FAKE", "1", 1)
+        defer { unsetenv("TURBO_RECORD_AUDIO_FAKE") }
+        RecordAudio.screenRecordingPermissionOverride = false  // would deny system+mic
+        defer { RecordAudio.screenRecordingPermissionOverride = nil }
+
+        let tmpDir = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("record-tests-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: tmpDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let outputURL = tmpDir.appendingPathComponent("out.wav")
+        // Mic-only must succeed even though the override would deny system+mic.
+        try RecordAudio.run(scope: .micOnly, deviceUID: nil, outputURL: outputURL, parentId: nil)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: outputURL.path))
     }
 }

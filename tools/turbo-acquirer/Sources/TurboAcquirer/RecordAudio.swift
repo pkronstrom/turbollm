@@ -32,6 +32,14 @@ enum RecordAudioError: Error {
 /// Writes an activity file before `engine.start()` and deletes it on exit via `defer`.
 enum RecordAudio {
 
+    // MARK: - Test seam
+
+    /// Overrides the Screen Recording permission check used by the `system+mic`
+    /// path. When set to `false`, `run(scope: .systemPlusMic, …)` throws
+    /// `RecordAudioError.permissionDenied("Screen Recording")` without
+    /// consulting the real TCC subsystem. Tests set this and reset to `nil`.
+    nonisolated(unsafe) static var screenRecordingPermissionOverride: Bool?
+
     // MARK: - Entry point
 
     /// Runs the record-audio subcommand.
@@ -54,7 +62,8 @@ enum RecordAudio {
 
         // System+mic requires Screen Recording permission.
         if scope == .systemPlusMic {
-            guard CGPreflightScreenCaptureAccess() else {
+            let granted = screenRecordingPermissionOverride ?? CGPreflightScreenCaptureAccess()
+            guard granted else {
                 throw RecordAudioError.permissionDenied("Screen Recording")
             }
         }
@@ -82,6 +91,13 @@ enum RecordAudio {
         installStopSignalHandlers()
 
         let engine = AVAudioEngine()
+        // Retain SCStream for the full life of the recording. ScreenCaptureKit
+        // does not document `startCapture()` as keeping its receiver alive, and
+        // ARC will deallocate a stream the moment its last strong reference
+        // disappears — losing system audio mid-recording without surfacing an
+        // error. Holding it here covers both the async setup path and graceful
+        // teardown.
+        var systemAudioStream: SCStream?
 
         switch scope {
         case .micOnly:
@@ -91,11 +107,15 @@ enum RecordAudio {
             // system+mic requires async SCStream setup — run on a background thread.
             let group = DispatchGroup()
             var startError: Error?
+            var producedStream: SCStream?
             group.enter()
             Task {
                 do {
-                    try await startSystemPlusMic(engine: engine, audioFile: audioFile,
-                                                  targetFormat: targetFormat)
+                    producedStream = try await startSystemPlusMic(
+                        engine: engine,
+                        audioFile: audioFile,
+                        targetFormat: targetFormat
+                    )
                 } catch {
                     startError = error
                 }
@@ -103,6 +123,7 @@ enum RecordAudio {
             }
             group.wait()
             if let error = startError { throw error }
+            systemAudioStream = producedStream
         }
 
         // Poll for stop signal at 100 ms intervals.
@@ -110,7 +131,17 @@ enum RecordAudio {
             Thread.sleep(forTimeInterval: 0.1)
         }
 
-        // Graceful stop: remove taps, stop engine, flush file.
+        // Graceful stop: stop the SCStream first (if any), then remove taps and
+        // stop the engine so the WAV is flushed cleanly.
+        if let stream = systemAudioStream {
+            let stopGroup = DispatchGroup()
+            stopGroup.enter()
+            Task {
+                try? await stream.stopCapture()
+                stopGroup.leave()
+            }
+            stopGroup.wait()
+        }
         engine.inputNode.removeTap(onBus: 0)
         engine.stop()
     }
@@ -234,11 +265,13 @@ enum RecordAudio {
 
     // MARK: - System+mic path (ScreenCaptureKit + AVAudioEngine)
 
+    /// Returns the SCStream so the caller can retain it for the full
+    /// recording lifetime and stop it during graceful teardown.
     private static func startSystemPlusMic(
         engine: AVAudioEngine,
         audioFile: AVAudioFile,
         targetFormat: AVAudioFormat
-    ) async throws {
+    ) async throws -> SCStream {
         let mixer = AVAudioMixerNode()
         let player = AVAudioPlayerNode()
 
@@ -277,6 +310,7 @@ enum RecordAudio {
             sampleHandlerQueue: .global()
         )
         try await stream.startCapture()
+        return stream
     }
 }
 
