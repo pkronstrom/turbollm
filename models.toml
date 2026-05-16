@@ -386,6 +386,10 @@ extensions = ["m4a", "wav", "mp3", "flac"]
 description = "Record audio, summarize, save to Obsidian (HUD-only: needs audio-recording acquirer)"
 script = "summarize-to-obsidian"
 args = ["{{audio}}", "{{title}}"]
+# Plumb the resolved `vault` param through so the HUD's vault picker steers
+# output instead of being cosmetic. The script reads $OBSIDIAN_VAULT (with a
+# $HOME/Documents/Obsidian fallback).
+env = { OBSIDIAN_VAULT = "{{vault}}" }
 
 [[workflows.record-to-obsidian.params]]
 name = "audio"
