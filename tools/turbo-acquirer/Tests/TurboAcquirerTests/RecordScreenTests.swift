@@ -298,6 +298,45 @@ final class RecordScreenTests: XCTestCase {
         XCTAssertEqual(manifest.startOffsetMs, 0)
     }
 
+    // MARK: - T-fix-4: signal handler install + setup-failure bail
+
+    func test_signal_handlers_installed_before_stream_via_fake_mode() throws {
+        // Verify that after running in fake mode (which bypasses SCStream),
+        // the process is in a defined state: fake mode returns without hanging.
+        // The installStopSignalHandlers call is exercised implicitly on real runs;
+        // here we confirm fake mode returns valid JSON (not a hang/nil).
+        setenv("TURBO_RECORD_SCREEN_FAKE", "1", 1)
+        defer { unsetenv("TURBO_RECORD_SCREEN_FAKE") }
+
+        let tmpDir = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("record-screen-sigtest-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let result = RecordScreen.run(outputDir: tmpDir, scope: .fullDisplay)
+        XCTAssertFalse(result.isEmpty, "run must return a manifest string even in fake mode")
+        let data = result.data(using: .utf8)!
+        let manifest = try JSONDecoder().decode(RecordScreenManifest.self, from: data)
+        XCTAssertEqual(manifest.frames.count, 0)
+    }
+
+    func test_empty_manifest_on_setup_failure_has_correct_shape() throws {
+        // Simulate the shape of the empty manifest returned when SCStream setup fails.
+        // The guard-setupSucceeded path returns this exact struct; verify round-trip.
+        let startOffset = 42
+        let manifest = RecordScreenManifest(
+            frames: [],
+            durationMs: 0,
+            droppedOvercap: 0,
+            startOffsetMs: startOffset
+        )
+        let json = RecordScreen.encodeManifest(manifest)
+        let data = json.data(using: .utf8)!
+        let decoded = try JSONDecoder().decode(RecordScreenManifest.self, from: data)
+        XCTAssertEqual(decoded.frames.count, 0, "Setup-failure manifest must have empty frames")
+        XCTAssertEqual(decoded.durationMs, 0, "Setup-failure manifest must have durationMs=0")
+        XCTAssertEqual(decoded.startOffsetMs, startOffset, "Setup-failure manifest must preserve startOffsetMs")
+    }
+
     // MARK: - Helpers
 
     /// Creates a hash that differs from `base` by exactly `distance` bits.

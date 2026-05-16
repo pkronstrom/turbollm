@@ -219,14 +219,19 @@ enum RecordScreen {
             activityFileURL: activityFileURL
         )
 
+        // Install signal handlers before starting the stream (mirrors RecordAudio.swift:91).
+        installStopSignalHandlers()
+
         // Build SCStream.
         let semaphore = DispatchSemaphore(value: 0)
         var stream: SCStream? = nil
+        var setupSucceeded = false
 
         Task {
             do {
                 let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
                 guard let display = content.displays.first else {
+                    fputs("record-screen: no display found\n", stderr)
                     semaphore.signal(); return
                 }
                 let filter = buildContentFilter(display: display, scope: resolvedScope, content: content)
@@ -235,6 +240,7 @@ enum RecordScreen {
                 try s.addStreamOutput(output, type: .screen, sampleHandlerQueue: .global(qos: .userInteractive))
                 try await s.startCapture()
                 stream = s
+                setupSucceeded = true
                 semaphore.signal()
             } catch {
                 fputs("record-screen: SCStream setup failed: \(error)\n", stderr)
@@ -242,6 +248,16 @@ enum RecordScreen {
             }
         }
         semaphore.wait()
+
+        // If setup failed, emit an empty manifest immediately instead of hanging in the poll loop.
+        guard setupSucceeded else {
+            return RecordScreenManifest(
+                frames: [],
+                durationMs: 0,
+                droppedOvercap: 0,
+                startOffsetMs: startOffsetMs
+            )
+        }
 
         // Poll for stop signal.
         while !isStopRequested() {
