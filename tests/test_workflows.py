@@ -622,3 +622,155 @@ def test_run_workflow_both_acquirers_see_same_t0_ns(monkeypatch, tmp_path):
         f"Both acquirers must see the same TURBO_T0_NS; got {captured_t0s}"
     )
     assert captured_t0s[0] > 0, "TURBO_T0_NS must be a positive monotonic timestamp"
+
+
+# ---------------------------------------------------------------------------
+# T-15: record-meeting-with-screen workflow definition
+# ---------------------------------------------------------------------------
+
+def test_record_meeting_with_screen_is_in_models_toml():
+    """record-meeting-with-screen must be loadable from models.toml."""
+    try:
+        import tomllib
+    except ImportError:
+        import tomli as tomllib  # type: ignore[no-redef]
+    from pathlib import Path
+
+    toml_path = Path(__file__).resolve().parent.parent / "models.toml"
+    if not toml_path.exists():
+        pytest.skip("models.toml not found")
+    with open(toml_path, "rb") as f:
+        registry = tomllib.load(f)
+    wfs = workflows.load_workflows(registry)
+    assert "record-meeting-with-screen" in wfs, (
+        f"record-meeting-with-screen not found in workflows: {list(wfs)}"
+    )
+    wf = wfs["record-meeting-with-screen"]
+    # validate_workflow must not raise
+    workflows.validate_workflow("record-meeting-with-screen", wf)
+    # Should have all three params
+    param_names = {p["name"] for p in wf.get("params", [])}
+    assert param_names == {"audio", "screen", "vault"}, (
+        f"Unexpected params: {param_names}"
+    )
+    # audio = primary audio-recording
+    audio_p = next(p for p in wf["params"] if p["name"] == "audio")
+    assert audio_p["type"] == "audio-recording"
+    assert audio_p.get("mode") == "primary"
+    # screen = background screen-recording
+    screen_p = next(p for p in wf["params"] if p["name"] == "screen")
+    assert screen_p["type"] == "screen-recording"
+    assert screen_p.get("mode") == "background"
+
+
+# ---------------------------------------------------------------------------
+# T-16: SIGTERM cascade — background acquirer receives SIGTERM when primary exits
+# ---------------------------------------------------------------------------
+
+def test_sigterm_cascade_background_receives_sigterm_when_primary_exits(
+    monkeypatch, tmp_path
+):
+    """When the primary acquirer exits naturally, background acquirers get SIGTERM."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+
+    sigterm_file = tmp_path / "sigterm_received.txt"
+    screen_manifest = (
+        '{"frames":[],"duration_ms":1000,"dropped_overcap":0,"start_offset_ms":0}'
+    )
+    manifest_file1 = tmp_path / "manifest1.json"
+    manifest_file1.write_text(screen_manifest)
+
+    # Fake acquirer:
+    #   record-audio  → exits immediately, returns a fake path
+    #   record-screen → loops until SIGTERM; on SIGTERM cats manifest file + writes marker
+    _make_fake_acquirer(
+        bin_dir,
+        "turbo-acquirer",
+        f"""\
+case "$1" in
+  record-audio)
+    printf '%s' '/fake/audio.wav'
+    ;;
+  record-screen)
+    trap 'cat "{manifest_file1}"; touch "{sigterm_file}"; exit 0' TERM INT
+    while true; do sleep 0.05; done
+    ;;
+  *) exit 1 ;;
+esac
+""",
+    )
+
+    out_file = tmp_path / "out.txt"
+    wf = {
+        "command": f'echo done > "{out_file}"',
+        "params": [
+            {"name": "audio", "type": "audio-recording", "mode": "primary", "scope": "system+mic"},
+            {"name": "screen", "type": "screen-recording", "mode": "background"},
+        ],
+    }
+
+    monkeypatch.setenv("TURBO_ACQUIRER_BIN", str(bin_dir / "turbo-acquirer"))
+    from turbollm import activity
+
+    monkeypatch.setattr(activity, "STATE_DIR", tmp_path / "state")
+
+    rc = workflows.run_workflow("cascade-test", wf, overrides={}, registry={})
+    assert rc == 0, f"run_workflow returned {rc}"
+    assert sigterm_file.exists(), (
+        "Background acquirer did not receive SIGTERM; marker file missing"
+    )
+    assert out_file.read_text().strip() == "done", "Workflow command did not run after acquirers"
+
+
+def test_sigterm_cascade_background_output_is_resolved(monkeypatch, tmp_path):
+    """Background acquirer stdout is captured and available as a resolved param."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+
+    screen_manifest = (
+        '{"frames":[],"duration_ms":2000,"dropped_overcap":0,"start_offset_ms":100}'
+    )
+    manifest_file2 = tmp_path / "manifest2.json"
+    manifest_file2.write_text(screen_manifest)
+    captured_screen_file = tmp_path / "screen_value.txt"
+
+    _make_fake_acquirer(
+        bin_dir,
+        "turbo-acquirer",
+        f"""\
+case "$1" in
+  record-audio)
+    printf '%s' '/fake/audio.wav'
+    ;;
+  record-screen)
+    trap 'cat "{manifest_file2}"; exit 0' TERM INT
+    while true; do sleep 0.05; done
+    ;;
+  *) exit 1 ;;
+esac
+""",
+    )
+
+    # Pass {{screen}} via an env var to avoid shell quoting issues with JSON content.
+    wf = {
+        "command": f'echo "$SCREEN_MANIFEST" > "{captured_screen_file}"',
+        "env": {"SCREEN_MANIFEST": "{{screen}}"},
+        "params": [
+            {"name": "audio", "type": "audio-recording", "mode": "primary", "scope": "system+mic"},
+            {"name": "screen", "type": "screen-recording", "mode": "background"},
+        ],
+    }
+
+    monkeypatch.setenv("TURBO_ACQUIRER_BIN", str(bin_dir / "turbo-acquirer"))
+    from turbollm import activity
+
+    monkeypatch.setattr(activity, "STATE_DIR", tmp_path / "state")
+
+    rc = workflows.run_workflow("cascade-output-test", wf, overrides={}, registry={})
+    assert rc == 0, f"run_workflow returned {rc}"
+
+    screen_value = captured_screen_file.read_text()
+    assert '"duration_ms": 2000' in screen_value or '"duration_ms":2000' in screen_value, (
+        f"Expected screen manifest in output, got: {screen_value!r}"
+    )

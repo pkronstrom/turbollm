@@ -12,6 +12,7 @@ import re as _re
 import shutil as _shutil
 import signal as _signal
 import subprocess as _subprocess
+import tempfile as _tempfile
 import time as _time
 
 
@@ -20,7 +21,7 @@ class WorkflowError(Exception):
 
 
 # Param `type` values that resolve at run time (HUD performs UI; CLI typically refuses).
-ACQUIRED_TYPES = {"audio-recording", "screenshot-manual", "command"}
+ACQUIRED_TYPES = {"audio-recording", "screenshot-manual", "command", "screen-recording"}
 
 # Param `type` values resolved ahead of time (configured by user in HUD or CLI).
 CONFIGURED_TYPES = {"string", "text", "enum", "file", "directory"}
@@ -137,9 +138,13 @@ def resolve_params(
     5. `default = "..."`
     6. empty string
 
-    Acquired params (audio-recording, screenshot-manual, command) are spawned
+    Acquired params (audio-recording, screenshot-manual, command, screen-recording) are spawned
     via `turbo-acquirer` when `acquirer_bin` is provided and the param is not
     already in `overrides`. Without `acquirer_bin`, they raise WorkflowError.
+
+    Background acquirers (mode != "primary") are started concurrently with the
+    primary acquirer. When the primary exits, SIGTERM is sent to all background
+    acquirers; their stdout is collected before this function returns.
 
     Configured params (string, text, enum, file, directory) without any source
     resolve to the empty string.
@@ -149,12 +154,48 @@ def resolve_params(
     scope). Workflow authors should order params with this constraint in mind.
     """
     resolved: dict[str, str] = {}
+
+    # Pre-flight: start background acquired params as async processes so they
+    # run concurrently with the (blocking) primary acquirer.
+    _background_procs: dict[str, tuple[_subprocess.Popen, dict]] = {}
+    if acquirer_bin is not None:
+        for p in params:
+            name = p["name"]
+            if name in overrides:
+                continue
+            ptype = p.get("type")
+            if ptype not in ACQUIRED_TYPES:
+                continue
+            mode = p.get("mode", _default_mode(p))
+            if mode != "background":
+                continue
+            # Explicitly background acquired param: launch immediately (non-blocking).
+            argv = _acquirer_argv(acquirer_bin, p, workflow_name=workflow_name)
+            env = dict(_os.environ)
+            if workflow_id:
+                env["TURBO_WORKFLOW_ID"] = workflow_id
+            if t0_ns is not None:
+                env["TURBO_T0_NS"] = str(t0_ns)
+            proc = _subprocess.Popen(
+                argv,
+                stdout=_subprocess.PIPE,
+                stderr=_subprocess.PIPE,
+                env=env,
+                text=True,
+            )
+            _background_procs[name] = (proc, p)
+
+    # Main loop: resolve params sequentially; skip backgrounds (handled below).
     for p in params:
         name = p["name"]
         ptype = p.get("type")
 
         if name in overrides:
             resolved[name] = overrides[name]
+            continue
+
+        if name in _background_procs:
+            # Will be resolved after the primary exits.
             continue
 
         if ptype in ACQUIRED_TYPES:
@@ -182,6 +223,29 @@ def resolve_params(
             continue
 
         resolved[name] = p.get("default", "")
+
+    # After primary(ies) have returned: SIGTERM all backgrounds and collect output.
+    if _background_procs:
+        for _name, (proc, _p) in _background_procs.items():
+            try:
+                proc.send_signal(_signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+
+        for name, (proc, p) in _background_procs.items():
+            stdout, stderr = proc.communicate()
+            # Accept clean exit (0) or killed by SIGTERM (-signal.SIGTERM on Unix).
+            if proc.returncode not in (0, -_signal.SIGTERM):
+                raise WorkflowError(
+                    f"background acquirer exited {proc.returncode} for param '{p['name']}': "
+                    f"{stderr.strip()}"
+                )
+            value = stdout.strip()
+            if not value:
+                raise WorkflowError(
+                    f"background acquirer returned empty output for param '{p['name']}'"
+                )
+            resolved[name] = value
 
     return resolved
 
@@ -262,6 +326,22 @@ def _acquirer_argv(
     if ptype == "command":
         acquire = param.get("acquire") or param.get("acquire_script", "")
         return [binary, "command", "--shell", acquire]
+    if ptype == "screen-recording":
+        out_dir = _tempfile.mkdtemp(prefix="turbo-session-")
+        argv = [binary, "record-screen", "--output-dir", out_dir]
+        scope = param.get("scope")
+        threshold = param.get("keyframe_threshold")
+        min_interval = param.get("min_interval_ms")
+        max_kf = param.get("max_keyframes")
+        if scope:
+            argv += ["--scope", scope]
+        if threshold is not None:
+            argv += ["--keyframe-threshold", str(threshold)]
+        if min_interval is not None:
+            argv += ["--min-interval-ms", str(min_interval)]
+        if max_kf is not None:
+            argv += ["--max-keyframes", str(max_kf)]
+        return argv
     raise WorkflowError(f"unknown acquired param type '{ptype}'")
 
 
