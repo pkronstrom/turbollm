@@ -346,11 +346,28 @@ vault="${OBSIDIAN_VAULT:-$HOME/Documents/Obsidian}"
 bn="${1##*/}"
 slug="${bn%.*}"
 out="$vault/Meetings/$slug.md"
+raw_out="$vault/Meetings/$slug.raw.md"
 mkdir -p "$(dirname "$out")"
 
-# Capture the transcript once, then both summarize it AND embed it in the
-# output. Lets the user compare summary vs. ASR truth.
+# Capture plain-text transcript for the summary LLM prompt.
 transcript="$(turbo transcribe "$1")"
+
+# Capture segmented transcript (JSON array) for the .raw.md companion file.
+segments_json="$(turbo transcribe --format segments "$1")"
+
+# Write .raw.md: [mm:ss] <text> lines from the segments JSON.
+# python3 is always available on macOS; no extra dependencies needed.
+printf '%s' "$segments_json" | python3 -c "
+import json, sys, math
+segs = json.load(sys.stdin)
+for seg in segs:
+    start = seg.get('start') or 0
+    mm = math.floor(start / 60)
+    ss = math.floor(start % 60)
+    text = seg.get('text', '').strip()
+    print(f'[{mm:02d}:{ss:02d}] {text}')
+" > "$raw_out"
+
 summary="$(printf '%s' "$transcript" | pi --no-extensions \
   --system-prompt 'You are a note-taking assistant. The user records audio of varied content: meetings, lectures, voice memos, brainstorms, interviews, walking thoughts. Produce a faithful markdown summary that will land in their Obsidian vault. The transcript on stdin is authoritative ground truth — base every claim on it. Never reference yourself, the user, "the workspace", "the message", "the snippet", or your own context. Output markdown only, with no preamble or sign-off.' \
   -p 'Summarize the transcript. Choose section headings that fit the actual content — do NOT force a fixed structure. Prefer concrete bullet points where they fit, prose where they do not. Use shapes like Decisions / Action items / Open questions / Key points / Notable quotes / Topics ONLY when the content genuinely contains them. Detect the transcript language and write the summary in that same language; do not translate.')"
@@ -369,6 +386,7 @@ summary="$(printf '%s' "$transcript" | pi --no-extensions \
 } > "$out"
 
 echo "Wrote: $out" >&2
+echo "Wrote: $raw_out" >&2
 """
 
 
