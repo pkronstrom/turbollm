@@ -212,7 +212,8 @@ def test_run_workflow_writes_activity_file(monkeypatch, tmp_path):
     assert not list((tmp_path / "state").glob("activity-*.json"))
 
 
-def test_run_workflow_refuses_unresolved_acquired_param():
+def test_run_workflow_refuses_unresolved_acquired_param(monkeypatch):
+    monkeypatch.setattr(workflows, "find_acquirer_bin", lambda: None)
     wf = {
         "command": "echo {{audio}}",
         "params": [{"name": "audio", "type": "audio-recording", "mode": "primary"}],
