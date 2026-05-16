@@ -132,9 +132,42 @@ final class AudioRecorder: Acquirer {
             )
         }
 
-        inputNode.installTap(onBus: 0, bufferSize: 4096, format: format) { [weak self] buffer, _ in
+        // Install tap with the input node's native hardware format — AVAudioEngine
+        // rejects any other format here ("Input HW format and tap format not matching").
+        // Convert each buffer to the target 16 kHz mono format before writing.
+        let nativeFormat = inputNode.outputFormat(forBus: 0)
+        guard let converter = AVAudioConverter(from: nativeFormat, to: format) else {
+            throw AcquirerError.underlying(NSError(
+                domain: "TurboHUD.AudioRecorder",
+                code: -1,
+                userInfo: [NSLocalizedDescriptionKey: "Could not create AVAudioConverter from \(nativeFormat) to \(format)"]
+            ))
+        }
+
+        inputNode.installTap(onBus: 0, bufferSize: 4096, format: nativeFormat) { [weak self] buffer, _ in
             guard let self, let file = self.audioFile else { return }
-            try? file.write(from: buffer)
+            // Allocate an output buffer sized for the converted sample count.
+            let ratio = format.sampleRate / nativeFormat.sampleRate
+            let outCapacity = AVAudioFrameCount((Double(buffer.frameLength) * ratio).rounded())
+            guard let outBuffer = AVAudioPCMBuffer(
+                pcmFormat: format,
+                frameCapacity: max(outCapacity, 1)
+            ) else { return }
+
+            var error: NSError?
+            var supplied = false
+            let status = converter.convert(to: outBuffer, error: &error) { _, inputStatus in
+                if supplied {
+                    inputStatus.pointee = .endOfStream
+                    return nil
+                }
+                supplied = true
+                inputStatus.pointee = .haveData
+                return buffer
+            }
+
+            guard status != .error, outBuffer.frameLength > 0 else { return }
+            try? file.write(from: outBuffer)
         }
 
         try engine.start()
@@ -155,9 +188,13 @@ final class AudioRecorder: Acquirer {
         engine.attach(mixer)
         engine.attach(player)
 
-        // Connect mic input → mixer bus 0.
+        // Connect mic input → mixer bus 0. Use the input node's native hardware
+        // format on the mic side; the mixer down-mixes/down-samples to the tap
+        // format on its output side. Forcing a non-native format here triggers
+        // "Input HW format and tap format not matching".
         let inputNode = engine.inputNode
-        engine.connect(inputNode, to: mixer, format: format)
+        let nativeMicFormat = inputNode.outputFormat(forBus: 0)
+        engine.connect(inputNode, to: mixer, format: nativeMicFormat)
         // Connect player → mixer bus 1.
         engine.connect(player, to: mixer, format: format)
         // Tap mixer output → file.
