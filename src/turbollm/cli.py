@@ -1236,9 +1236,34 @@ def sidecar_cmd(build):
                 _refresh_symlink(link, acq_bin)
                 console.print(f"[dim]Symlinked turbo-acquirer → {acq_bin}[/dim]")
 
-    args = ["swift", "run"] if build else ["swift", "run", "--skip-build"]
-    console.print(f"[dim]Launching HUD via `swift run` in {hud_dir}...[/dim]")
-    subprocess.run(args, cwd=hud_dir)
+        # Build TurboHUD too so the symlink target exists and the HUD can be
+        # launched via a stable path. This is what gives macOS a consistent
+        # binary identity for TCC grants — `swift run` rebuilds the binary
+        # in place each time and produces a fresh wrapper, which would force
+        # the user to re-grant permissions on every invocation.
+        console.print(f"[dim]Building TurboHUD in {hud_dir}...[/dim]")
+        result = subprocess.run(["swift", "build"], cwd=hud_dir)
+        if result.returncode != 0:
+            console.print("[red]TurboHUD build failed.[/red]")
+            raise SystemExit(1)
+
+    hud_bin = _swift_build_product_path(hud_dir, "TurboHUD")
+    if hud_bin.exists():
+        hud_link = _local_bin() / "TurboHUD"
+        _refresh_symlink(hud_link, hud_bin)
+        console.print(f"[dim]Symlinked TurboHUD → {hud_bin}[/dim]")
+        console.print(f"[dim]Launching HUD via {hud_link}...[/dim]")
+        subprocess.run([str(hud_link)])
+    else:
+        # Fallback (cold start before any build, or unexpected state): use
+        # `swift run` so the user is not left without a HUD. The symlink
+        # path will be wired up on the next `turbo sidecar --build`.
+        args = ["swift", "run"] if build else ["swift", "run", "--skip-build"]
+        console.print(
+            f"[yellow]HUD binary not found at {hud_bin}; "
+            f"launching via `swift run` in {hud_dir}.[/yellow]"
+        )
+        subprocess.run(args, cwd=hud_dir)
 
 
 if __name__ == "__main__":

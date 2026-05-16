@@ -155,9 +155,14 @@ def test_sidecar_skips_acquirer_build_when_package_absent(tmp_path):
         result = runner.invoke(turbo_cli.cli, ["sidecar"])
 
     assert result.exit_code == 0
-    # Only swift run should have been called (no swift build for absent acquirer).
-    build_calls = [c for c in mock_run.call_args_list if c.args[0][:2] == ["swift", "build"]]
-    assert build_calls == [], f"Unexpected swift build calls: {build_calls}"
+    # No swift build should have been called in the (absent) acquirer dir.
+    # The HUD swift build is still expected.
+    absent_acq_dir = tmp_path / "tools" / "turbo-acquirer"
+    acq_build_calls = [
+        c for c in mock_run.call_args_list
+        if c.args[0][:2] == ["swift", "build"] and c.kwargs.get("cwd") == absent_acq_dir
+    ]
+    assert acq_build_calls == [], f"Unexpected acquirer build calls: {acq_build_calls}"
 
 
 def test_sidecar_continues_after_acquirer_build_failure(tmp_path):
@@ -189,6 +194,60 @@ def test_sidecar_continues_after_acquirer_build_failure(tmp_path):
 
     assert result.exit_code == 0
     assert "Warning" in result.output or "warning" in result.output.lower()
+
+
+def test_sidecar_builds_and_symlinks_hud_then_launches_via_symlink(tmp_path):
+    """Review fix: sidecar must `swift build` the HUD, create the
+    ~/.local/bin/TurboHUD symlink, and launch via the symlink (not via
+    `swift run`) so the HUD's binary identity is stable for TCC grants."""
+    hud_dir = tmp_path / "tools" / "turbo-hud"
+    hud_dir.mkdir(parents=True)
+    (hud_dir / "Package.swift").write_text("")
+
+    # Fake-built HUD binary so the symlink path resolves.
+    fake_hud_bin = hud_dir / ".build" / "debug" / "TurboHUD"
+    fake_hud_bin.parent.mkdir(parents=True)
+    fake_hud_bin.write_text("#!/bin/sh\necho fake HUD")
+
+    local_bin = tmp_path / "local_bin"
+    local_bin.mkdir()
+
+    symlinked: list[tuple] = []
+
+    def _fake_refresh_symlink(link_path, target_path):
+        symlinked.append((link_path, target_path))
+
+    runner = CliRunner()
+    with (
+        patch("turbollm.cli.subprocess.run") as mock_run,
+        patch.object(turbo_cli, "_hud_dir", return_value=hud_dir),
+        patch.object(turbo_cli, "_acquirer_dir",
+                     return_value=tmp_path / "tools" / "no-acquirer"),
+        patch.object(turbo_cli, "_local_bin", return_value=local_bin),
+        patch.object(turbo_cli, "_refresh_symlink", side_effect=_fake_refresh_symlink),
+    ):
+        mock_run.return_value.returncode = 0
+        result = runner.invoke(turbo_cli.cli, ["sidecar"])
+
+    assert result.exit_code == 0
+
+    # The HUD must have been built (swift build in hud_dir).
+    hud_build_calls = [
+        c for c in mock_run.call_args_list
+        if c.args[0][:2] == ["swift", "build"] and c.kwargs.get("cwd") == hud_dir
+    ]
+    assert hud_build_calls, f"Expected `swift build` in HUD dir; got {mock_run.call_args_list}"
+
+    # The TurboHUD symlink must have been created.
+    hud_symlinks = [s for s in symlinked if s[0] == local_bin / "TurboHUD"]
+    assert hud_symlinks, f"Expected ~/.local/bin/TurboHUD symlink; got {symlinked}"
+    assert hud_symlinks[0][1] == fake_hud_bin
+
+    # The HUD must have been launched via the symlinked path, NOT `swift run`.
+    last_call = mock_run.call_args_list[-1]
+    assert last_call.args[0] == [str(local_bin / "TurboHUD")], (
+        f"HUD launch must go through the symlink; got {last_call}"
+    )
 
 
 def test_refresh_symlink_creates_new_symlink(tmp_path):
