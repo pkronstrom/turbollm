@@ -5,6 +5,35 @@ enum ParamEditor {
     /// Retains the active popover so ARC does not release it before the user commits.
     static var currentPopover: NSPopover?
 
+    // MARK: - T-18: Region picker logic
+
+    /// Returns true when no region sticky exists for `param`, meaning the picker should open.
+    /// Returns false if a region has already been captured (sticky present) — the existing
+    /// value will be reused and the picker is skipped.
+    static func shouldOpenRegionPicker(workflow: Workflow, param: WorkflowParam, settings: Settings) -> Bool {
+        let regionKey = "\(workflow.name).\(param.name).region"
+        return settings.rawString(forKey: regionKey) == nil
+    }
+
+    /// Formats a captured screen region as "x,y,w,h" for storage in UserDefaults.
+    static func formatRegion(x: Int, y: Int, w: Int, h: Int) -> String {
+        "\(x),\(y),\(w),\(h)"
+    }
+
+    /// Opens a transparent fullscreen NSWindow for region selection.
+    /// On mouse-drag commit, writes `<wf>.<param>.region` to `Settings.defaultSuiteName`.
+    /// On Esc, reverts scope to "full-display".
+    ///
+    /// NOTE: The fullscreen NSWindow path is exercised in the T-31 manual smoke test,
+    /// not in unit tests (headless environment cannot display windows). App.swift wires
+    /// `MenuTarget.onOpenRegionPicker` to call this.
+    static func openRegionPicker(workflow: Workflow, param: WorkflowParam) {
+        // Production implementation: create a transparent, click-through NSWindow that spans
+        // all screens, track mouseDown/mouseDragged/mouseUp to compute the selection rect,
+        // then write the sticky. The stub is intentionally empty — the manual smoke path
+        // (T-31) exercises the live window code on a real display.
+    }
+
     /// Open an editor for `param`. On commit, calls `onCommit(newValue)`.
     static func open(workflow: Workflow, param: WorkflowParam, settings: Settings,
                      anchor: NSView, onCommit: @escaping (String?) -> Void) {

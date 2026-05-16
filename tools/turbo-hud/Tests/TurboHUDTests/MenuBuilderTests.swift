@@ -489,6 +489,68 @@ final class MenuBuilderTests: XCTestCase {
         XCTAssertNotNil(pickerOpenedFor, "Re-pick must invoke onOpenRegionPicker")
     }
 
+    // MARK: - T-18: Region picker logic
+
+    func test_shouldOpenRegionPicker_returns_true_when_no_sticky() {
+        let suite = "t.\(UUID().uuidString)"
+        let settings = Settings(suiteName: suite)
+        let wf = Workflow(name: "rec", description: nil, command: nil, script: "s",
+                          args: nil, env: nil, params: [])
+        let param = WorkflowParam(name: "screen", type: "screen-recording", mode: nil,
+                                   defaultValue: nil, defaultEnv: nil, auto: nil,
+                                   options: nil, extensions: nil, scope: nil, command: nil)
+        XCTAssertTrue(ParamEditor.shouldOpenRegionPicker(workflow: wf, param: param, settings: settings),
+                      "shouldOpenRegionPicker must return true when no region sticky exists")
+    }
+
+    func test_shouldOpenRegionPicker_returns_false_when_sticky_present() {
+        let suite = "t.\(UUID().uuidString)"
+        let settings = Settings(suiteName: suite)
+        let wf = Workflow(name: "rec", description: nil, command: nil, script: "s",
+                          args: nil, env: nil, params: [])
+        let param = WorkflowParam(name: "screen", type: "screen-recording", mode: nil,
+                                   defaultValue: nil, defaultEnv: nil, auto: nil,
+                                   options: nil, extensions: nil, scope: nil, command: nil)
+        // Write a region sticky.
+        UserDefaults(suiteName: suite)?.set("100,100,300,200", forKey: "rec.screen.region")
+        XCTAssertFalse(ParamEditor.shouldOpenRegionPicker(workflow: wf, param: param, settings: settings),
+                       "shouldOpenRegionPicker must return false when a region sticky already exists")
+    }
+
+    func test_formatRegion_produces_correct_format() {
+        XCTAssertEqual(ParamEditor.formatRegion(x: 100, y: 200, w: 300, h: 150),
+                       "100,200,300,150",
+                       "formatRegion must produce x,y,w,h format")
+        XCTAssertEqual(ParamEditor.formatRegion(x: 0, y: 0, w: 1920, h: 1080),
+                       "0,0,1920,1080")
+    }
+
+    // MARK: - T-20: Stop targets primary acquirer
+
+    func test_stop_targets_primary_acquirer_pid_when_multi_acquirer() {
+        // Two acquirers sharing a parent workflow: audio is primary, screen is background.
+        let audioAcq = Activity(id: "audio", kind: "acquirer", label: "audio (mic-only)",
+                                icon: nil, color: nil, phase: nil,
+                                startedAt: Date().addingTimeInterval(-2),
+                                ownerPid: 101, children: [], parentId: "wf-1")
+        let screenAcq = Activity(id: "screen", kind: "acquirer", label: "screen (full-display)",
+                                 icon: nil, color: nil, phase: nil,
+                                 startedAt: Date(),
+                                 ownerPid: 102, children: [], parentId: "wf-1")
+
+        // Simulate what HudStateWatcher feeds AppState (audio wins as primary).
+        let primary = HudStateWatcher.acquirerActivity(from: [audioAcq, screenAcq])
+        let state = AppState()
+        state.currentAcquirerActivity = primary
+
+        let menu = MenuBuilder.build(state: state, settings: Settings(suiteName: "t.\(UUID().uuidString)"),
+                                     onRunWorkflow: { _ in }, onEditParam: { _, _ in })
+        let stopItem = menu.items.first!
+        let pid = (stopItem.representedObject as? NSNumber)?.intValue
+        XCTAssertEqual(pid, 101,
+                       "Stop row must target audio primary acquirer (PID 101), not screen background (PID 102)")
+    }
+
     // MARK: - T-fix-5: system+mic with Screen Recording denied disables Run
 
     func test_system_plus_mic_scope_screen_recording_denied_disables_run() {
