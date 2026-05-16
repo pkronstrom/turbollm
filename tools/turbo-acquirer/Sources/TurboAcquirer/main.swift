@@ -36,7 +36,19 @@ struct App {
     // MARK: - Stub handlers (replaced in later clusters)
 
     static func handleRecordAudio(argv: [String]) -> String {
-        "record-audio"
+        let (scope, deviceUID, outputPathStr) = RecordAudio.parseArgs(argv: argv)
+        let outputURL = RecordAudio.outputPath(explicitPath: outputPathStr)
+        let parentId = ProcessInfo.processInfo.environment["TURBO_WORKFLOW_ID"]
+        do {
+            try RecordAudio.run(scope: scope, deviceUID: deviceUID, outputURL: outputURL, parentId: parentId)
+            return outputURL.path
+        } catch RecordAudioError.permissionDenied(let resource) {
+            fputs("permissionDenied(\"\(resource)\")\n", stderr)
+            exit(1)
+        } catch {
+            fputs("\(error)\n", stderr)
+            exit(1)
+        }
     }
 
     static func handleScreenshot(argv: [String]) -> String {

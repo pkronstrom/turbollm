@@ -3,8 +3,16 @@ import XCTest
 
 final class SubcommandDispatchTests: XCTestCase {
     func test_dispatch_record_audio() {
+        // Use fake mode so dispatch doesn't start real AVAudioEngine (no hardware in tests).
+        setenv("TURBO_RECORD_AUDIO_FAKE", "1", 1)
+        defer { unsetenv("TURBO_RECORD_AUDIO_FAKE") }
+        setenv("TURBO_AUDIO_INBOX", NSTemporaryDirectory(), 1)
+        defer { unsetenv("TURBO_AUDIO_INBOX") }
+
         let result = App.dispatch(argv: ["turbo-acquirer", "record-audio"])
-        XCTAssertEqual(result, "record-audio")
+        // In fake mode, returns the output WAV path (a .wav file in TURBO_AUDIO_INBOX).
+        XCTAssertTrue(result.hasSuffix(".wav"),
+                      "record-audio dispatch in fake mode must return a .wav path, got: \(result)")
     }
 
     func test_dispatch_screenshot() {
@@ -52,19 +60,28 @@ final class SubcommandDispatchTests: XCTestCase {
     }
 
     func test_subcommands_are_distinct() {
-        // Use fully-specified args for subcommands that require them.
-        // screenshot uses fake-success mode; command echoes a unique sentinel.
+        // Use fake modes so dispatch doesn't start real engines or screencapture.
+        setenv("TURBO_RECORD_AUDIO_FAKE", "1", 1)
+        defer { unsetenv("TURBO_RECORD_AUDIO_FAKE") }
         setenv("TURBO_SCREENCAPTURE_FAKE", "success", 1)
         defer { unsetenv("TURBO_SCREENCAPTURE_FAKE") }
 
-        let tmpDir = URL(fileURLWithPath: NSTemporaryDirectory())
-            .appendingPathComponent("distinct-\(UUID().uuidString)", isDirectory: true)
-        try? FileManager.default.createDirectory(at: tmpDir, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
+        // Use an inbox dir so record-audio writes to a known prefix.
+        let audioInbox = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("audio-distinct-\(UUID().uuidString)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: audioInbox, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: audioInbox) }
+        setenv("TURBO_AUDIO_INBOX", audioInbox.path, 1)
+        defer { unsetenv("TURBO_AUDIO_INBOX") }
+
+        let screenshotDir = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("screenshot-distinct-\(UUID().uuidString)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: screenshotDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: screenshotDir) }
 
         let results = [
             App.dispatch(argv: ["turbo-acquirer", "record-audio"]),
-            App.dispatch(argv: ["turbo-acquirer", "screenshot", "--output-dir", tmpDir.path]),
+            App.dispatch(argv: ["turbo-acquirer", "screenshot", "--output-dir", screenshotDir.path]),
             App.dispatch(argv: ["turbo-acquirer", "command", "--shell", "echo __cmd_sentinel__"]),
             App.dispatch(argv: ["turbo-acquirer", "permissions-state"]),
         ]
