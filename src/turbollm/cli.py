@@ -1361,30 +1361,37 @@ def _do_raycast_sync(extension_dir: Path, quiet: bool) -> None:
 
     wf_names = {wf["name"] for wf in wf_items}
 
-    # Create/refresh symlinks for current workflows.
+    # Per-workflow command files. Originally symlinks to run-workflow.tsx, but
+    # Raycast's bundler de-dupes symlinks (multiple commands collapsing to one
+    # compiled JS file), causing "Could not find command's executable JS file"
+    # at runtime. Use thin re-export stubs instead — each stub is a real file
+    # so the bundler emits a distinct JS artifact per command.
+    stub_marker = "// turbo raycast sync — per-workflow re-export stub"
+    stub_body = (
+        f"{stub_marker}\n"
+        "// Logic lives in run-workflow.tsx; this file just re-exports the default\n"
+        "// component so Raycast's bundler emits a distinct compiled JS per command.\n"
+        'export { default } from "./run-workflow";\n'
+    )
+
     for wf_name in wf_names:
         link = src_dir / f"{wf_name}.tsx"
         if link.is_symlink():
-            current_target = os.readlink(str(link))
-            if current_target != "run-workflow.tsx":
-                link.unlink()
-                link.symlink_to("run-workflow.tsx")
+            # Migrate legacy symlinks to stubs.
+            link.unlink()
+            link.write_text(stub_body)
         elif not link.exists():
-            link.symlink_to("run-workflow.tsx")
-        # If it's a real non-symlink file, leave it alone.
+            link.write_text(stub_body)
+        # If it's a real non-stub file (user-authored or our stub), leave alone.
 
-    # Remove orphan symlinks — symlinks pointing at run-workflow.tsx whose
-    # workflow slug is no longer in the registry.
+    # Remove orphan stub/symlink files — those whose workflow slug is no longer
+    # in the registry. Identify ours by either symlink target or stub marker.
     for tsx_file in src_dir.glob("*.tsx"):
-        if not tsx_file.is_symlink():
+        if tsx_file.stem in wf_names or tsx_file.stem in {"run-workflow", "running-workflows"}:
             continue
-        try:
-            target = os.readlink(str(tsx_file))
-        except OSError:
-            continue
-        if target != "run-workflow.tsx":
-            continue
-        if tsx_file.stem not in wf_names:
+        is_legacy_symlink = tsx_file.is_symlink() and os.readlink(str(tsx_file)) == "run-workflow.tsx"
+        is_stub = tsx_file.is_file() and stub_marker in tsx_file.read_text()
+        if is_legacy_symlink or is_stub:
             tsx_file.unlink()
 
     # Write src/_generated_commands.ts — a type-safe command-name → workflow-name map.

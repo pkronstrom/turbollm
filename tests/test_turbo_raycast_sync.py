@@ -276,11 +276,15 @@ def test_raycast_sync_with_no_workflows_keeps_only_fixed(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# T-fix-5: per-workflow symlinks
+# Per-workflow command stubs (formerly symlinks — Raycast's bundler de-dupes
+# symlinks and fails to emit per-command JS, so we use real re-export files).
 # ---------------------------------------------------------------------------
 
-def test_raycast_sync_creates_workflow_symlinks(tmp_path):
-    """sync creates src/<slug>.tsx → run-workflow.tsx symlinks for each workflow."""
+_STUB_MARKER = "// turbo raycast sync — per-workflow re-export stub"
+
+
+def test_raycast_sync_creates_workflow_stubs(tmp_path):
+    """sync creates src/<slug>.tsx re-export stubs for each workflow."""
     src_dir = tmp_path / "src"
     src_dir.mkdir()
     pkg_path = tmp_path / "package.json"
@@ -291,12 +295,13 @@ def test_raycast_sync_creates_workflow_symlinks(tmp_path):
         result = runner.invoke(turbo_cli.cli, ["raycast", "sync", "--extension-dir", str(tmp_path)])
 
     assert result.exit_code == 0, result.output
-    transcribe = src_dir / "transcribe-file.tsx"
-    record = src_dir / "record-to-obsidian.tsx"
-    assert transcribe.is_symlink(), "expected a symlink for transcribe-file"
-    assert os.readlink(str(transcribe)) == "run-workflow.tsx"
-    assert record.is_symlink(), "expected a symlink for record-to-obsidian"
-    assert os.readlink(str(record)) == "run-workflow.tsx"
+    for slug in ("transcribe-file", "record-to-obsidian"):
+        stub = src_dir / f"{slug}.tsx"
+        assert stub.is_file(), f"expected stub file for {slug}"
+        assert not stub.is_symlink(), f"{slug} stub must be a real file, not a symlink"
+        content = stub.read_text()
+        assert _STUB_MARKER in content
+        assert 'from "./run-workflow"' in content
 
 
 def test_raycast_sync_creates_src_dir_if_missing(tmp_path):
@@ -311,11 +316,52 @@ def test_raycast_sync_creates_src_dir_if_missing(tmp_path):
 
     assert result.exit_code == 0, result.output
     assert (tmp_path / "src").is_dir()
-    assert (tmp_path / "src" / "transcribe-file.tsx").is_symlink()
+    stub = tmp_path / "src" / "transcribe-file.tsx"
+    assert stub.is_file()
+    assert _STUB_MARKER in stub.read_text()
 
 
-def test_raycast_sync_removes_orphan_symlinks(tmp_path):
-    """sync removes src/<slug>.tsx symlinks for workflows that no longer exist."""
+def test_raycast_sync_migrates_legacy_symlinks_to_stubs(tmp_path):
+    """A pre-existing symlink (legacy format) is replaced by a stub file."""
+    src_dir = tmp_path / "src"
+    src_dir.mkdir()
+    legacy = src_dir / "transcribe-file.tsx"
+    legacy.symlink_to("run-workflow.tsx")
+    assert legacy.is_symlink()
+
+    pkg_path = tmp_path / "package.json"
+    pkg_path.write_text(json.dumps(_make_package_json(_FIXED_COMMANDS), indent=2) + "\n")
+
+    runner = CliRunner()
+    with patch("turbollm.cli.load_registry", return_value=_FAKE_REGISTRY):
+        result = runner.invoke(turbo_cli.cli, ["raycast", "sync", "--extension-dir", str(tmp_path)])
+
+    assert result.exit_code == 0, result.output
+    assert legacy.is_file()
+    assert not legacy.is_symlink(), "legacy symlink should have been migrated to a real stub"
+    assert _STUB_MARKER in legacy.read_text()
+
+
+def test_raycast_sync_removes_orphan_stubs(tmp_path):
+    """sync removes src/<slug>.tsx stub files for workflows that no longer exist."""
+    src_dir = tmp_path / "src"
+    src_dir.mkdir()
+    orphan = src_dir / "old-workflow.tsx"
+    orphan.write_text(_STUB_MARKER + '\nexport { default } from "./run-workflow";\n')
+
+    pkg_path = tmp_path / "package.json"
+    pkg_path.write_text(json.dumps(_make_package_json(_FIXED_COMMANDS), indent=2) + "\n")
+
+    runner = CliRunner()
+    with patch("turbollm.cli.load_registry", return_value=_FAKE_REGISTRY):
+        result = runner.invoke(turbo_cli.cli, ["raycast", "sync", "--extension-dir", str(tmp_path)])
+
+    assert result.exit_code == 0, result.output
+    assert not orphan.exists(), "orphan stub should have been removed"
+
+
+def test_raycast_sync_removes_orphan_legacy_symlinks(tmp_path):
+    """sync also removes pre-existing orphan symlinks (backwards compat with legacy format)."""
     src_dir = tmp_path / "src"
     src_dir.mkdir()
     orphan = src_dir / "old-workflow.tsx"
@@ -329,12 +375,11 @@ def test_raycast_sync_removes_orphan_symlinks(tmp_path):
         result = runner.invoke(turbo_cli.cli, ["raycast", "sync", "--extension-dir", str(tmp_path)])
 
     assert result.exit_code == 0, result.output
-    assert not orphan.is_symlink(), "orphan symlink should have been removed"
-    assert not orphan.exists()
+    assert not orphan.exists(), "legacy orphan symlink should have been removed"
 
 
 def test_raycast_sync_does_not_remove_real_tsx_files(tmp_path):
-    """sync does not remove real (non-symlink) .tsx files in src/."""
+    """sync does not remove user-authored (non-stub, non-symlink) .tsx files in src/."""
     src_dir = tmp_path / "src"
     src_dir.mkdir()
     real_file = src_dir / "run-workflow.tsx"
@@ -349,11 +394,11 @@ def test_raycast_sync_does_not_remove_real_tsx_files(tmp_path):
 
     assert result.exit_code == 0, result.output
     assert real_file.exists()
-    assert not real_file.is_symlink(), "real file must not have been turned into a symlink"
+    assert real_file.read_text() == "// real file\n"
 
 
-def test_raycast_sync_symlinks_are_idempotent(tmp_path):
-    """Running sync twice produces the same symlinks."""
+def test_raycast_sync_stubs_are_idempotent(tmp_path):
+    """Running sync twice produces the same stub content."""
     src_dir = tmp_path / "src"
     src_dir.mkdir()
     pkg_path = tmp_path / "package.json"
@@ -362,11 +407,12 @@ def test_raycast_sync_symlinks_are_idempotent(tmp_path):
     runner = CliRunner()
     with patch("turbollm.cli.load_registry", return_value=_FAKE_REGISTRY):
         runner.invoke(turbo_cli.cli, ["raycast", "sync", "--extension-dir", str(tmp_path)])
+        first = (src_dir / "transcribe-file.tsx").read_text()
         runner.invoke(turbo_cli.cli, ["raycast", "sync", "--extension-dir", str(tmp_path)])
+        second = (src_dir / "transcribe-file.tsx").read_text()
 
-    transcribe = src_dir / "transcribe-file.tsx"
-    assert transcribe.is_symlink()
-    assert os.readlink(str(transcribe)) == "run-workflow.tsx"
+    assert first == second
+    assert _STUB_MARKER in first
 
 
 # ---------------------------------------------------------------------------
