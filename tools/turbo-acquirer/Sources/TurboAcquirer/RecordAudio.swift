@@ -14,7 +14,6 @@ enum AudioScope: Equatable {
 
 enum RecordAudioError: Error {
     case permissionDenied(String)
-    case converterInitFailed
     case outputPathRequired
 }
 
@@ -264,33 +263,16 @@ enum RecordAudio {
 
         // Install tap with the input node's native hardware format — AVAudioEngine
         // rejects any other format here ("Input HW format and tap format not matching").
-        // Use AVAudioConverter to down-convert each buffer to 16 kHz mono.
+        // AVAudioFile.write(from:) handles format conversion internally when the
+        // buffer's format differs from the file's format, so we don't need an
+        // explicit AVAudioConverter. (An earlier explicit-converter implementation
+        // signalled .endOfStream after the first input buffer, putting the
+        // converter into a terminal state for subsequent tap callbacks — recordings
+        // produced only ~156 ms of audio regardless of actual duration.)
         let nativeFormat = inputNode.outputFormat(forBus: 0)
-        guard let converter = AVAudioConverter(from: nativeFormat, to: targetFormat) else {
-            throw RecordAudioError.converterInitFailed
-        }
 
         inputNode.installTap(onBus: 0, bufferSize: 4096, format: nativeFormat) { buffer, _ in
-            let ratio = targetFormat.sampleRate / nativeFormat.sampleRate
-            let outCapacity = AVAudioFrameCount((Double(buffer.frameLength) * ratio).rounded())
-            guard let outBuffer = AVAudioPCMBuffer(
-                pcmFormat: targetFormat,
-                frameCapacity: max(outCapacity, 1)
-            ) else { return }
-
-            var supplied = false
-            let status = converter.convert(to: outBuffer, error: nil) { _, inputStatus in
-                if supplied {
-                    inputStatus.pointee = .endOfStream
-                    return nil
-                }
-                supplied = true
-                inputStatus.pointee = .haveData
-                return buffer
-            }
-
-            guard status != .error, outBuffer.frameLength > 0 else { return }
-            try? audioFile.write(from: outBuffer)
+            try? audioFile.write(from: buffer)
         }
 
         try engine.start()

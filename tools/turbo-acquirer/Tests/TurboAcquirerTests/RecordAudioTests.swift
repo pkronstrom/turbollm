@@ -144,11 +144,21 @@ final class RecordAudioTests: XCTestCase {
             )
         }
 
-        // And AVAudioConverter must be set up so the buffers reach the file in
-        // the target 16 kHz mono format.
+        // AVAudioFile must be created at the target 16 kHz mono format. The
+        // conversion from the tap's native-format buffers to the file's target
+        // format is handled by AVAudioFile.write(from:) internally, so we don't
+        // require an explicit AVAudioConverter — earlier explicit-converter
+        // attempts mis-signalled .endOfStream and produced ~156 ms recordings
+        // regardless of actual duration. The cheapest source-grep proxy for
+        // "file is in target format" is the standardFormatWithSampleRate
+        // construction passed to AVAudioFile(forWriting:settings:).
         XCTAssertTrue(
-            source.contains("AVAudioConverter(from: nativeFormat, to: targetFormat)"),
-            "RecordAudio.swift must convert native→target via AVAudioConverter."
+            source.contains("standardFormatWithSampleRate: 16_000, channels: 1"),
+            "RecordAudio.swift must create the AVAudioFile at 16 kHz mono."
+        )
+        XCTAssertTrue(
+            source.contains("AVAudioFile(forWriting: outputURL, settings: targetFormat.settings)"),
+            "RecordAudio.swift must write the AVAudioFile using the target 16 kHz mono settings."
         )
     }
 
