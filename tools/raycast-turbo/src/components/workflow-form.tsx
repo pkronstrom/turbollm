@@ -62,8 +62,20 @@ export function WorkflowForm({ workflow, turboPath }: WorkflowFormProps) {
     async function loadStickies() {
       const loaded: Record<string, string> = {};
       for (const param of workflow.params ?? []) {
-        const val = await getSticky(workflow.name, param.name);
-        if (val != null) loaded[param.name] = val;
+        try {
+          const val = await getSticky(workflow.name, param.name);
+          if (val != null) loaded[param.name] = val;
+        } catch (err) {
+          // Corrupted LocalStorage entry — Raycast's Swift JSON decoder
+          // surfaces these as "The data couldn't be read because it isn't
+          // in the correct format." Skip the entry and surface the issue
+          // as a toast instead of crashing the whole form.
+          await showToast({
+            style: Toast.Style.Failure,
+            title: `Sticky for "${param.name}" is corrupt`,
+            message: "Will be overwritten next time you submit. " + String(err),
+          });
+        }
       }
       setDefaults(loaded);
     }
