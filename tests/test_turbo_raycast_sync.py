@@ -81,6 +81,30 @@ def test_raycast_sync_writes_per_workflow_commands(tmp_path):
     assert "record-to-obsidian" in names
 
 
+def test_raycast_sync_emits_description_and_mode_on_per_workflow_commands(tmp_path):
+    """Raycast's Swift decoder requires `description` and `mode` on every command.
+
+    Without them, `ray develop` fails with:
+        Could not install extension from development sources
+        No value associated with key description
+    """
+    pkg_path = tmp_path / "package.json"
+    pkg_path.write_text(json.dumps(_make_package_json(_FIXED_COMMANDS), indent=2) + "\n")
+
+    runner = CliRunner()
+    with patch("turbollm.cli.load_registry", return_value=_FAKE_REGISTRY):
+        result = runner.invoke(turbo_cli.cli, ["raycast", "sync", "--extension-dir", str(tmp_path)])
+
+    assert result.exit_code == 0, result.output
+
+    pkg = json.loads(pkg_path.read_text())
+    per_wf_cmds = [c for c in pkg["commands"] if c["name"] not in {"run-workflow", "running-workflows"}]
+    assert per_wf_cmds, "expected at least one per-workflow command"
+    for cmd in per_wf_cmds:
+        assert cmd.get("description"), f"command {cmd['name']!r} missing description"
+        assert cmd.get("mode") == "view", f"command {cmd['name']!r} missing mode=view"
+
+
 def test_raycast_sync_title_is_title_case_of_slug(tmp_path):
     """Each per-workflow command title is the slug converted to Title Case."""
     pkg_path = tmp_path / "package.json"

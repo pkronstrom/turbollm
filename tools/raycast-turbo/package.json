@@ -3,7 +3,7 @@
   "name": "turbollm",
   "title": "Turbollm Workflows",
   "description": "Run and monitor turbollm workflows from Raycast",
-  "icon": "assets/command-icon.png",
+  "icon": "command-icon.png",
   "author": "turbollm",
   "categories": [
     "Productivity"
@@ -25,14 +25,25 @@
       "mode": "view"
     },
     {
+      "name": "record-meeting-with-screen",
+      "title": "Record Meeting With Screen",
+      "subtitle": "Record audio + screen, transcribe, summarize, bundle into Obsidian",
+      "description": "Record audio + screen, transcribe, summarize, bundle into Obsidian",
+      "mode": "view"
+    },
+    {
       "name": "record-to-obsidian",
       "title": "Record To Obsidian",
-      "subtitle": "Record audio, summarize, save to Obsidian (HUD-only: needs audio-recording acquirer)"
+      "subtitle": "Record audio, summarize, save to Obsidian (HUD-only: needs audio-recording acquirer)",
+      "description": "Record audio, summarize, save to Obsidian (HUD-only: needs audio-recording acquirer)",
+      "mode": "view"
     },
     {
       "name": "transcribe-file",
       "title": "Transcribe File",
-      "subtitle": "Transcribe an audio file to stdout"
+      "subtitle": "Transcribe an audio file to stdout",
+      "description": "Transcribe an audio file to stdout",
+      "mode": "view"
     }
   ],
   "preferences": [
@@ -47,7 +58,7 @@
     }
   ],
   "dependencies": {
-    "@raycast/api": "^1.79.0"
+    "@raycast/api": "^1.104.17"
   },
   "devDependencies": {
     "@types/node": "^20.14.0",

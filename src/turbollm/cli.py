@@ -1332,12 +1332,19 @@ def _do_raycast_sync(extension_dir: Path, quiet: bool) -> None:
     commands = pkg.get("commands", [])
     fixed_commands = [cmd for cmd in commands if cmd.get("name") in _RAYCAST_FIXED_COMMANDS]
 
+    # Raycast's Swift Codable decoder requires `description` and `mode` on every
+    # command entry; omitting either causes "Could not install extension from
+    # development sources" / "No value associated with key description" failures.
+    # Use the workflow's description for both `subtitle` (UI hint) and
+    # `description` (required by decoder).
     wf_commands = sorted(
         [
             {
                 "name": wf["name"],
                 "title": _to_title_case(wf["name"]),
                 "subtitle": wf.get("description", ""),
+                "description": wf.get("description", "") or _to_title_case(wf["name"]),
+                "mode": "view",
             }
             for wf in wf_items
         ],
