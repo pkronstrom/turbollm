@@ -1179,6 +1179,11 @@ def _hud_dir() -> Path:
     return Path(__file__).resolve().parent.parent.parent / "tools" / "turbo-hud"
 
 
+def _raycast_extension_dir() -> Path:
+    """Locate the tools/raycast-turbo/ directory next to the turbollm source tree."""
+    return Path(__file__).resolve().parent.parent.parent / "tools" / "raycast-turbo"
+
+
 def _acquirer_dir() -> Path:
     """Locate the tools/turbo-acquirer/ directory next to the turbollm source tree."""
     return Path(__file__).resolve().parent.parent.parent / "tools" / "turbo-acquirer"
@@ -1201,6 +1206,24 @@ def _refresh_symlink(link_path: Path, target_path: Path) -> None:
     if link_path.is_symlink():
         link_path.unlink()
     link_path.symlink_to(target_path)
+
+
+def _sidecar_raycast_sync() -> None:
+    """Auto-sync the Raycast extension on sidecar startup (T-26).
+
+    Fails gracefully: if the extension directory is absent (e.g. the user has
+    not installed the Raycast extension yet), a dim warning is printed and
+    startup continues.
+    """
+    ext_dir = _raycast_extension_dir()
+    if not ext_dir.exists():
+        console.print("[dim]Raycast extension not found — skipping sync.[/dim]")
+        return
+    try:
+        _do_raycast_sync(ext_dir, quiet=True)
+        console.print("[dim]Raycast commands synced.[/dim]")
+    except Exception as exc:  # noqa: BLE001
+        console.print(f"[dim]Warning: raycast sync failed: {exc}[/dim]")
 
 
 @cli.command(name="sidecar")
@@ -1247,6 +1270,10 @@ def sidecar_cmd(build):
             console.print("[red]TurboHUD build failed.[/red]")
             raise SystemExit(1)
 
+    # T-26: Sync Raycast extension on every sidecar launch so per-workflow
+    # commands stay in sync with models.toml without manual intervention.
+    _sidecar_raycast_sync()
+
     hud_bin = _swift_build_product_path(hud_dir, "TurboHUD")
     if hud_bin.exists():
         hud_link = _local_bin() / "TurboHUD"
@@ -1283,20 +1310,8 @@ def raycast_grp():
     """Raycast extension helpers."""
 
 
-@raycast_grp.command(name="sync")
-@click.option(
-    "--extension-dir",
-    required=True,
-    type=click.Path(file_okay=False, path_type=Path),
-    help="Path to the Raycast extension directory (contains package.json).",
-)
-@click.option("--quiet", is_flag=True, help="Suppress output.")
-def raycast_sync(extension_dir, quiet):
-    """Regenerate Raycast package.json commands from the current workflow list.
-
-    Preserves the fixed commands (run-workflow, running-workflows) and removes
-    per-workflow commands that no longer appear in the workflow list.
-    """
+def _do_raycast_sync(extension_dir: Path, quiet: bool) -> None:
+    """Business logic for `turbo raycast sync`. Also called by `turbo sidecar`."""
     from turbollm import workflows as _wf
 
     reg = load_registry()
@@ -1383,6 +1398,23 @@ def raycast_sync(extension_dir, quiet):
         console.print(
             f"[green]Synced[/green] {len(wf_commands)} workflow command(s) → {pkg_path}"
         )
+
+
+@raycast_grp.command(name="sync")
+@click.option(
+    "--extension-dir",
+    required=True,
+    type=click.Path(file_okay=False, path_type=Path),
+    help="Path to the Raycast extension directory (contains package.json).",
+)
+@click.option("--quiet", is_flag=True, help="Suppress output.")
+def raycast_sync(extension_dir, quiet):
+    """Regenerate Raycast package.json commands from the current workflow list.
+
+    Preserves the fixed commands (run-workflow, running-workflows) and removes
+    per-workflow commands that no longer appear in the workflow list.
+    """
+    _do_raycast_sync(Path(extension_dir), quiet)
 
 
 # ---------------------------------------------------------------------------

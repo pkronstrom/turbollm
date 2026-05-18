@@ -410,3 +410,76 @@ def test_raycast_sync_generated_commands_ts_is_sorted(tmp_path):
     record_idx = content.index("record-to-obsidian")
     transcribe_idx = content.index("transcribe-file")
     assert record_idx < transcribe_idx, "entries should be sorted alphabetically"
+
+
+# ---------------------------------------------------------------------------
+# T-26: sidecar auto-sync
+# ---------------------------------------------------------------------------
+
+def test_sidecar_auto_syncs_raycast_on_startup(tmp_path):
+    """turbo sidecar syncs the Raycast extension on every launch.
+
+    After sidecar starts, package.json commands match the workflow registry.
+    """
+    from unittest.mock import MagicMock
+
+    # Fake HUD dir (sidecar checks its existence + Package.swift).
+    hud_dir = tmp_path / "turbo-hud"
+    hud_dir.mkdir()
+    (hud_dir / "Package.swift").touch()
+
+    # Fake Raycast extension dir with a pre-existing package.json.
+    ext_dir = tmp_path / "raycast-turbo"
+    ext_dir.mkdir()
+    pkg = _make_package_json(_FIXED_COMMANDS)
+    (ext_dir / "package.json").write_text(json.dumps(pkg, indent=2) + "\n")
+
+    runner = CliRunner()
+    mock_proc = MagicMock()
+    mock_proc.returncode = 0
+
+    with (
+        patch("turbollm.cli.subprocess.run", return_value=mock_proc),
+        patch("turbollm.cli._hud_dir", return_value=hud_dir),
+        patch("turbollm.cli._raycast_extension_dir", return_value=ext_dir),
+        patch("turbollm.cli.load_registry", return_value=_FAKE_REGISTRY),
+    ):
+        result = runner.invoke(turbo_cli.cli, ["sidecar", "--no-build"])
+
+    assert result.exit_code == 0, result.output
+
+    pkg_after = json.loads((ext_dir / "package.json").read_text())
+    names = [cmd["name"] for cmd in pkg_after["commands"]]
+
+    # Fixed commands preserved.
+    assert "run-workflow" in names
+    assert "running-workflows" in names
+    # Per-workflow commands from registry added.
+    assert "transcribe-file" in names
+    assert "record-to-obsidian" in names
+
+
+def test_sidecar_skips_sync_gracefully_when_extension_dir_absent(tmp_path):
+    """When the Raycast extension dir does not exist, sidecar starts without error."""
+    from unittest.mock import MagicMock
+
+    hud_dir = tmp_path / "turbo-hud"
+    hud_dir.mkdir()
+    (hud_dir / "Package.swift").touch()
+
+    nonexistent_ext_dir = tmp_path / "raycast-turbo-MISSING"
+
+    runner = CliRunner()
+    mock_proc = MagicMock()
+    mock_proc.returncode = 0
+
+    with (
+        patch("turbollm.cli.subprocess.run", return_value=mock_proc),
+        patch("turbollm.cli._hud_dir", return_value=hud_dir),
+        patch("turbollm.cli._raycast_extension_dir", return_value=nonexistent_ext_dir),
+        patch("turbollm.cli.load_registry", return_value=_FAKE_REGISTRY),
+    ):
+        result = runner.invoke(turbo_cli.cli, ["sidecar", "--no-build"])
+
+    assert result.exit_code == 0, result.output
+    assert "skipping sync" in result.output
