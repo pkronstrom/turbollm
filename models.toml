@@ -343,17 +343,27 @@ usage = "FILE"
 command = """
 set -euo pipefail
 vault="${OBSIDIAN_VAULT:-$HOME/Documents/Obsidian}"
-bn="${1##*/}"
+
+# $1 may be either a plain audio path (manual invocation) or the JSON
+# manifest emitted by `turbo-acquirer record-audio` since Phase 2's
+# alignment work (e.g. `{"path":"/...wav","start_offset_ms":N}`).
+# Permissively unwrap either shape into a plain audio_file path.
+if [[ "$1" == \\{* ]]; then
+  audio_file="$(printf '%s' "$1" | python3 -c "import json,sys; print(json.load(sys.stdin)['path'])")"
+else
+  audio_file="$1"
+fi
+bn="${audio_file##*/}"
 slug="${bn%.*}"
 out="$vault/Meetings/$slug.md"
 raw_out="$vault/Meetings/$slug.raw.md"
 mkdir -p "$(dirname "$out")"
 
 # Capture plain-text transcript for the summary LLM prompt.
-transcript="$(turbo transcribe "$1")"
+transcript="$(turbo transcribe "$audio_file")"
 
 # Capture segmented transcript (JSON array) for the .raw.md companion file.
-segments_json="$(turbo transcribe --format segments "$1")"
+segments_json="$(turbo transcribe --format segments "$audio_file")"
 
 # Write .raw.md: [mm:ss] <text> lines from the segments JSON.
 # python3 is always available on macOS; no extra dependencies needed.
@@ -375,7 +385,7 @@ summary="$(printf '%s' "$transcript" | pi --no-extensions \
 {
   printf -- '---\n'
   printf 'date: %s\n' "$(date -Iseconds)"
-  printf 'source: %s\n' "$1"
+  printf 'source: %s\n' "$audio_file"
   printf 'tags: [meeting, auto-transcribed]\n'
   printf 'model: parakeet-v3 + local-llm\n'
   printf -- '---\n\n'
