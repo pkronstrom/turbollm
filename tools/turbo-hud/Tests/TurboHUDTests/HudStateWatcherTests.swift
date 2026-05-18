@@ -115,7 +115,10 @@ final class HudStateWatcherTests: XCTestCase {
 
         let pid = ProcessInfo.processInfo.processIdentifier
         let f = dir.appendingPathComponent("activity-acq.json")
-        try #"{"id":"acq1","kind":"acquirer","label":"audio (mic-only)","icon":null,"color":null,"phase":null,"started_at":"2026-01-15T08:00:00Z","owner_pid":\#(pid)}"#
+        // Use a dynamic timestamp so loadCurrent()'s freshness filter accepts the fixture
+        // regardless of when this test runs (mirrors commit 7a55e29 fix for sister tests).
+        let nowIso = ISO8601DateFormatter().string(from: Date())
+        try #"{"id":"acq1","kind":"acquirer","label":"audio (mic-only)","icon":null,"color":null,"phase":null,"started_at":"\#(nowIso)","owner_pid":\#(pid)}"#
             .write(to: f, atomically: true, encoding: .utf8)
 
         let watcher = HudStateWatcher(stateDir: dir)

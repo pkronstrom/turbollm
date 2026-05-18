@@ -5,7 +5,9 @@
   "description": "Run and monitor turbollm workflows from Raycast",
   "icon": "assets/command-icon.png",
   "author": "turbollm",
-  "categories": ["Productivity"],
+  "categories": [
+    "Productivity"
+  ],
   "license": "MIT",
   "commands": [
     {
@@ -21,6 +23,16 @@
       "subtitle": "In-flight activities",
       "description": "List in-flight acquirer activities with Stop actions",
       "mode": "view"
+    },
+    {
+      "name": "record-to-obsidian",
+      "title": "Record To Obsidian",
+      "subtitle": "Record audio, summarize, save to Obsidian (HUD-only: needs audio-recording acquirer)"
+    },
+    {
+      "name": "transcribe-file",
+      "title": "Transcribe File",
+      "subtitle": "Transcribe an audio file to stdout"
     }
   ],
   "preferences": [
