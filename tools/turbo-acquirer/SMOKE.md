@@ -150,3 +150,101 @@ Expected: process exits non-zero; stderr contains `permissionDenied`.
 
 All 7 steps above complete without unexpected errors and match the expected
 behaviors described. Document any deviations as issues before merging.
+
+---
+
+## record-meeting-with-screen end-to-end (Phase 2)
+
+Full workflow smoke: audio + screen recording → transcription → bundled
+Obsidian note with interleaved keyframes. Run all three launch paths.
+
+### Prerequisites
+
+- `turbo sidecar` has run (binaries on PATH, Raycast extension synced).
+- Screen Recording + Microphone permissions granted.
+- `$OBSIDIAN_VAULT` set or `~/Documents/Obsidian` exists.
+
+### Path A — HUD menu
+
+1. Start `turbo sidecar` (menu-bar turtle icon appears).
+2. Click the turtle icon → select **record-meeting-with-screen** → **▶ Run**.
+3. Change windows / switch slides for ~30 seconds so the screen recorder
+   captures several distinct keyframes.
+4. Click **Stop** in the HUD menu.
+5. Confirm three artifacts exist:
+   - `$OBSIDIAN_VAULT/Meetings/<slug>.md` — YAML frontmatter + LLM summary,
+     no `![[...]]` image references.
+   - `$OBSIDIAN_VAULT/Meetings/<slug>.raw.md` — frontmatter + interleaved
+     `[mm:ss] <transcript>` lines and `![[<slug>/<name>.png]]` image refs.
+   - `$OBSIDIAN_VAULT/Meetings/attachments/<slug>/` — directory of PNG
+     keyframe files referenced by `<slug>.raw.md`.
+
+### Path B — terminal CLI
+
+```bash
+export OBSIDIAN_VAULT="$HOME/Documents/Obsidian"
+turbo workflows run record-meeting-with-screen
+```
+
+- Let it record for ~30 seconds (switch windows/slides during recording).
+- Press **Ctrl+C** (or send SIGINT) to stop.
+- Confirm the same three artifacts appear under `$OBSIDIAN_VAULT/Meetings/`.
+
+### Path C — Raycast
+
+1. Open Raycast → search **"Record Meeting With Screen"**.
+2. Select the command → fill in the vault path if prompted → **Submit**.
+3. Switch windows / change slides for ~30 seconds.
+4. Click **Stop** from the running-workflows view or the HUD.
+5. Confirm the same three artifacts.
+
+### Pass criteria
+
+- All three launch paths produce `.md`, `.raw.md`, and `attachments/<slug>/`.
+- `<slug>.raw.md` contains at least one `![[<slug>/....png]]` line
+  (i.e. at least one keyframe was captured).
+- `<slug>.md` contains no `![[...]]` references.
+- The temp screen-recording directory (`/tmp/turbo-session-*/`) is cleaned
+  up after the run.
+- No orphaned `turbo-acquirer` or `python3` processes remain after Stop.
+
+---
+
+## record-screen standalone (Phase 2)
+
+Smoke test for the `record-screen` subcommand in isolation — without the
+full bundling pipeline.
+
+```bash
+mkdir -p /tmp/test-record-screen
+
+# Start recording (runs until SIGTERM/SIGINT).
+turbo-acquirer record-screen \
+  --output-dir /tmp/test-record-screen \
+  --scope full-display &
+ACQUIRER_PID=$!
+
+# Change windows or switch apps for ~5 seconds so keyframes are captured.
+sleep 5
+
+# Stop by sending SIGTERM.
+kill -TERM $ACQUIRER_PID
+wait $ACQUIRER_PID
+```
+
+Expected:
+
+- Process exits 0 (or with status matching SIGTERM — both are acceptable).
+- `stdout` contains a JSON manifest, for example:
+  ```json
+  {"dropped_overcap":0,"duration_ms":5123,"frames":[...],"start_offset_ms":0}
+  ```
+- `/tmp/test-record-screen/` contains one or more `*.png` keyframe files
+  whose paths match the `frames[*].path` entries in the manifest.
+- Each frame's `t_offset_ms` is non-negative and less than `duration_ms`.
+
+Cleanup:
+
+```bash
+rm -rf /tmp/test-record-screen
+```
