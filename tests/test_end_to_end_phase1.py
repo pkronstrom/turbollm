@@ -115,10 +115,14 @@ def test_record_to_obsidian_produces_md_and_raw_md(tmp_path):
         "text": "Hello Phase 1. One minute mark.",
         "segments": json.loads(FAKE_SEGMENTS),
     }))
-    _make_stub(bin_dir, "turbo", f"cat '{blob_file}'\n")
-
-    # pi stub: echo a fake summary.
-    _make_stub(bin_dir, "pi", "printf '%s' 'Fake AI summary of the meeting.'\n")
+    # Dispatching stub: handle both `transcribe` and `pi` subcommands.
+    _make_stub(bin_dir, "turbo", f"""\
+case "$1" in
+  transcribe) cat '{blob_file}' ;;
+  pi)         cat > /dev/null; printf '%s' 'Fake AI summary of the meeting.' ;;
+  *)          echo "stub: unknown subcommand $1" >&2; exit 2 ;;
+esac
+""")
 
     vault = tmp_path / "vault"
     vault.mkdir()
@@ -168,8 +172,13 @@ def test_record_to_obsidian_raw_md_has_timestamp_lines(tmp_path):
         "text": "Hello Phase 1. One minute mark.",
         "segments": json.loads(FAKE_SEGMENTS),
     }))
-    _make_stub(bin_dir, "turbo", f"cat '{blob_file}'\n")
-    _make_stub(bin_dir, "pi", "printf '%s' 'Summary.'\n")
+    _make_stub(bin_dir, "turbo", f"""\
+case "$1" in
+  transcribe) cat '{blob_file}' ;;
+  pi)         cat > /dev/null; printf '%s' 'Summary.' ;;
+  *)          echo "stub: unknown subcommand $1" >&2; exit 2 ;;
+esac
+""")
 
     vault = tmp_path / "vault"
     vault.mkdir()

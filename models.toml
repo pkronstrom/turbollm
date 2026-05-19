@@ -364,12 +364,20 @@ mkdir -p "$(dirname "$out")"
 # from one mlx-audio response. Avoids paying the parakeet-v3 model load twice.
 blob="$(turbo transcribe --format verbose_json "$audio_file")"
 transcript="$(printf '%s' "$blob" | python3 -c "import json,sys; print(json.load(sys.stdin).get('text','').strip())")"
-segments_json="$(printf '%s' "$blob" | python3 -c "import json,sys; print(json.dumps(json.load(sys.stdin).get('segments') or []))")"
+# mlx-audio's parakeet returns sentences[] (with start/end from token alignment);
+# whisper-shaped backends return segments[]. Normalise either to {start,end,text}.
+segments_json="$(printf '%s' "$blob" | python3 -c "
+import json, sys
+data = json.load(sys.stdin)
+segs = data.get('segments') or []
+if not segs:
+    segs = [{'start': s.get('start', 0.0), 'end': s.get('end'), 'text': (s.get('text') or '').strip()}
+            for s in (data.get('sentences') or [])]
+print(json.dumps(segs))
+")"
 
-# Write .raw.md: [mm:ss] <text> lines from the segments JSON. mlx-audio's
-# parakeet backend sometimes returns text without segment timestamps; in that
-# case we fall back to a single [00:00] line carrying the full transcript so
-# the .raw.md companion is never empty.
+# Write .raw.md: [mm:ss] <text> lines from the segments JSON. The empty-segments
+# fallback below only fires for truly silent input (no sentences, no segments).
 SEGMENTS_JSON="$segments_json" TRANSCRIPT="$transcript" python3 -c '
 import json, math, os, sys
 segs = json.loads(os.environ["SEGMENTS_JSON"])
@@ -387,16 +395,28 @@ for seg in segs:
     print(f"[{mm:02d}:{ss:02d}] {text}")
 ' > "$raw_out"
 
-summary="$(printf '%s' "$transcript" | pi --no-extensions \
-  --system-prompt 'You are a note-taking assistant. The user records audio of varied content: meetings, lectures, voice memos, brainstorms, interviews, walking thoughts. Produce a faithful markdown summary that will land in their Obsidian vault. The transcript on stdin is authoritative ground truth — base every claim on it. Never reference yourself, the user, "the workspace", "the message", "the snippet", or your own context. Output markdown only, with no preamble or sign-off.' \
-  -p 'Summarize the transcript. Choose section headings that fit the actual content — do NOT force a fixed structure. Prefer concrete bullet points where they fit, prose where they do not. Use shapes like Decisions / Action items / Open questions / Key points / Notable quotes / Topics ONLY when the content genuinely contains them. Detect the transcript language and write the summary in that same language; do not translate.')"
+# Summarise with Qwen3.6 35B-A3B at a context window sized to fit the transcript.
+# Rough estimate: ~3 chars/token for FI/EN mixed text; add 8K headroom for prompt + output.
+n_chars=$(printf '%s' "$transcript" | wc -c | tr -d ' ')
+est_tokens=$(( n_chars / 3 + 8192 ))
+if   [ "$est_tokens" -lt  32768 ]; then ctx=32768
+elif [ "$est_tokens" -lt  65536 ]; then ctx=65536
+elif [ "$est_tokens" -lt 131072 ]; then ctx=131072
+else                                    ctx=196608
+fi
+echo "[summarize] transcript=${n_chars} chars; sizing pi context_window=${ctx}" >&2
+
+summary="$(printf '%s' "$transcript" | turbo pi qwen36-35b-4bit --context-window "$ctx" --prompt 'You are a note-taking assistant. The user records audio of varied content: meetings, lectures, voice memos, brainstorms, interviews, walking thoughts. Produce a faithful markdown summary that will land in their Obsidian vault. The transcript on stdin is authoritative ground truth — base every claim on it. Never reference yourself, the user, "the workspace", "the message", "the snippet", or your own context. Output markdown only, with no preamble or sign-off.
+
+Summarize the transcript on stdin. Choose section headings that fit the actual content — do NOT force a fixed structure. Prefer concrete bullet points where they fit, prose where they do not. Use shapes like Decisions / Action items / Open questions / Key points / Notable quotes / Topics ONLY when the content genuinely contains them. Detect the transcript language and write the summary in that same language; do not translate.')"
 
 {
   printf -- '---\n'
   printf 'date: %s\n' "$(date -Iseconds)"
   printf 'source: %s\n' "$audio_file"
   printf 'tags: [meeting, auto-transcribed]\n'
-  printf 'model: parakeet-v3 + local-llm\n'
+  printf 'model: parakeet-v3 + qwen36-35b-4bit\n'
+  printf 'context_window: %s\n' "$ctx"
   printf -- '---\n\n'
   printf '# %s\n\n' "$slug"
   printf '%s\n\n' "$summary"
@@ -434,15 +454,32 @@ mkdir -p "$(dirname "$out")" "$attachments"
 
 # Single transcribe call: extract text + segments from one verbose_json blob
 # to avoid paying the parakeet-v3 model load twice (see summarize-to-obsidian
-# for the same pattern).
+# for the same pattern). Normalise parakeet's sentences[] → segments shape.
 blob="$(turbo transcribe --format verbose_json "$audio_file")"
 transcript="$(printf '%s' "$blob" | python3 -c "import json,sys; print(json.load(sys.stdin).get('text','').strip())")"
-segments_json="$(printf '%s' "$blob" | python3 -c "import json,sys; print(json.dumps(json.load(sys.stdin).get('segments') or []))")"
+segments_json="$(printf '%s' "$blob" | python3 -c "
+import json, sys
+data = json.load(sys.stdin)
+segs = data.get('segments') or []
+if not segs:
+    segs = [{'start': s.get('start', 0.0), 'end': s.get('end'), 'text': (s.get('text') or '').strip()}
+            for s in (data.get('sentences') or [])]
+print(json.dumps(segs))
+")"
 
-# Summarise.
-summary="$(printf '%s' "$transcript" | pi --no-extensions \
-  --system-prompt 'You are a note-taking assistant. The user records audio of varied content: meetings, lectures, voice memos, brainstorms, interviews, walking thoughts. Produce a faithful markdown summary that will land in their Obsidian vault. The transcript on stdin is authoritative ground truth — base every claim on it. Never reference yourself, the user, "the workspace", "the message", "the snippet", or your own context. Output markdown only, with no preamble or sign-off.' \
-  -p 'Summarize the transcript. Choose section headings that fit the actual content — do NOT force a fixed structure. Prefer concrete bullet points where they fit, prose where they do not. Use shapes like Decisions / Action items / Open questions / Key points / Notable quotes / Topics ONLY when the content genuinely contains them. Detect the transcript language and write the summary in that same language; do not translate.')"
+# Summarise with Qwen3.6 35B-A3B at a context window sized to fit the transcript.
+n_chars=$(printf '%s' "$transcript" | wc -c | tr -d ' ')
+est_tokens=$(( n_chars / 3 + 8192 ))
+if   [ "$est_tokens" -lt  32768 ]; then ctx=32768
+elif [ "$est_tokens" -lt  65536 ]; then ctx=65536
+elif [ "$est_tokens" -lt 131072 ]; then ctx=131072
+else                                    ctx=196608
+fi
+echo "[summarize] transcript=${n_chars} chars; sizing pi context_window=${ctx}" >&2
+
+summary="$(printf '%s' "$transcript" | turbo pi qwen36-35b-4bit --context-window "$ctx" --prompt 'You are a note-taking assistant. The user records audio of varied content: meetings, lectures, voice memos, brainstorms, interviews, walking thoughts. Produce a faithful markdown summary that will land in their Obsidian vault. The transcript on stdin is authoritative ground truth — base every claim on it. Never reference yourself, the user, "the workspace", "the message", "the snippet", or your own context. Output markdown only, with no preamble or sign-off.
+
+Summarize the transcript on stdin. Choose section headings that fit the actual content — do NOT force a fixed structure. Prefer concrete bullet points where they fit, prose where they do not. Use shapes like Decisions / Action items / Open questions / Key points / Notable quotes / Topics ONLY when the content genuinely contains them. Detect the transcript language and write the summary in that same language; do not translate.')"
 
 # Write .md (no image references).
 {

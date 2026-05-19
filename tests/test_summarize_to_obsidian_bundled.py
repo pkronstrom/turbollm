@@ -102,8 +102,13 @@ def _run_bundled_script(
     segments_json: str = INTERLEAVE_SEGMENTS,
     summary_text: str = SUMMARY_TEXT,
     audio_start_offset_ms: int = 0,
+    *,
+    shape: str = "segments",
 ) -> dict:
     """Run the summarize-to-obsidian-bundled script with stub binaries.
+
+    ``shape`` chooses the blob key — "segments" (whisper-shape) or "sentences"
+    (mlx-audio parakeet shape). Workflow must accept either.
 
     Returns a dict with keys: md, raw_md, attachments_dir, src_dir, vault, slug.
     """
@@ -113,15 +118,18 @@ def _run_bundled_script(
     # Workflow now calls `turbo transcribe --format verbose_json <file>` once
     # and extracts both text + segments from a single blob. The stub emits the
     # combined JSON shape.
-    blob = json.dumps({"text": "Stub transcript text.", "segments": json.loads(segments_json)})
+    assert shape in ("segments", "sentences"), shape
+    blob = json.dumps({"text": "Stub transcript text.", shape: json.loads(segments_json)})
     blob_file = tmp_path / "blob.json"
     blob_file.write_text(blob)
 
     _make_stub(bin_dir, "turbo", f"""\
-cat '{blob_file}'
+case "$1" in
+  transcribe) cat '{blob_file}' ;;
+  pi)         cat > /dev/null; printf '%s' "{summary_text}" ;;
+  *)          echo "stub: unknown subcommand $1" >&2; exit 2 ;;
+esac
 """)
-
-    _make_stub(bin_dir, "pi", f"printf '%s' '{summary_text}'\n")
 
     vault = tmp_path / "vault"
     vault.mkdir()
@@ -232,6 +240,22 @@ def test_temp_dir_is_cleaned_after_success(tmp_path):
     assert not paths["src_dir"].exists(), (
         f"Temp source dir still exists after script ran: {paths['src_dir']}"
     )
+
+
+def test_bundled_accepts_parakeet_sentences_shape(tmp_path):
+    """Bundled workflow accepts mlx-audio parakeet's `sentences[]` blob shape
+    and still produces correctly-interleaved [mm:ss] lines + keyframes."""
+    paths = _run_bundled_script(tmp_path, shape="sentences")
+    raw_text = paths["raw_md"].read_text()
+    content = re.sub(r'^---\n.*?\n---\n\n?', '', raw_text, flags=re.DOTALL)
+    content_lines = [l for l in content.splitlines() if l.strip()]
+    slug = paths["slug"]
+    assert len(content_lines) == 5, "\n".join(content_lines)
+    assert content_lines[0] == "[00:00] First."
+    assert content_lines[1] == f"![[{slug}/001-T+3200.png]]"
+    assert content_lines[2] == "[00:05] Second."
+    assert content_lines[3] == "[00:12] Third."
+    assert content_lines[4] == f"![[{slug}/002-T+14500.png]]"
 
 
 def test_audio_start_offset_shifts_segment_times(tmp_path):

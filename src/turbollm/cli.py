@@ -466,7 +466,21 @@ _AUDIO_MIME = {
               type=click.Choice(["text", "json", "srt", "vtt", "verbose_json", "segments"]),
               default="text", help="Response format (default: text). Use 'segments' for JSON array with timestamps.")
 @click.option("--port", "-p", default=None, type=int, help="Port (default: 8899).")
-def transcribe(audio_file, model, language, response_format, port):
+@click.option("--split/--no-split", "split_flag", default=None,
+              help="Force silence-aware pre-chunking on/off. Default: auto-split when audio > 30 min.")
+@click.option("--split-threshold", default=1800.0, type=float, show_default=True,
+              help="Auto-split when audio duration (seconds) exceeds this.")
+@click.option("--split-target", default=300.0, type=float, show_default=True,
+              help="Target chunk size (seconds) for the silence-aware splitter.")
+@click.option("--split-max", default=600.0, type=float, show_default=True,
+              help="Hard cap on chunk size (seconds); used when no silence lies within the target window.")
+@click.option("--split-silence-db", default=-30.0, type=float, show_default=True,
+              help="ffmpeg silencedetect noise threshold (dB).")
+@click.option("--split-silence-min", default=0.8, type=float, show_default=True,
+              help="ffmpeg silencedetect minimum silence duration (seconds).")
+def transcribe(audio_file, model, language, response_format, port,
+               split_flag, split_threshold, split_target, split_max,
+               split_silence_db, split_silence_min):
     """Transcribe an audio file via mlx-audio. Auto-starts server if needed.
 
     Transcript goes to stdout; status to stderr. Pipe-friendly:
@@ -506,6 +520,7 @@ def transcribe(audio_file, model, language, response_format, port):
     # input extension isn't a format its audio writer supports (e.g. .m4a).
     # Pre-convert anything non-wav to wav via ffmpeg so the server's
     # extension-based output selection succeeds.
+    cleanup_wav: Path | None = None
     if path.suffix.lower() != ".wav":
         import shutil as _sh
         if not _sh.which("ffmpeg"):
@@ -514,62 +529,98 @@ def transcribe(audio_file, model, language, response_format, port):
         err.print(f"[dim]converting {path.suffix} → wav via ffmpeg…[/dim]")
         wav_tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
         wav_tmp.close()
-        try:
-            subprocess.run(
-                ["ffmpeg", "-y", "-loglevel", "error", "-i", str(path),
-                 "-ac", "1", "-ar", "16000", wav_tmp.name],
-                check=True,
-            )
-            file_bytes = Path(wav_tmp.name).read_bytes()
-            send_name = path.with_suffix(".wav").name
-            mime = "audio/wav"
-        finally:
-            os.unlink(wav_tmp.name)
+        subprocess.run(
+            ["ffmpeg", "-y", "-loglevel", "error", "-i", str(path),
+             "-ac", "1", "-ar", "16000", wav_tmp.name],
+            check=True,
+        )
+        wav_path = Path(wav_tmp.name)
+        cleanup_wav = wav_path
+        send_name = path.with_suffix(".wav").name
     else:
-        file_bytes = path.read_bytes()
+        wav_path = path
         send_name = path.name
-        mime = "audio/wav"
+
+    def _decide_split() -> bool:
+        """Pick the path: explicit --split / --no-split overrides auto-detect."""
+        if split_flag is not None:
+            return split_flag
+        try:
+            import shutil as _sh
+            if not _sh.which("ffprobe"):
+                return False
+            from turbollm.transcribe_split import probe_duration_seconds
+            duration = probe_duration_seconds(wav_path)
+        except Exception:
+            return False
+        return duration > split_threshold
 
     def _do(_m, p):
-        # Always request verbose_json internally so we have both text and
-        # segments available regardless of the user-facing --format flag.
-        fields = {"model": model_id, "response_format": "verbose_json"}
-        if language:
-            fields["language"] = language
-        body, ctype = _build_multipart(fields, "file", send_name, mime, file_bytes)
-        req = urllib.request.Request(
-            f"http://127.0.0.1:{p}/v1/audio/transcriptions",
-            data=body,
-            headers={"Content-Type": ctype},
-        )
-        err.print(f"[dim]POST /v1/audio/transcriptions  model={model_id}  size={len(file_bytes)/1e6:.1f}MB[/dim]")
-        try:
-            with urllib.request.urlopen(req, timeout=600) as resp:
-                raw = resp.read().decode("utf-8", errors="replace")
-        except urllib.error.HTTPError as e:
-            err.print(f"[red]HTTP {e.code}:[/red] {e.read().decode('utf-8', 'replace')}")
-            raise SystemExit(1) from None
-        # Parse the JSON response (mlx-audio always returns JSON).
-        try:
-            data = json.loads(raw)
-        except json.JSONDecodeError:
-            data = {"text": raw}
+        if _decide_split():
+            from turbollm.transcribe_split import SplitOptions, transcribe_split
+            err.print(f"[dim]split mode: pre-chunking on silences for {wav_path.name}[/dim]")
+            data = transcribe_split(
+                wav_path,
+                model_id=model_id,
+                port=p,
+                options=SplitOptions(
+                    target_s=split_target,
+                    max_s=split_max,
+                    silence_db=split_silence_db,
+                    silence_min_s=split_silence_min,
+                ),
+                language=language,
+                progress=lambda s: err.print(f"[dim]{s}[/dim]"),
+            )
+            raw = json.dumps(data, ensure_ascii=False)
+        else:
+            # Always request verbose_json internally so we have both text and
+            # segments available regardless of the user-facing --format flag.
+            file_bytes = wav_path.read_bytes()
+            fields = {"model": model_id, "response_format": "verbose_json"}
+            if language:
+                fields["language"] = language
+            body, ctype = _build_multipart(fields, "file", send_name, "audio/wav", file_bytes)
+            req = urllib.request.Request(
+                f"http://127.0.0.1:{p}/v1/audio/transcriptions",
+                data=body,
+                headers={"Content-Type": ctype},
+            )
+            err.print(f"[dim]POST /v1/audio/transcriptions  model={model_id}  size={len(file_bytes)/1e6:.1f}MB[/dim]")
+            try:
+                with urllib.request.urlopen(req, timeout=600) as resp:
+                    raw = resp.read().decode("utf-8", errors="replace")
+            except urllib.error.HTTPError as e:
+                err.print(f"[red]HTTP {e.code}:[/red] {e.read().decode('utf-8', 'replace')}")
+                raise SystemExit(1) from None
+            try:
+                data = json.loads(raw)
+            except json.JSONDecodeError:
+                data = {"text": raw}
 
         if response_format == "text":
             # Default behaviour: emit concatenated text, pipe-friendly.
             sys.stdout.write(data.get("text", raw).rstrip() + "\n")
         elif response_format == "segments":
-            # Emit the segments array as pretty-printed JSON.
+            # mlx-audio's parakeet backend returns `sentences[]` (with per-sentence
+            # start/end from token alignment); whisper-shaped backends return
+            # `segments[]`. Normalise either shape to {start, end, text}.
             segments = data.get("segments")
-            if segments is None:
-                # Older mlx-audio versions, or transient backend behavior where
-                # segments[] is omitted. Log the response keys so we can tell
-                # text-only-payload from some other shape next time it happens.
-                keys = sorted(data.keys()) if isinstance(data, dict) else type(data).__name__
-                sys.stderr.write(
-                    f"warning: mlx-audio did not return verbose_json segments (response keys: {keys})\n"
-                )
-                segments = [{"start": 0, "end": None, "text": data.get("text", "")}]
+            if not segments:
+                sentences = data.get("sentences") or []
+                if sentences:
+                    segments = [
+                        {"start": s.get("start", 0.0),
+                         "end": s.get("end"),
+                         "text": (s.get("text") or "").strip()}
+                        for s in sentences
+                    ]
+                else:
+                    keys = sorted(data.keys()) if isinstance(data, dict) else type(data).__name__
+                    sys.stderr.write(
+                        f"warning: mlx-audio returned neither segments nor sentences (response keys: {keys})\n"
+                    )
+                    segments = [{"start": 0, "end": None, "text": data.get("text", "")}]
             sys.stdout.write(json.dumps(segments, indent=2, ensure_ascii=False) + "\n")
         else:
             # Legacy passthroughs: json, srt, vtt, verbose_json — emit raw response.
@@ -577,7 +628,14 @@ def transcribe(audio_file, model, language, response_format, port):
         sys.stdout.flush()
         return 0
 
-    _run_with_server(m, port, _do)
+    try:
+        _run_with_server(m, port, _do)
+    finally:
+        if cleanup_wav is not None and cleanup_wav.exists():
+            try:
+                os.unlink(cleanup_wav)
+            except OSError:
+                pass
 
 
 # ---------------------------------------------------------------------------
@@ -811,6 +869,7 @@ def _dispatch_harness(
     prompt: str | None,
     *,
     show_incompat_warning: bool,
+    context_window: int | None = None,
 ) -> None:
     """Shared dispatch for `turbo <harness>` and `turbo run -H <harness>`.
 
@@ -850,6 +909,11 @@ def _dispatch_harness(
 
     if backend:
         m = {**m, "backend": backend}
+    if context_window:
+        # Override the picker landing context for this invocation. Flows through
+        # both the provider (server max-model-len) and the harness's models.json
+        # via context_default_tokens().
+        m = {**m, "context_default": int(context_window)}
     _run_harness(harness_name, m, port, prompt=prompt)
 
 
@@ -889,10 +953,13 @@ def _make_harness_command(harness_name: str):
                   help="Override backend (default: from model config)")
     @click.option("--prompt", default=None,
                   help="Run harness headlessly with this prompt and exit (no TTY).")
-    def cmd(model, port, backend, prompt):
+    @click.option("--context-window", "context_window", default=None, type=int,
+                  help="Override the model's context_default for this invocation (tokens).")
+    def cmd(model, port, backend, prompt, context_window):
         _dispatch_harness(
             harness_name, model, port, backend, prompt,
             show_incompat_warning=True,
+            context_window=context_window,
         )
     return cmd
 
@@ -1200,11 +1267,14 @@ def hud_status_clear(activity_id):
               help="Override backend (default: from model config)")
 @click.option("--prompt", default=None,
               help="Run harness headlessly with this prompt and exit (no TTY).")
-def run_cmd(model, harness, port, backend, prompt):
+@click.option("--context-window", "context_window", default=None, type=int,
+              help="Override the model's context_default for this invocation (tokens).")
+def run_cmd(model, harness, port, backend, prompt, context_window):
     """Start model server + launch a harness by name."""
     _dispatch_harness(
         harness, model, port, backend, prompt,
         show_incompat_warning=False,
+        context_window=context_window,
     )
 
 

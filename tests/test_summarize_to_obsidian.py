@@ -81,8 +81,14 @@ def _run_script(
     segments_json: str,
     transcript_text: str = "Stub transcript text.",
     summary_text: str = "Stub summary.",
+    *,
+    shape: str = "segments",
 ) -> dict[str, Path]:
     """Run the summarize-to-obsidian script with stub binaries.
+
+    ``shape`` controls the key name carrying the segment list — "segments" for
+    whisper-shaped backends, "sentences" for parakeet's mlx-audio shape. The
+    workflow must accept either.
 
     Returns a dict with keys ``md``, ``raw_md`` pointing at the output files.
     """
@@ -93,17 +99,24 @@ def _run_script(
     # Workflow now calls `turbo transcribe --format verbose_json <file>` once
     # and parses text + segments from the same blob. The stub returns the
     # combined shape regardless of args.
+    assert shape in ("segments", "sentences"), shape
     blob_payload = json.dumps({
         "text": transcript_text,
-        "segments": json.loads(segments_json),
+        shape: json.loads(segments_json),
     })
     blob_file = tmp_path / "blob.json"
     blob_file.write_text(blob_payload)
 
-    _make_stub(bin_dir, "turbo", f"cat '{blob_file}'\n")
-
-    # Stub `pi`: just echo the summary text regardless of input.
-    _make_stub(bin_dir, "pi", f"printf '%s' '{summary_text}'\n")
+    # Single `turbo` stub that dispatches on the first arg:
+    #   - `turbo transcribe ...` → emit the verbose_json blob
+    #   - `turbo pi ...`         → emit the summary text (consumes stdin transcript)
+    _make_stub(bin_dir, "turbo", f"""\
+case "$1" in
+  transcribe) cat '{blob_file}' ;;
+  pi)         cat > /dev/null; printf '%s' "{summary_text}" ;;
+  *)          echo "stub: unknown subcommand $1" >&2; exit 2 ;;
+esac
+""")
 
     # Set up a fake vault.
     vault = tmp_path / "vault"
@@ -174,6 +187,17 @@ def test_raw_md_single_segment_fallback_formats_correctly(tmp_path):
     assert len(lines) == 1, f"Expected 1 line, got: {lines}"
     assert lines[0].startswith("[00:00]"), f"Wrong format: {lines[0]!r}"
     assert "Full transcript as one segment." in lines[0]
+
+
+def test_raw_md_accepts_parakeet_sentences_shape(tmp_path):
+    """When the transcribe blob carries `sentences[]` instead of `segments[]`
+    (mlx-audio parakeet shape), the workflow must still produce [mm:ss] lines."""
+    paths = _run_script(tmp_path, MULTI_SEGMENT_RESPONSE, shape="sentences")
+    lines = paths["raw_md"].read_text().strip().splitlines()
+    assert len(lines) == 3, f"Expected 3 lines, got {len(lines)}: {lines}"
+    assert lines[0].startswith("[00:00]") and "Hello world." in lines[0]
+    assert lines[1].startswith("[01:05]") and "One minute in." in lines[1]
+    assert lines[2].startswith("[02:05]") and "Two minutes five." in lines[2]
 
 
 def test_main_md_has_yaml_frontmatter(tmp_path):

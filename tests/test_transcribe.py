@@ -211,7 +211,34 @@ def test_format_segments_fallback_emits_stderr_warning(tmp_path):
     # The warning is written via sys.stderr.write which CliRunner routes to its
     # output buffer — check there.
     result, _ = _invoke_transcribe(tmp_path, extra_args=["--format", "segments"], response_json=response)
-    assert "warning: mlx-audio did not return verbose_json segments" in result.output
+    assert "warning: mlx-audio returned neither segments nor sentences" in result.output
+
+
+# ---------------------------------------------------------------------------
+# parakeet shape: server returns `sentences[]` instead of `segments[]`
+# ---------------------------------------------------------------------------
+
+
+def test_format_segments_maps_parakeet_sentences_to_segments(tmp_path):
+    """When the server returns parakeet-shape `sentences[]`, --format segments
+    must project each sentence to {start, end, text} so jq pipelines see the
+    same shape regardless of backend."""
+    response = {
+        "text": "Hello. World now.",
+        "sentences": [
+            {"start": 0.32, "end": 1.05, "text": "Hello.", "tokens": [{"text": "Hello."}]},
+            {"start": 1.40, "end": 2.80, "text": " World now.", "tokens": [{"text": "World now."}]},
+        ],
+    }
+    result, _ = _invoke_transcribe(tmp_path, extra_args=["--format", "segments"], response_json=response)
+    assert result.exit_code == 0, result.output
+    parsed = _extract_json_from_output(result.output)
+    assert isinstance(parsed, list)
+    assert len(parsed) == 2
+    assert parsed[0] == {"start": 0.32, "end": 1.05, "text": "Hello."}
+    assert parsed[1] == {"start": 1.40, "end": 2.80, "text": "World now."}
+    # No warning when we have a usable shape.
+    assert "warning" not in result.output.lower()
 
 
 # ---------------------------------------------------------------------------
