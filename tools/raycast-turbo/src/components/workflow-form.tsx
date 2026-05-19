@@ -47,6 +47,28 @@ export function getAllowedExtensions(param: WorkflowParam): string[] | undefined
   return undefined;
 }
 
+/**
+ * Normalize a stored sticky value for `<Form.FilePicker>`'s `defaultValue`,
+ * which expects `string[]` (or `undefined` to skip).
+ *
+ * Raycast's FilePicker submits values as `string[]`, but our setSticky stores
+ * via `LocalStorage.setItem<string>` — so older stickies from this extension
+ * may have landed as either:
+ *   - a JSON-encoded array (when the raw submit value flowed through unchanged)
+ *   - a plain string path (when the value was coerced via template literal)
+ * Accept both shapes and produce a `string[]` for the FilePicker.
+ */
+export function filePickerDefault(raw: unknown): string[] | undefined {
+  if (Array.isArray(raw)) {
+    const paths = raw.filter((p): p is string => typeof p === "string" && p.length > 0);
+    return paths.length ? paths : undefined;
+  }
+  if (typeof raw === "string" && raw.length > 0) {
+    return [raw];
+  }
+  return undefined;
+}
+
 // ── Component ──────────────────────────────────────────────────────────────────
 
 interface WorkflowFormProps {
@@ -180,6 +202,7 @@ function renderField(param: WorkflowParam, defaults: Record<string, string>) {
           title={param.name}
           allowMultipleSelection={false}
           extensions={getAllowedExtensions(param)}
+          defaultValue={filePickerDefault(defaults[param.name])}
         />
       );
     case "directory":
@@ -191,6 +214,7 @@ function renderField(param: WorkflowParam, defaults: Record<string, string>) {
           allowMultipleSelection={false}
           canChooseFiles={false}
           canChooseDirectories
+          defaultValue={filePickerDefault(defaults[param.name])}
         />
       );
     default:
