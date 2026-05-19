@@ -280,6 +280,15 @@ enum RecordAudio {
 
     // MARK: - System+mic path (ScreenCaptureKit + AVAudioEngine)
 
+    /// SCStream audio format. Hardcoded values are constrained by
+    /// `SCStreamConfiguration` (only specific sample rates / channel counts
+    /// are accepted by ScreenCaptureKit's audio capture). 48 kHz stereo is
+    /// the system's native rate and the well-tested config in the SCStream
+    /// docs. AVAudioConverter in the bridge handles the conversion to the
+    /// player's connection format.
+    private static let scStreamSampleRate: Double = 48_000
+    private static let scStreamChannelCount: UInt32 = 2
+
     /// Returns the SCStream so the caller can retain it for the full
     /// recording lifetime and stop it during graceful teardown.
     private static func startSystemPlusMic(
@@ -293,27 +302,32 @@ enum RecordAudio {
         engine.attach(mixer)
         engine.attach(player)
 
-        // Two sources fanning into one mixer require explicit input bus
-        // indices — `engine.connect(src, to: mixer, format:)` defaults to
-        // mixer.bus 0 for every call, so the second connection would
-        // silently clobber the first.
+        // Mic → mixer bus 0 at native HW format (AVAudioEngine rejects any
+        // other format for the input tap).
         let inputNode = engine.inputNode
         let nativeMicFormat = inputNode.outputFormat(forBus: 0)
         engine.connect(inputNode, to: mixer, fromBus: 0, toBus: 0, format: nativeMicFormat)
-        engine.connect(player, to: mixer, fromBus: 0, toBus: 1, format: targetFormat)
+
+        // Player → mixer bus 1 at SCStream's native format. The bridge
+        // converts each incoming CMSampleBuffer to this exact format before
+        // scheduling onto the player. The mixer downsamples both inputs to
+        // the tap format on its way out.
+        guard let scPlayerFormat = AVAudioFormat(
+            commonFormat: .pcmFormatFloat32,
+            sampleRate: scStreamSampleRate,
+            channels: scStreamChannelCount,
+            interleaved: false
+        ) else {
+            throw RecordAudioError.permissionDenied("Screen Recording (could not construct AVAudioFormat)")
+        }
+        engine.connect(player, to: mixer, fromBus: 0, toBus: 1, format: scPlayerFormat)
 
         // AVAudioEngine refuses to start any input chain that does not
-        // ultimately reach `outputNode` — the AUGraph validator throws
-        // kAudioUnitErr_FormatNotSupported (-10868) inside
-        // `AUGraphParser::InitializeActiveNodesInInputChain` with no
-        // useful detail beyond "input chain not connected". Wire the
-        // mixer to the main mixer (→ outputNode) to satisfy the
-        // topology, and mute the main mixer so the mic does not loop
-        // back through the speakers. The tap on `mixer` still captures
-        // the full mix because it sits upstream of the muted sink.
-        // Manual smoke (T-33) caught this in CLI context; the original
-        // HUD code suffered the same bug but presumably hadn't been
-        // exercised against `system+mic` since the b22c9cd fix landed.
+        // ultimately reach `outputNode`. Wire the mixer to the main mixer
+        // (→ outputNode) to satisfy the topology, and mute the main mixer
+        // so the mic does not loop back through the speakers. The tap on
+        // `mixer` still captures the full mix because it sits upstream of
+        // the muted sink.
         engine.connect(mixer, to: engine.mainMixerNode, format: targetFormat)
         engine.mainMixerNode.outputVolume = 0
 
@@ -334,12 +348,20 @@ enum RecordAudio {
         let config = SCStreamConfiguration()
         config.capturesAudio = true
         config.excludesCurrentProcessAudio = true
+        // Pin SCStream's audio output to a known, supported format so the
+        // bridge's AVAudioConverter has a deterministic source format. Without
+        // these, SCStream emits at the system's current default and the
+        // bridge has to discover the format from the first CMSampleBuffer.
+        config.sampleRate = Int(scStreamSampleRate)
+        config.channelCount = Int(scStreamChannelCount)
 
         let stream = SCStream(filter: filter, configuration: config, delegate: nil)
+        // Serial sample-handler queue: AVAudioConverter is not thread-safe and
+        // SCStream can dispatch samples concurrently from a global queue.
         try stream.addStreamOutput(
-            SCStreamOutputBridge(player: player, format: targetFormat),
+            SCStreamOutputBridge(player: player, playerFormat: scPlayerFormat),
             type: .audio,
-            sampleHandlerQueue: .global()
+            sampleHandlerQueue: DispatchQueue(label: "com.turbollm.acquirer.scstream.audio")
         )
         try await stream.startCapture()
         return stream
@@ -348,48 +370,108 @@ enum RecordAudio {
 
 // MARK: - SCStream bridge
 
-/// Bridges ScreenCaptureKit sample buffers to an AVAudioPlayerNode.
+/// Bridges ScreenCaptureKit audio sample buffers to an AVAudioPlayerNode.
+///
+/// SCStream emits audio in whatever format `SCStreamConfiguration` requested
+/// (typically 48 kHz stereo Float32). The player node is wired into the mixer
+/// at a known fixed format. This bridge:
+///
+/// 1. Reads the actual ASBD from each CMSampleBuffer (defensive — works even
+///    if SCStream's output format ever shifts).
+/// 2. Copies PCM data into an AVAudioPCMBuffer in the SC-emitted format using
+///    the supported `CMSampleBufferCopyPCMDataIntoAudioBufferList` API.
+/// 3. Converts to the player's connection format via AVAudioConverter (held
+///    once, rebuilt only if the source format changes).
+/// 4. Schedules the converted buffer onto the player.
+///
+/// Must be invoked on a serial dispatch queue — AVAudioConverter is not
+/// documented as thread-safe.
 private final class SCStreamOutputBridge: NSObject, SCStreamOutput {
     private let player: AVAudioPlayerNode
-    private let format: AVAudioFormat
+    private let playerFormat: AVAudioFormat
 
-    init(player: AVAudioPlayerNode, format: AVAudioFormat) {
+    private var converter: AVAudioConverter?
+    private var sourceFormat: AVAudioFormat?
+
+    init(player: AVAudioPlayerNode, playerFormat: AVAudioFormat) {
         self.player = player
-        self.format = format
+        self.playerFormat = playerFormat
+        super.init()
     }
 
     func stream(_ stream: SCStream,
                 didOutputSampleBuffer sampleBuffer: CMSampleBuffer,
                 of type: SCStreamOutputType) {
         guard type == .audio else { return }
-        guard let pcmBuffer = sampleBuffer.asPCMBuffer(format: format) else { return }
-        player.scheduleBuffer(pcmBuffer)
+        guard let inputBuffer = sampleBuffer.toAVAudioPCMBuffer() else { return }
+
+        // Rebuild the converter on first buffer, or when the source format
+        // changes mid-stream (defensive — SCStream config pins the format
+        // but a future SCK change could relax that).
+        if converter == nil || sourceFormat != inputBuffer.format {
+            sourceFormat = inputBuffer.format
+            converter = AVAudioConverter(from: inputBuffer.format, to: playerFormat)
+        }
+        guard let converter = converter else { return }
+
+        // Output capacity: scale by sample-rate ratio + a small headroom for
+        // resampler tail samples. The converter writes the actual frame count
+        // into the buffer.
+        let ratio = playerFormat.sampleRate / inputBuffer.format.sampleRate
+        let outputCapacity = AVAudioFrameCount(ceil(Double(inputBuffer.frameLength) * ratio)) + 32
+        guard let outputBuffer = AVAudioPCMBuffer(pcmFormat: playerFormat, frameCapacity: outputCapacity) else {
+            return
+        }
+
+        var providedOnce = false
+        var conversionError: NSError?
+        let status = converter.convert(to: outputBuffer, error: &conversionError) { _, statusPtr in
+            if providedOnce {
+                statusPtr.pointee = .noDataNow
+                return nil
+            }
+            providedOnce = true
+            statusPtr.pointee = .haveData
+            return inputBuffer
+        }
+
+        guard status == .haveData || status == .inputRanDry else { return }
+        guard outputBuffer.frameLength > 0 else { return }
+        player.scheduleBuffer(outputBuffer)
     }
 }
 
 // MARK: - CMSampleBuffer conversion helper
 
 private extension CMSampleBuffer {
-    func asPCMBuffer(format: AVAudioFormat) -> AVAudioPCMBuffer? {
-        guard let blockBuffer = CMSampleBufferGetDataBuffer(self) else { return nil }
-        let frameCount = CMSampleBufferGetNumSamples(self)
-        guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(frameCount)) else {
+    /// Convert this audio CMSampleBuffer to an AVAudioPCMBuffer in the
+    /// sample buffer's own native format. Returns nil if the sample buffer
+    /// is not a PCM audio buffer or the copy fails.
+    func toAVAudioPCMBuffer() -> AVAudioPCMBuffer? {
+        guard let formatDescription = CMSampleBufferGetFormatDescription(self),
+              let asbdPtr = CMAudioFormatDescriptionGetStreamBasicDescription(formatDescription) else {
             return nil
         }
-        buffer.frameLength = buffer.frameCapacity
+        var asbd = asbdPtr.pointee
+        guard let format = AVAudioFormat(streamDescription: &asbd) else { return nil }
 
-        var totalLength = 0
-        var dataPointer: UnsafeMutablePointer<Int8>?
-        let status = CMBlockBufferGetDataPointer(
-            blockBuffer, atOffset: 0, lengthAtOffsetOut: nil,
-            totalLengthOut: &totalLength, dataPointerOut: &dataPointer
-        )
-        guard status == kCMBlockBufferNoErr, let src = dataPointer else { return nil }
-
-        if let floatChannelData = buffer.floatChannelData {
-            let byteCount = min(totalLength, Int(buffer.frameCapacity) * MemoryLayout<Float>.size)
-            memcpy(floatChannelData[0], src, byteCount)
+        let frameCount = AVAudioFrameCount(CMSampleBufferGetNumSamples(self))
+        guard frameCount > 0,
+              let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount) else {
+            return nil
         }
+        buffer.frameLength = frameCount
+
+        // CMSampleBufferCopyPCMDataIntoAudioBufferList is the supported API
+        // for materializing CMSampleBuffer audio into a host-managed buffer
+        // list; it handles interleaved vs deinterleaved layouts automatically.
+        let status = CMSampleBufferCopyPCMDataIntoAudioBufferList(
+            self,
+            at: 0,
+            frameCount: Int32(frameCount),
+            into: buffer.mutableAudioBufferList
+        )
+        guard status == noErr else { return nil }
         return buffer
     }
 }
