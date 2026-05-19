@@ -472,6 +472,11 @@ def _workflow_lock(name: str):
                 "(HUD ⏹ Stop, Raycast 'Running Workflows' command, "
                 f"or remove {path} after confirming no live process holds it)."
             ) from exc
+        # Stamp our PID so workflow_status() can identify the holder without a
+        # separate registry. We re-open read-only to read this; flock itself is
+        # still the authority for "is it running".
+        fd.write(str(_os.getpid()))
+        fd.flush()
         yield
     finally:
         try:
@@ -479,6 +484,59 @@ def _workflow_lock(name: str):
         except Exception:
             pass
         fd.close()
+
+
+def workflow_status(name: str) -> dict:
+    """Probe the per-workflow flock and report state without taking it.
+
+    Returns `{"state": "idle"|"running", "pid": int|None}`. When the lock file
+    exists but is unheld (last holder exited cleanly or crashed; the kernel
+    releases the flock on any process exit), we report idle and `pid` is None.
+    When the lock is held, we read the PID stamp that the holder wrote; if the
+    stamp is missing or unparseable we still report running but with pid=None.
+    """
+    path = _workflow_lock_path(name)
+    if not path.exists():
+        return {"state": "idle", "pid": None}
+    try:
+        fd = open(path, "r")
+    except OSError:
+        return {"state": "idle", "pid": None}
+    try:
+        try:
+            _fcntl.flock(fd.fileno(), _fcntl.LOCK_EX | _fcntl.LOCK_NB)
+            # Acquired → no one was holding it. Release immediately.
+            _fcntl.flock(fd.fileno(), _fcntl.LOCK_UN)
+            return {"state": "idle", "pid": None}
+        except BlockingIOError:
+            pid_str = fd.read().strip()
+            pid = int(pid_str) if pid_str.isdigit() else None
+            return {"state": "running", "pid": pid}
+    finally:
+        fd.close()
+
+
+def stop_workflow(name: str, sig: int = _signal.SIGTERM) -> int | None:
+    """Signal a running workflow's process group. Returns the signaled PID or None.
+
+    Targets the process group (negative pid via killpg) so the python parent's
+    /bin/sh subprocess — and any acquirers it spawned — go down too. Relies on
+    run_workflow having started the child in a new session (see Popen
+    `start_new_session=True`).
+    """
+    info = workflow_status(name)
+    if info["state"] != "running" or not info["pid"]:
+        return None
+    pid = info["pid"]
+    try:
+        pgid = _os.getpgid(pid)
+    except ProcessLookupError:
+        return None
+    try:
+        _os.killpg(pgid, sig)
+    except ProcessLookupError:
+        return None
+    return pid
 
 
 def run_workflow(
@@ -550,9 +608,37 @@ def run_workflow(
                 argv = ["/bin/sh", "-c", command, name]
             else:
                 argv = ["/bin/sh", "-c", command, name, *positional]
-            return _subprocess.run(argv, env=env).returncode
+            return _spawn_and_wait(argv, env)
         finally:
             _activity.clear_activity(aid)
+
+
+def _spawn_and_wait(argv: list[str], env: dict[str, str]) -> int:
+    """Run the workflow command in its own process group and propagate SIGTERM.
+
+    `start_new_session=True` puts the child shell at the head of a fresh
+    session/process group, so `stop_workflow` can signal the whole tree via
+    `killpg`. We also install a SIGTERM handler in the parent that forwards
+    the signal to the child group before waiting, so an external `kill
+    <python-pid>` cleanly tears down the shell + acquirers instead of leaving
+    them orphaned.
+    """
+    proc = _subprocess.Popen(argv, env=env, start_new_session=True)
+    child_pgid = _os.getpgid(proc.pid)
+
+    def _forward(signum, _frame):
+        try:
+            _os.killpg(child_pgid, signum)
+        except ProcessLookupError:
+            pass
+
+    prev_term = _signal.signal(_signal.SIGTERM, _forward)
+    prev_int = _signal.signal(_signal.SIGINT, _forward)
+    try:
+        return proc.wait()
+    finally:
+        _signal.signal(_signal.SIGTERM, prev_term)
+        _signal.signal(_signal.SIGINT, prev_int)
 
 
 def _os_environ_copy() -> dict[str, str]:

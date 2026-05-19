@@ -994,3 +994,136 @@ def test_workflow_lock_path_sanitizes_slashes(tmp_path, monkeypatch):
     path = workflows._workflow_lock_path("foo/bar")
     assert "/" not in path.name
     assert path.name == "foo_bar.lock"
+
+
+# ── workflow_status / stop_workflow ───────────────────────────────────────────
+
+
+def test_workflow_status_idle_when_no_lock(tmp_path, monkeypatch):
+    """No lock file → idle, no pid."""
+    from turbollm import workflows
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    assert workflows.workflow_status("never-ran") == {"state": "idle", "pid": None}
+
+
+def test_workflow_status_idle_when_lock_unheld(tmp_path, monkeypatch):
+    """Stale lock file (kernel lock not held) → idle, no pid."""
+    import os
+
+    from turbollm import workflows
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    path = workflows._workflow_lock_path("stale-wf")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    # Write a PID stamp but don't hold the flock — simulates a crashed holder
+    # whose file lingers on disk.
+    path.write_text(str(os.getpid()))
+    assert workflows.workflow_status("stale-wf") == {"state": "idle", "pid": None}
+
+
+def test_workflow_status_running_reports_holder_pid(tmp_path, monkeypatch):
+    """Externally held lock with a PID stamp → running, correct pid."""
+    import fcntl
+    import os
+
+    from turbollm import workflows
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    path = workflows._workflow_lock_path("held-wf")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    holder = open(path, "w")
+    fcntl.flock(holder.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    holder.write(str(os.getpid()))
+    holder.flush()
+    try:
+        info = workflows.workflow_status("held-wf")
+        assert info == {"state": "running", "pid": os.getpid()}
+    finally:
+        fcntl.flock(holder.fileno(), fcntl.LOCK_UN)
+        holder.close()
+
+
+def test_stop_workflow_returns_none_when_idle(tmp_path, monkeypatch):
+    """stop_workflow on an idle workflow is a no-op returning None."""
+    from turbollm import workflows
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    assert workflows.stop_workflow("never-ran") is None
+
+
+def test_stop_workflow_signals_holder_pgid(tmp_path, monkeypatch):
+    """stop_workflow targets the holder's process group, tearing down a real child shell."""
+    import os
+    import signal
+    import subprocess
+    import sys
+    import time
+
+    from turbollm import workflows
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+
+    # Spawn a real child that holds the lock + sleeps in its own session. We
+    # use a python -c one-liner so the test is hermetic.
+    lock_path = workflows._workflow_lock_path("real-holder")
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    script = (
+        "import fcntl, os, sys, time;"
+        f"f=open({str(lock_path)!r},'w');"
+        "fcntl.flock(f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB);"
+        "f.write(str(os.getpid())); f.flush();"
+        "time.sleep(30)"
+    )
+    proc = subprocess.Popen(
+        [sys.executable, "-c", script],
+        start_new_session=True,
+    )
+    try:
+        # Wait until the holder has actually stamped its PID.
+        for _ in range(50):
+            if lock_path.exists() and lock_path.read_text().strip().isdigit():
+                break
+            time.sleep(0.05)
+        info = workflows.workflow_status("real-holder")
+        assert info["state"] == "running"
+        assert info["pid"] == proc.pid
+
+        signaled = workflows.stop_workflow("real-holder", sig=signal.SIGTERM)
+        assert signaled == proc.pid
+
+        # Confirm the holder actually exited.
+        proc.wait(timeout=5)
+        assert proc.returncode is not None
+    finally:
+        if proc.poll() is None:
+            try:
+                os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            proc.wait(timeout=2)
+
+
+def test_run_workflow_stamps_holder_pid(tmp_path, monkeypatch):
+    """While run_workflow is executing, the lock file should contain its PID."""
+    import os
+
+    from turbollm import activity, workflows
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(activity, "STATE_DIR", tmp_path / "state")
+
+    # Use a small inline script that lets us peek at the lock file while the
+    # workflow is "running". The command reads the lock file's contents and
+    # compares to its own PPID (the python parent that holds the flock).
+    wf = {
+        "command": (
+            f"cat {workflows._workflow_lock_path('stamp-wf')!s} > "
+            f"{tmp_path / 'observed.txt'!s}"
+        ),
+    }
+    rc = workflows.run_workflow("stamp-wf", wf, overrides={}, registry={})
+    assert rc == 0
+    observed = (tmp_path / "observed.txt").read_text().strip()
+    assert observed.isdigit()
+    assert int(observed) == os.getpid()

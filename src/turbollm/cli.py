@@ -1070,6 +1070,41 @@ def workflows_config(workflow_name, assignments):
             console.print(f"Cleared {param}")
 
 
+@workflows_grp.command(name="status")
+@click.argument("name")
+@click.option("--json", "as_json", is_flag=True, help="Emit JSON for machine consumption.")
+def workflows_status(name, as_json):
+    """Report whether a workflow is currently running.
+
+    Probes the per-workflow flock without holding it. Exits 0 in both cases —
+    "idle" is not an error condition. Use --json for Raycast / scripts.
+    """
+    from turbollm import workflows as _wf
+
+    info = _wf.workflow_status(name)
+    if as_json:
+        click.echo(json.dumps(info))
+        return
+    if info["state"] == "running":
+        pid = info["pid"]
+        click.echo(f"running (pid {pid})" if pid else "running")
+    else:
+        click.echo("idle")
+
+
+@workflows_grp.command(name="stop")
+@click.argument("name")
+def workflows_stop(name):
+    """Send SIGTERM to a running workflow's process group."""
+    from turbollm import workflows as _wf
+
+    pid = _wf.stop_workflow(name)
+    if pid is None:
+        click.echo(f"workflow '{name}' is not running", err=True)
+        raise SystemExit(1)
+    click.echo(f"sent SIGTERM to pid {pid}")
+
+
 # ---------------------------------------------------------------------------
 # Activities (HUD state visibility)
 # ---------------------------------------------------------------------------
