@@ -6,8 +6,11 @@ internal HUD design spec for the full schema.
 """
 from __future__ import annotations
 
+import contextlib as _contextlib
 import datetime as _dt
+import fcntl as _fcntl
 import os as _os
+import pathlib as _pathlib
 import re as _re
 import shutil as _shutil
 import signal as _signal
@@ -437,6 +440,47 @@ def find_acquirer_bin() -> str | None:
     return _shutil.which("turbo-acquirer")
 
 
+def _workflow_lock_path(name: str) -> _pathlib.Path:
+    """Lockfile location for per-workflow concurrency control."""
+    run_dir = _pathlib.Path.home() / ".turbollm" / "run"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    # Sanitize the workflow name minimally — slashes would otherwise create
+    # nested dirs. The registry already rejects most exotic chars.
+    safe = name.replace("/", "_").replace("\\", "_")
+    return run_dir / f"{safe}.lock"
+
+
+@_contextlib.contextmanager
+def _workflow_lock(name: str):
+    """Hold an exclusive non-blocking flock for the lifetime of a workflow run.
+
+    Refusing to start a second instance of the same workflow protects shared
+    resources (microphone, ScreenCaptureKit, vault output paths) from racing.
+    The lock is kernel-managed: held for the lifetime of the holding process,
+    released automatically on exit (including crash / SIGKILL).
+    """
+    path = _workflow_lock_path(name)
+    fd = open(path, "w")
+    try:
+        try:
+            _fcntl.flock(fd.fileno(), _fcntl.LOCK_EX | _fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            fd.close()
+            raise WorkflowError(
+                f"workflow '{name}' is already running. "
+                "Stop the running instance first "
+                "(HUD ⏹ Stop, Raycast 'Running Workflows' command, "
+                f"or remove {path} after confirming no live process holds it)."
+            ) from exc
+        yield
+    finally:
+        try:
+            _fcntl.flock(fd.fileno(), _fcntl.LOCK_UN)
+        except Exception:
+            pass
+        fd.close()
+
+
 def run_workflow(
     name: str,
     wf: dict,
@@ -452,58 +496,63 @@ def run_workflow(
     to this workflow.
 
     Writes an activity file for the duration. Returns the subprocess exit code.
+
+    A per-workflow flock at ~/.turbollm/run/<name>.lock prevents two instances
+    of the same workflow from running concurrently — raises WorkflowError
+    immediately if the lock can't be acquired.
     """
     from turbollm import activity as _activity
 
     validate_workflow(name, wf)
 
-    # Capture monotonic origin before spawning any acquirer.
-    # Both acquirers inherit TURBO_T0_NS so their manifests' start_offset_ms fields
-    # can be aligned on a common timeline.
-    t0_ns: int = _time.monotonic_ns()
+    with _workflow_lock(name):
+        # Capture monotonic origin before spawning any acquirer.
+        # Both acquirers inherit TURBO_T0_NS so their manifests' start_offset_ms fields
+        # can be aligned on a common timeline.
+        t0_ns: int = _time.monotonic_ns()
 
-    aid = _activity.start_activity(
-        kind="workflow", label=f"Running {name}", icon="play", color="blue",
-    )
-    try:
-        acquirer_bin = find_acquirer_bin()
-        resolved = resolve_params(
-            wf.get("params", []),
-            overrides,
-            workflow_id=aid,
-            workflow_name=name,
-            acquirer_bin=acquirer_bin,
-            t0_ns=t0_ns,
+        aid = _activity.start_activity(
+            kind="workflow", label=f"Running {name}", icon="play", color="blue",
         )
+        try:
+            acquirer_bin = find_acquirer_bin()
+            resolved = resolve_params(
+                wf.get("params", []),
+                overrides,
+                workflow_id=aid,
+                workflow_name=name,
+                acquirer_bin=acquirer_bin,
+                t0_ns=t0_ns,
+            )
 
-        # Pick the command string: inline or via script reference.
-        if wf.get("command"):
-            command = expand_template(wf["command"], resolved)
-        else:
-            script_name = wf["script"]
-            scripts = registry.get("scripts", {})
-            if script_name not in scripts:
-                raise WorkflowError(
-                    f"workflow '{name}' references script '{script_name}' "
-                    "but no such [scripts.*] entry exists"
-                )
-            script_cmd = scripts[script_name].get("command", "")
-            positional = [expand_template(a, resolved) for a in wf.get("args", [])]
-            command = script_cmd  # the script's own template uses $1..$N
-            # We will pass `positional` as positional args to /bin/sh below.
+            # Pick the command string: inline or via script reference.
+            if wf.get("command"):
+                command = expand_template(wf["command"], resolved)
+            else:
+                script_name = wf["script"]
+                scripts = registry.get("scripts", {})
+                if script_name not in scripts:
+                    raise WorkflowError(
+                        f"workflow '{name}' references script '{script_name}' "
+                        "but no such [scripts.*] entry exists"
+                    )
+                script_cmd = scripts[script_name].get("command", "")
+                positional = [expand_template(a, resolved) for a in wf.get("args", [])]
+                command = script_cmd  # the script's own template uses $1..$N
+                # We will pass `positional` as positional args to /bin/sh below.
 
-        env_overrides = {
-            k: expand_template(v, resolved) for k, v in wf.get("env", {}).items()
-        }
+            env_overrides = {
+                k: expand_template(v, resolved) for k, v in wf.get("env", {}).items()
+            }
 
-        env = {**_os_environ_copy(), **env_overrides}
-        if wf.get("command"):
-            argv = ["/bin/sh", "-c", command, name]
-        else:
-            argv = ["/bin/sh", "-c", command, name, *positional]
-        return _subprocess.run(argv, env=env).returncode
-    finally:
-        _activity.clear_activity(aid)
+            env = {**_os_environ_copy(), **env_overrides}
+            if wf.get("command"):
+                argv = ["/bin/sh", "-c", command, name]
+            else:
+                argv = ["/bin/sh", "-c", command, name, *positional]
+            return _subprocess.run(argv, env=env).returncode
+        finally:
+            _activity.clear_activity(aid)
 
 
 def _os_environ_copy() -> dict[str, str]:

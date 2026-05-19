@@ -939,3 +939,58 @@ esac
         "Background acquirer was not terminated after primary failure; "
         "leaked child process detected"
     )
+
+
+# ── Per-workflow lock (concurrency guard) ─────────────────────────────────────
+
+
+def test_workflow_lock_refuses_concurrent_run(tmp_path, monkeypatch):
+    """A second concurrent call to run_workflow with the same name must raise WorkflowError."""
+    import fcntl
+    from turbollm import activity, workflows
+
+    # Redirect HOME so the lockfile lands in tmp_path, not the user's real ~.
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(activity, "STATE_DIR", tmp_path / "state")
+
+    # Externally hold the workflow's lock.
+    lock_path = workflows._workflow_lock_path("locked-wf")
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    holder = open(lock_path, "w")
+    fcntl.flock(holder.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    try:
+        wf = {"command": "true"}
+        with pytest.raises(workflows.WorkflowError, match="already running"):
+            workflows.run_workflow("locked-wf", wf, overrides={}, registry={})
+    finally:
+        fcntl.flock(holder.fileno(), fcntl.LOCK_UN)
+        holder.close()
+
+
+def test_workflow_lock_released_after_success(tmp_path, monkeypatch):
+    """After a normal run, the lock is releasable — sequential runs work."""
+    import fcntl
+    from turbollm import activity, workflows
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(activity, "STATE_DIR", tmp_path / "state")
+
+    wf = {"command": "true"}
+    assert workflows.run_workflow("seq-wf", wf, overrides={}, registry={}) == 0
+
+    # Lock file persists (it's just a file) — what matters is the kernel
+    # lock is released, so a fresh acquire on the same path succeeds.
+    lock_path = workflows._workflow_lock_path("seq-wf")
+    with open(lock_path, "w") as f:
+        fcntl.flock(f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+
+
+def test_workflow_lock_path_sanitizes_slashes(tmp_path, monkeypatch):
+    """A workflow name with a slash must not create a nested directory."""
+    from turbollm import workflows
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    path = workflows._workflow_lock_path("foo/bar")
+    assert "/" not in path.name
+    assert path.name == "foo_bar.lock"
