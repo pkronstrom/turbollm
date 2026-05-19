@@ -169,3 +169,71 @@ describe("filePickerDefault", () => {
     expect(filePickerDefault(["", null, undefined])).toBeUndefined();
   });
 });
+
+
+// ── normalizeSubmitValue ──────────────────────────────────────────────────────
+//
+// Form.FilePicker submits string[]. LocalStorage rejects non-primitives.
+// Our CLI expects single string per --param. Coerce at the boundary.
+
+import { normalizeSubmitValue } from "../src/components/workflow-form";
+
+describe("normalizeSubmitValue", () => {
+  it("returns strings unchanged", () => {
+    expect(normalizeSubmitValue("hello")).toBe("hello");
+    expect(normalizeSubmitValue("")).toBe("");
+  });
+
+  it("returns first non-empty entry from a string array", () => {
+    expect(normalizeSubmitValue(["/Users/me/vault"])).toBe("/Users/me/vault");
+    expect(normalizeSubmitValue(["/a", "/b"])).toBe("/a");
+    expect(normalizeSubmitValue(["", "/b"])).toBe("/b");
+  });
+
+  it("returns empty string for empty array", () => {
+    expect(normalizeSubmitValue([])).toBe("");
+  });
+
+  it("returns empty string for nullish", () => {
+    expect(normalizeSubmitValue(null)).toBe("");
+    expect(normalizeSubmitValue(undefined)).toBe("");
+  });
+
+  it("coerces numbers and booleans to string", () => {
+    expect(normalizeSubmitValue(42)).toBe("42");
+    expect(normalizeSubmitValue(true)).toBe("true");
+  });
+
+  it("returns empty string for objects (defensive)", () => {
+    expect(normalizeSubmitValue({})).toBe("");
+  });
+});
+
+describe("buildArgsForSubmit with array values (FilePicker submits)", () => {
+  it("unwraps single-element string arrays into the --param value", () => {
+    const args = buildArgsForSubmit("record-to-obsidian", {
+      vault: ["/Users/me/Obsidian"],
+    } as unknown as Record<string, string>);
+    expect(args).toEqual([
+      "workflows",
+      "run",
+      "record-to-obsidian",
+      "--param",
+      "vault=/Users/me/Obsidian",
+    ]);
+  });
+
+  it("omits empty arrays", () => {
+    const args = buildArgsForSubmit("record-to-obsidian", {
+      vault: [],
+      file: "/tmp/x.wav",
+    } as unknown as Record<string, string>);
+    expect(args).toEqual([
+      "workflows",
+      "run",
+      "record-to-obsidian",
+      "--param",
+      "file=/tmp/x.wav",
+    ]);
+  });
+});

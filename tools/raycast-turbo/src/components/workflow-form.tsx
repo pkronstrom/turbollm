@@ -20,16 +20,43 @@ const ACQUIRED_TYPES = new Set([
 ]);
 
 /**
+ * Coerce a Form submit value to a single string.
+ *
+ * Raycast's TextField/TextArea/Dropdown submit values as `string`, but
+ * `<Form.FilePicker>` always submits `string[]` even for single-pick mode.
+ * Our CLI takes one path per --param; LocalStorage rejects non-primitive
+ * values. Normalize once at the boundary so both sticky storage and argv
+ * construction see plain strings.
+ *
+ * For arrays we take the first element (single-pick assumption). Empty
+ * arrays / nullish / non-strings collapse to "".
+ */
+export function normalizeSubmitValue(v: unknown): string {
+  if (typeof v === "string") return v;
+  if (Array.isArray(v)) {
+    const first = v.find((x): x is string => typeof x === "string" && x.length > 0);
+    return first ?? "";
+  }
+  if (v == null) return "";
+  if (typeof v === "number" || typeof v === "boolean") return String(v);
+  return "";
+}
+
+/**
  * Build the argv for `turbo workflows run <name> --param k=v ...`.
  * Empty values are omitted so the CLI can apply its own defaults.
+ *
+ * Accepts loose typing because Raycast's onSubmit values are
+ * heterogeneous (string | string[] depending on field type).
  */
 export function buildArgsForSubmit(
   workflowName: string,
-  values: Record<string, string>
+  values: Record<string, unknown>
 ): string[] {
   const args = ["workflows", "run", workflowName];
-  for (const [k, v] of Object.entries(values)) {
-    if (v != null && v !== "") {
+  for (const [k, raw] of Object.entries(values)) {
+    const v = normalizeSubmitValue(raw);
+    if (v !== "") {
       args.push("--param", `${k}=${v}`);
     }
   }
@@ -104,10 +131,25 @@ export function WorkflowForm({ workflow, turboPath }: WorkflowFormProps) {
     loadStickies();
   }, [workflow.name]);
 
-  async function handleSubmit(values: Record<string, string>) {
-    // Persist non-empty stickies before spawning
-    for (const [k, v] of Object.entries(values)) {
-      if (v) await setSticky(workflow.name, k, v);
+  async function handleSubmit(values: Record<string, unknown>) {
+    // Persist non-empty stickies before spawning. Coerce FilePicker arrays
+    // to strings — LocalStorage.setItem accepts only `string | number |
+    // boolean` and surfaces non-primitive values as the Swift Codable error
+    // "The data couldn't be read because it isn't in the correct format."
+    for (const [k, raw] of Object.entries(values)) {
+      const v = normalizeSubmitValue(raw);
+      if (v !== "") {
+        try {
+          await setSticky(workflow.name, k, v);
+        } catch (err) {
+          // Don't let a sticky-write failure block the actual workflow run.
+          await showToast({
+            style: Toast.Style.Failure,
+            title: `Couldn't save sticky for "${k}"`,
+            message: String(err),
+          });
+        }
+      }
     }
 
     const args = buildArgsForSubmit(workflow.name, values);
