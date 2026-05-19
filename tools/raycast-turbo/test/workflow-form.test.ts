@@ -14,7 +14,6 @@ vi.mock("../src/lib/stickies", () => ({
 
 import {
   buildArgsForSubmit,
-  filePickerDefault,
   getAllowedExtensions,
 } from "../src/components/workflow-form";
 import type { WorkflowParam } from "../src/lib/workflows";
@@ -129,48 +128,6 @@ describe("acquired param handling", () => {
 });
 
 
-// ── filePickerDefault ──────────────────────────────────────────────────────────
-//
-// Form.FilePicker's defaultValue is `string[]`. Submitted values from
-// FilePicker are also string[]. setSticky persists whatever it receives;
-// stored stickies may therefore be either a string (legacy) or string[]
-// (post-storage round-trip via FilePicker submit). Cover both.
-
-describe("filePickerDefault", () => {
-  it("wraps a plain string sticky into a single-element array", () => {
-    expect(filePickerDefault("/Users/me/vault")).toEqual(["/Users/me/vault"]);
-  });
-
-  it("passes through a string[] sticky unchanged", () => {
-    expect(filePickerDefault(["/Users/me/vault"])).toEqual(["/Users/me/vault"]);
-  });
-
-  it("returns undefined for empty string", () => {
-    expect(filePickerDefault("")).toBeUndefined();
-  });
-
-  it("returns undefined for empty array", () => {
-    expect(filePickerDefault([])).toBeUndefined();
-  });
-
-  it("returns undefined for nullish", () => {
-    expect(filePickerDefault(undefined)).toBeUndefined();
-    expect(filePickerDefault(null)).toBeUndefined();
-  });
-
-  it("filters out non-string entries in arrays", () => {
-    expect(filePickerDefault(["/path", null, "", 42, "/other"])).toEqual([
-      "/path",
-      "/other",
-    ]);
-  });
-
-  it("returns undefined when all array entries are filtered out", () => {
-    expect(filePickerDefault(["", null, undefined])).toBeUndefined();
-  });
-});
-
-
 // ── normalizeSubmitValue ──────────────────────────────────────────────────────
 //
 // Form.FilePicker submits string[]. LocalStorage rejects non-primitives.
@@ -247,6 +204,40 @@ describe("buildArgsForSubmit with array values (FilePicker submits)", () => {
 // the spawn layer so workflow scripts find the expected binaries.
 
 import { enrichedPath } from "../src/components/workflow-form";
+
+// ── parseStatusOutput ─────────────────────────────────────────────────────────
+//
+// Drives the Run/Stop action swap. Must never throw and must collapse every
+// non-running shape to `null` so the UI stays in the "Run" state by default.
+
+import { parseStatusOutput } from "../src/components/workflow-form";
+
+describe("parseStatusOutput", () => {
+  it("returns the pid when the workflow is running", () => {
+    expect(parseStatusOutput('{"state":"running","pid":42}')).toBe(42);
+  });
+
+  it("returns null when idle", () => {
+    expect(parseStatusOutput('{"state":"idle","pid":null}')).toBeNull();
+  });
+
+  it("returns null when running but pid is missing or not a number", () => {
+    expect(parseStatusOutput('{"state":"running","pid":null}')).toBeNull();
+    expect(parseStatusOutput('{"state":"running"}')).toBeNull();
+    expect(parseStatusOutput('{"state":"running","pid":"42"}')).toBeNull();
+  });
+
+  it("returns null on malformed JSON", () => {
+    expect(parseStatusOutput("")).toBeNull();
+    expect(parseStatusOutput("not json")).toBeNull();
+    expect(parseStatusOutput("{")).toBeNull();
+  });
+
+  it("returns null when state is something unexpected", () => {
+    expect(parseStatusOutput('{"state":"weird","pid":99}')).toBeNull();
+  });
+});
+
 
 describe("enrichedPath", () => {
   it("appends ~/.local/bin, /opt/homebrew/bin, /usr/local/bin", () => {

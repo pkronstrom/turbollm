@@ -8,7 +8,7 @@ import {
 } from "@raycast/api";
 import { spawn } from "child_process";
 import { homedir } from "os";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { clearStickies, getSticky, setSticky } from "../lib/stickies";
 import { Workflow, WorkflowParam } from "../lib/workflows";
 
@@ -75,26 +75,68 @@ export function getAllowedExtensions(param: WorkflowParam): string[] | undefined
   return undefined;
 }
 
+// ── Status polling ─────────────────────────────────────────────────────────────
+
 /**
- * Normalize a stored sticky value for `<Form.FilePicker>`'s `defaultValue`,
- * which expects `string[]` (or `undefined` to skip).
+ * Parse `turbo workflows status <name> --json` output.
  *
- * Raycast's FilePicker submits values as `string[]`, but our setSticky stores
- * via `LocalStorage.setItem<string>` — so older stickies from this extension
- * may have landed as either:
- *   - a JSON-encoded array (when the raw submit value flowed through unchanged)
- *   - a plain string path (when the value was coerced via template literal)
- * Accept both shapes and produce a `string[]` for the FilePicker.
+ * Returns the holder PID when the workflow is running, or `null` for idle /
+ * malformed payloads. We swallow JSON errors here so a transient bad parse
+ * never knocks the polling hook into an error state — the next tick will
+ * see a clean payload.
  */
-export function filePickerDefault(raw: unknown): string[] | undefined {
-  if (Array.isArray(raw)) {
-    const paths = raw.filter((p): p is string => typeof p === "string" && p.length > 0);
-    return paths.length ? paths : undefined;
+export function parseStatusOutput(raw: string): number | null {
+  try {
+    const info = JSON.parse(raw) as { state?: string; pid?: number | null };
+    if (info.state === "running" && typeof info.pid === "number") return info.pid;
+    return null;
+  } catch {
+    return null;
   }
-  if (typeof raw === "string" && raw.length > 0) {
-    return [raw];
-  }
-  return undefined;
+}
+
+/** Default polling interval; can be overridden by tests. */
+export const STATUS_POLL_INTERVAL_MS = 1500;
+
+/**
+ * Poll `turbo workflows status <name> --json` and report the holder PID.
+ *
+ * Returns `null` while idle, the integer PID while running. The first poll
+ * fires immediately; subsequent polls are spaced by `STATUS_POLL_INTERVAL_MS`.
+ * Cleans up the interval and ignores in-flight responses after unmount.
+ */
+export function useRunningPid(turboPath: string, workflowName: string): number | null {
+  const [pid, setPid] = useState<number | null>(null);
+  const aliveRef = useRef(true);
+
+  useEffect(() => {
+    aliveRef.current = true;
+    if (!turboPath) return;
+
+    const tick = () => {
+      const proc = spawn(turboPath, ["workflows", "status", workflowName, "--json"], {
+        env: { ...process.env, PATH: enrichedPath(process.env.PATH, homedir()) },
+      });
+      let out = "";
+      proc.stdout.on("data", (c: Buffer) => (out += c.toString()));
+      proc.on("close", () => {
+        if (!aliveRef.current) return;
+        setPid(parseStatusOutput(out));
+      });
+      proc.on("error", () => {
+        // turbo binary missing or unspawnable — keep last value, retry next tick.
+      });
+    };
+
+    tick();
+    const id = setInterval(tick, STATUS_POLL_INTERVAL_MS);
+    return () => {
+      aliveRef.current = false;
+      clearInterval(id);
+    };
+  }, [turboPath, workflowName]);
+
+  return pid;
 }
 
 // ── Component ──────────────────────────────────────────────────────────────────
@@ -107,6 +149,8 @@ interface WorkflowFormProps {
 export function WorkflowForm({ workflow, turboPath }: WorkflowFormProps) {
   const { pop } = useNavigation();
   const [defaults, setDefaults] = useState<Record<string, string>>({});
+  const runningPid = useRunningPid(turboPath, workflow.name);
+  const isRunning = runningPid !== null;
 
   useEffect(() => {
     async function loadStickies() {
@@ -172,11 +216,32 @@ export function WorkflowForm({ workflow, turboPath }: WorkflowFormProps) {
     }
   }
 
+  async function handleStop() {
+    if (!runningPid) return;
+    const toast = await showToast({
+      style: Toast.Style.Animated,
+      title: `Stopping ${workflow.name}…`,
+    });
+    try {
+      await runSubprocess(turboPath, ["workflows", "stop", workflow.name]);
+      toast.style = Toast.Style.Success;
+      toast.title = `${workflow.name} stop signaled`;
+    } catch (err) {
+      toast.style = Toast.Style.Failure;
+      toast.title = `Couldn't stop ${workflow.name}`;
+      toast.message = String(err);
+    }
+  }
+
   return (
     <Form
       actions={
         <ActionPanel>
-          <Action.SubmitForm title="Run" onSubmit={handleSubmit} />
+          {isRunning ? (
+            <Action title={`Stop (pid ${runningPid})`} onAction={handleStop} />
+          ) : (
+            <Action.SubmitForm title="Run" onSubmit={handleSubmit} />
+          )}
           <Action
             title="Reset Stickies"
             onAction={async () => {
@@ -238,26 +303,31 @@ function renderField(param: WorkflowParam, defaults: Record<string, string>) {
         </Form.Dropdown>
       );
     case "file":
-      return (
-        <Form.FilePicker
-          key={param.name}
-          id={param.name}
-          title={param.name}
-          allowMultipleSelection={false}
-          extensions={getAllowedExtensions(param)}
-          defaultValue={filePickerDefault(defaults[param.name])}
-        />
-      );
     case "directory":
+      // Once a sticky value exists, render as a TextField. Reason: Raycast's
+      // FilePicker steals Enter to open the picker dialog, so the happy path
+      // (open form → Enter → run) is broken whenever a file/directory field
+      // is in the form. After the first pick, the path is known — the user
+      // can edit the string directly and Enter submits.
+      if (defaults[param.name]) {
+        return (
+          <Form.TextField
+            key={param.name}
+            id={param.name}
+            title={param.name}
+            defaultValue={defaults[param.name]}
+          />
+        );
+      }
       return (
         <Form.FilePicker
           key={param.name}
           id={param.name}
           title={param.name}
           allowMultipleSelection={false}
-          canChooseFiles={false}
-          canChooseDirectories
-          defaultValue={filePickerDefault(defaults[param.name])}
+          canChooseFiles={param.type === "file"}
+          canChooseDirectories={param.type === "directory"}
+          extensions={param.type === "file" ? getAllowedExtensions(param) : undefined}
         />
       );
     default:
