@@ -1435,62 +1435,24 @@ def raycast_sync(extension_dir, quiet):
 # Maintenance: turbo prune
 # ---------------------------------------------------------------------------
 
-def _parse_duration_days(value: str) -> int:
-    """Parse a duration string (Nd, Nw, Nm, Ny) into a number of days.
-
-    Raises ValueError on invalid input.
-    """
-    import re as _re
-    m = _re.fullmatch(r"(\d+)([dwmy])", value)
-    if not m:
-        raise ValueError(f"invalid duration '{value}'")
-    n, unit = int(m.group(1)), m.group(2)
-    return n * {"d": 1, "w": 7, "m": 30, "y": 365}[unit]
+_PRUNE_CATEGORY_LABELS = {
+    "recordings": "Recordings (transcribed)",
+    "activities": "Stale activity files",
+    "locks": "Stale workflow locks",
+    "session_dirs": "Orphaned screen-recording dirs",
+}
 
 
-def _slug_candidate_files(audio_dir: Path, vault: Path, slug: str) -> list[Path]:
-    """Return existing candidate files/dirs for a slug."""
-    candidates = [
-        audio_dir / f"{slug}.wav",
-        vault / "Meetings" / f"{slug}.md",
-        vault / "Meetings" / f"{slug}.raw.md",
-        vault / "Meetings" / "attachments" / slug,
-    ]
-    return [p for p in candidates if p.exists()]
-
-
-def _path_size(p: Path) -> int:
-    """Return the size in bytes of a file or a directory tree."""
-    if p.is_dir():
-        return sum(f.stat().st_size for f in p.rglob("*") if f.is_file())
-    return p.stat().st_size
-
-
-def _discover_prune_slugs(audio_dir: Path, vault: Path) -> dict[str, float]:
-    """Return slug → mtime mapping from audio files and vault markdown (orphans included)."""
-    slugs: dict[str, float] = {}
-    if audio_dir.exists():
-        for wav in audio_dir.glob("*.wav"):
-            slugs[wav.stem] = wav.stat().st_mtime
-    meetings = vault / "Meetings"
-    if meetings.exists():
-        for md in meetings.glob("*.md"):
-            if md.name.endswith(".raw.md"):
-                continue
-            if md.stem not in slugs:
-                slugs[md.stem] = md.stat().st_mtime
-    return slugs
+def _format_bytes(n: int) -> str:
+    if n >= 1024 * 1024:
+        return f"{n / 1024 / 1024:.1f} MB"
+    if n >= 1024:
+        return f"{n / 1024:.1f} KB"
+    return f"{n} B"
 
 
 @cli.command(name="prune")
-@click.option(
-    "--older-than", default=None, metavar="DURATION",
-    help="Prune recordings older than DURATION (e.g. 7d, 2w, 3m, 1y).",
-)
-@click.option(
-    "--keep-last", default=None, type=int, metavar="N",
-    help="Keep the N newest recordings; prune the rest.",
-)
+@click.option("--dry-run", is_flag=True, help="Print what would be removed, do not delete.")
 @click.option(
     "--vault", default=None, type=click.Path(),
     help="Obsidian vault path (default: $OBSIDIAN_VAULT or ~/Documents/Obsidian).",
@@ -1499,87 +1461,68 @@ def _discover_prune_slugs(audio_dir: Path, vault: Path) -> dict[str, float]:
     "--audio-dir", default=None, type=click.Path(),
     help="Audio files directory (default: $TURBO_AUDIO_INBOX or ~/Recordings/turbo).",
 )
-@click.option("--apply", is_flag=True, help="Delete the listed files (default: dry-run).")
-def prune_cmd(older_than, keep_last, vault, audio_dir, apply):
-    """Housekeeping: prune old recordings and their markdown + attachments.
+def prune_cmd(dry_run, vault, audio_dir):
+    """Remove turbollm's intermediate artifacts (safe by default).
+
+    \b
+    Cleans up four categories:
+      - recordings:   .wav files whose transcript is already in the vault
+      - activities:   ~/.turbollm/state/*.json with no live owner_pid
+      - locks:        ~/.turbollm/run/*.lock that are unheld + at least 1h old
+      - session_dirs: orphaned screen-recording temp directories (>1h old)
+
+    Never touches anything under the Obsidian vault or files held by a
+    live process.
 
     \b
     Examples:
-      turbo prune --older-than 7d            # list recordings older than 7 days
-      turbo prune --older-than 7d --apply    # delete them
-      turbo prune --keep-last 10             # list all but the 10 newest
-      turbo prune --keep-last 10 --apply     # delete all but the 10 newest
+      turbo prune --dry-run     # preview what would be removed
+      turbo prune               # delete
     """
-    import shutil
+    from turbollm import prune as _prune
 
-    if older_than is not None and keep_last is not None:
-        click.echo("--older-than and --keep-last are mutually exclusive", err=True)
-        raise SystemExit(1)
-    if older_than is None and keep_last is None:
-        click.echo("must specify one of --older-than or --keep-last", err=True)
-        raise SystemExit(1)
+    vault_path = Path(vault) if vault else _prune.default_vault()
+    audio_path = Path(audio_dir) if audio_dir else _prune.default_recordings_dir()
 
-    threshold_days: int | None = None
-    if older_than is not None:
-        try:
-            threshold_days = _parse_duration_days(older_than)
-        except ValueError as exc:
-            click.echo(str(exc), err=True)
-            raise SystemExit(1) from None
-
-    vault_path = Path(vault) if vault else Path(
-        os.environ.get("OBSIDIAN_VAULT", str(Path.home() / "Documents" / "Obsidian"))
-    )
-    audio_path = Path(audio_dir) if audio_dir else Path(
-        os.environ.get("TURBO_AUDIO_INBOX", str(Path.home() / "Recordings" / "turbo"))
+    targets = _prune.gather_prune_targets(
+        recordings_dir=audio_path,
+        vault=vault_path,
     )
 
-    slugs = _discover_prune_slugs(audio_path, vault_path)
-
-    now = time.time()
-    if threshold_days is not None:
-        threshold_secs = threshold_days * 86400
-        eligible = sorted(s for s, mtime in slugs.items() if (now - mtime) > threshold_secs)
-    else:
-        sorted_slugs = sorted(slugs.items(), key=lambda x: x[1], reverse=True)
-        eligible = sorted(s for s, _ in sorted_slugs[keep_last:])
-
-    if not eligible:
-        console.print("[dim]No recordings match the prune criteria.[/dim]")
+    total_count = sum(len(items) for items in targets.values())
+    if total_count == 0:
+        console.print("[dim]Nothing to prune.[/dim]")
         return
 
-    rows: list[tuple[str, int, int]] = []
-    total_size = 0
-    for slug in eligible:
-        files = _slug_candidate_files(audio_path, vault_path, slug)
-        size = sum(_path_size(f) for f in files)
-        rows.append((slug, size, len(files)))
-        total_size += size
+    table = Table(show_header=True, title="Prune candidates", title_justify="left")
+    table.add_column("Category", style="bold")
+    table.add_column("Count", justify="right")
+    table.add_column("Size", justify="right")
+    grand_total = 0
+    for category in _prune.CATEGORY_ORDER:
+        items = targets.get(category, [])
+        if not items:
+            continue
+        size = sum(t.size_bytes for t in items)
+        grand_total += size
+        table.add_row(_PRUNE_CATEGORY_LABELS[category], str(len(items)), _format_bytes(size))
+    console.print(table)
+    console.print(f"[bold]Total:[/bold] {_format_bytes(grand_total)}")
 
-    for slug, size, n_files in rows:
-        click.echo(f"{slug}  {size}  {n_files}")
-    click.echo("---")
-    click.echo(f"Total: {total_size} bytes, {len(rows)} recording(s)")
-
-    if not apply:
+    if dry_run:
+        # Show individual paths so the user can audit.
+        for category in _prune.CATEGORY_ORDER:
+            items = targets.get(category, [])
+            if not items:
+                continue
+            console.print(f"\n[bold]{_PRUNE_CATEGORY_LABELS[category]}[/bold]")
+            for t in items:
+                console.print(f"  {t.path}  [dim]({_format_bytes(t.size_bytes)})[/dim]")
         return
 
-    freed = 0
-    deleted = 0
-    for slug, size, _ in rows:
-        files = _slug_candidate_files(audio_path, vault_path, slug)
-        for f in files:
-            try:
-                if f.is_dir():
-                    shutil.rmtree(f)
-                else:
-                    f.unlink()
-            except OSError:
-                pass
-        freed += size
-        deleted += 1
-
-    console.print(f"[green]Deleted {deleted} slug(s), freed {freed / 1e6:.1f} MB[/green]")
+    all_targets = [t for items in targets.values() for t in items]
+    deleted, freed = _prune.execute_prune(all_targets)
+    console.print(f"[green]Deleted {deleted} item(s), freed {_format_bytes(freed)}[/green]")
 
 
 if __name__ == "__main__":
