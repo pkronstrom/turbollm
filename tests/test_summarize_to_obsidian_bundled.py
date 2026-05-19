@@ -110,15 +110,15 @@ def _run_bundled_script(
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
 
-    # Write segments JSON to a file so the stub can cat it (avoids quoting issues).
-    segments_file = tmp_path / "segments.json"
-    segments_file.write_text(segments_json)
+    # Workflow now calls `turbo transcribe --format verbose_json <file>` once
+    # and extracts both text + segments from a single blob. The stub emits the
+    # combined JSON shape.
+    blob = json.dumps({"text": "Stub transcript text.", "segments": json.loads(segments_json)})
+    blob_file = tmp_path / "blob.json"
+    blob_file.write_text(blob)
 
     _make_stub(bin_dir, "turbo", f"""\
-case "$2" in
-  --format) cat '{segments_file}' ;;
-  *) printf '%s' 'Stub transcript text.' ;;
-esac
+cat '{blob_file}'
 """)
 
     _make_stub(bin_dir, "pi", f"printf '%s' '{summary_text}'\n")

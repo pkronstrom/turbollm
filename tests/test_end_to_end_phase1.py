@@ -110,16 +110,12 @@ def test_record_to_obsidian_produces_md_and_raw_md(tmp_path):
     _make_stub(bin_dir, "turbo-acquirer", f"printf '%s' '{fake_wav}'\n")
 
     # turbo stub: handles both plain transcribe and --format segments.
-    _make_stub(bin_dir, "turbo", f"""\
-case "$2" in
-  --format)
-    printf '%s' '{FAKE_SEGMENTS}'
-    ;;
-  *)
-    printf '%s' 'Hello Phase 1. One minute mark.'
-    ;;
-esac
-""")
+    blob_file = tmp_path / "blob.json"
+    blob_file.write_text(json.dumps({
+        "text": "Hello Phase 1. One minute mark.",
+        "segments": json.loads(FAKE_SEGMENTS),
+    }))
+    _make_stub(bin_dir, "turbo", f"cat '{blob_file}'\n")
 
     # pi stub: echo a fake summary.
     _make_stub(bin_dir, "pi", "printf '%s' 'Fake AI summary of the meeting.'\n")
@@ -167,16 +163,12 @@ def test_record_to_obsidian_raw_md_has_timestamp_lines(tmp_path):
     fake_wav.write_bytes(b"RIFF")
 
     _make_stub(bin_dir, "turbo-acquirer", f"printf '%s' '{fake_wav}'\n")
-    _make_stub(bin_dir, "turbo", f"""\
-case "$2" in
-  --format)
-    printf '%s' '{FAKE_SEGMENTS}'
-    ;;
-  *)
-    printf '%s' 'Hello Phase 1. One minute mark.'
-    ;;
-esac
-""")
+    blob_file = tmp_path / "blob.json"
+    blob_file.write_text(json.dumps({
+        "text": "Hello Phase 1. One minute mark.",
+        "segments": json.loads(FAKE_SEGMENTS),
+    }))
+    _make_stub(bin_dir, "turbo", f"cat '{blob_file}'\n")
     _make_stub(bin_dir, "pi", "printf '%s' 'Summary.'\n")
 
     vault = tmp_path / "vault"

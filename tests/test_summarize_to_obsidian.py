@@ -90,20 +90,17 @@ def _run_script(
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
 
-    # Stub `turbo`: handles `transcribe --format segments` and plain `transcribe`.
-    # The script calls `turbo transcribe "$1"` and `turbo transcribe --format segments "$1"`.
-    _make_stub(bin_dir, "turbo", f"""\
-case "$2" in
-  --format)
-    # `turbo transcribe --format segments <file>`
-    printf '%s' '{segments_json}'
-    ;;
-  *)
-    # `turbo transcribe <file>`
-    printf '%s' '{transcript_text}'
-    ;;
-esac
-""")
+    # Workflow now calls `turbo transcribe --format verbose_json <file>` once
+    # and parses text + segments from the same blob. The stub returns the
+    # combined shape regardless of args.
+    blob_payload = json.dumps({
+        "text": transcript_text,
+        "segments": json.loads(segments_json),
+    })
+    blob_file = tmp_path / "blob.json"
+    blob_file.write_text(blob_payload)
+
+    _make_stub(bin_dir, "turbo", f"cat '{blob_file}'\n")
 
     # Stub `pi`: just echo the summary text regardless of input.
     _make_stub(bin_dir, "pi", f"printf '%s' '{summary_text}'\n")

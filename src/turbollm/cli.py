@@ -562,9 +562,12 @@ def transcribe(audio_file, model, language, response_format, port):
             # Emit the segments array as pretty-printed JSON.
             segments = data.get("segments")
             if segments is None:
-                # Older mlx-audio versions may not return verbose_json segments.
+                # Older mlx-audio versions, or transient backend behavior where
+                # segments[] is omitted. Log the response keys so we can tell
+                # text-only-payload from some other shape next time it happens.
+                keys = sorted(data.keys()) if isinstance(data, dict) else type(data).__name__
                 sys.stderr.write(
-                    "warning: mlx-audio did not return verbose_json segments\n"
+                    f"warning: mlx-audio did not return verbose_json segments (response keys: {keys})\n"
                 )
                 segments = [{"start": 0, "end": None, "text": data.get("text", "")}]
             sys.stdout.write(json.dumps(segments, indent=2, ensure_ascii=False) + "\n")

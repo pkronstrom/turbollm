@@ -359,24 +359,33 @@ out="$vault/Meetings/$slug.md"
 raw_out="$vault/Meetings/$slug.raw.md"
 mkdir -p "$(dirname "$out")"
 
-# Capture plain-text transcript for the summary LLM prompt.
-transcript="$(turbo transcribe "$audio_file")"
+# Single transcribe call: ask for the full verbose_json blob and extract both
+# the plain-text transcript (for the LLM prompt) and segments[] (for .raw.md)
+# from one mlx-audio response. Avoids paying the parakeet-v3 model load twice.
+blob="$(turbo transcribe --format verbose_json "$audio_file")"
+transcript="$(printf '%s' "$blob" | python3 -c "import json,sys; print(json.load(sys.stdin).get('text','').strip())")"
+segments_json="$(printf '%s' "$blob" | python3 -c "import json,sys; print(json.dumps(json.load(sys.stdin).get('segments') or []))")"
 
-# Capture segmented transcript (JSON array) for the .raw.md companion file.
-segments_json="$(turbo transcribe --format segments "$audio_file")"
-
-# Write .raw.md: [mm:ss] <text> lines from the segments JSON.
-# python3 is always available on macOS; no extra dependencies needed.
-printf '%s' "$segments_json" | python3 -c "
-import json, sys, math
-segs = json.load(sys.stdin)
+# Write .raw.md: [mm:ss] <text> lines from the segments JSON. mlx-audio's
+# parakeet backend sometimes returns text without segment timestamps; in that
+# case we fall back to a single [00:00] line carrying the full transcript so
+# the .raw.md companion is never empty.
+SEGMENTS_JSON="$segments_json" TRANSCRIPT="$transcript" python3 -c '
+import json, math, os, sys
+segs = json.loads(os.environ["SEGMENTS_JSON"])
+if not segs:
+    print("warning: mlx-audio returned no segments; emitting single-segment fallback", file=sys.stderr)
+    text = os.environ.get("TRANSCRIPT", "").strip()
+    if text:
+        print(f"[00:00] {text}")
+    sys.exit(0)
 for seg in segs:
-    start = seg.get('start') or 0
+    start = seg.get("start") or 0
     mm = math.floor(start / 60)
     ss = math.floor(start % 60)
-    text = seg.get('text', '').strip()
-    print(f'[{mm:02d}:{ss:02d}] {text}')
-" > "$raw_out"
+    text = (seg.get("text") or "").strip()
+    print(f"[{mm:02d}:{ss:02d}] {text}")
+' > "$raw_out"
 
 summary="$(printf '%s' "$transcript" | pi --no-extensions \
   --system-prompt 'You are a note-taking assistant. The user records audio of varied content: meetings, lectures, voice memos, brainstorms, interviews, walking thoughts. Produce a faithful markdown summary that will land in their Obsidian vault. The transcript on stdin is authoritative ground truth — base every claim on it. Never reference yourself, the user, "the workspace", "the message", "the snippet", or your own context. Output markdown only, with no preamble or sign-off.' \
@@ -423,11 +432,12 @@ raw_out="$vault/Meetings/$slug.raw.md"
 attachments="$vault/Meetings/attachments/$slug"
 mkdir -p "$(dirname "$out")" "$attachments"
 
-# Capture plain-text transcript for the summary LLM prompt.
-transcript="$(turbo transcribe "$audio_file")"
-
-# Capture segmented transcript (JSON array) for interleaving.
-segments_json="$(turbo transcribe --format segments "$audio_file")"
+# Single transcribe call: extract text + segments from one verbose_json blob
+# to avoid paying the parakeet-v3 model load twice (see summarize-to-obsidian
+# for the same pattern).
+blob="$(turbo transcribe --format verbose_json "$audio_file")"
+transcript="$(printf '%s' "$blob" | python3 -c "import json,sys; print(json.load(sys.stdin).get('text','').strip())")"
+segments_json="$(printf '%s' "$blob" | python3 -c "import json,sys; print(json.dumps(json.load(sys.stdin).get('segments') or []))")"
 
 # Summarise.
 summary="$(printf '%s' "$transcript" | pi --no-extensions \
@@ -448,6 +458,7 @@ summary="$(printf '%s' "$transcript" | pi --no-extensions \
 
 # Copy PNGs to attachments dir, then delete temp source dir, then write .raw.md.
 SEGMENTS_JSON="$segments_json" \
+TRANSCRIPT="$transcript" \
 MANIFEST_JSON="$manifest_json" \
 AUDIO_MANIFEST_JSON="$audio_manifest_json" \
 ATTACHMENTS="$attachments" \
@@ -467,6 +478,14 @@ slug          = os.environ['SLUG']
 raw_out       = os.environ['RAW_OUT']
 audio         = os.environ['AUDIO_FILE']
 summary       = os.environ['SUMMARY']
+transcript    = os.environ.get('TRANSCRIPT', '').strip()
+
+# Fallback when mlx-audio returned text without segment timestamps: synthesize
+# a single segment at start=0 carrying the full transcript, so the interleaved
+# .raw.md still has the spoken content (just without finer-grained timing).
+if not segs and transcript:
+    print("warning: mlx-audio returned no segments; emitting single-segment fallback", file=sys.stderr)
+    segs = [{"start": 0, "text": transcript}]
 
 # Screen keyframe time origin relative to T0.
 screen_start_offset_ms = manifest.get('start_offset_ms', 0)
