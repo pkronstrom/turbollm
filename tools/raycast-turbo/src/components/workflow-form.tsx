@@ -7,6 +7,7 @@ import {
   useNavigation,
 } from "@raycast/api";
 import { spawn } from "child_process";
+import { homedir } from "os";
 import { useEffect, useState } from "react";
 import { clearStickies, getSticky, setSticky } from "../lib/stickies";
 import { Workflow, WorkflowParam } from "../lib/workflows";
@@ -273,18 +274,51 @@ function renderField(param: WorkflowParam, defaults: Record<string, string>) {
 
 // ── Subprocess helper ──────────────────────────────────────────────────────────
 
+/**
+ * Build a PATH that includes the typical locations Raycast's stripped login
+ * env misses: Homebrew (`/opt/homebrew/bin` on Apple Silicon,
+ * `/usr/local/bin` on Intel) and the user's `~/.local/bin`. Workflow scripts
+ * spawn `pi`, `turbo`, `ffmpeg`, etc. by bare name; without these prefixes
+ * the scripts fail with command-not-found and `set -e` aborts with the
+ * next command's exit code (Click commonly yields 2 for "usage error").
+ */
+export function enrichedPath(envPath: string | undefined, home: string): string {
+  const extras = [`${home}/.local/bin`, "/opt/homebrew/bin", "/usr/local/bin"];
+  const existing = (envPath ?? "").split(":").filter(Boolean);
+  const seen = new Set(existing);
+  for (const p of extras) {
+    if (!seen.has(p)) {
+      existing.push(p);
+      seen.add(p);
+    }
+  }
+  return existing.join(":");
+}
+
 function runSubprocess(execPath: string, args: string[]): Promise<void> {
   return new Promise((resolve, reject) => {
-    const proc = spawn(execPath, args);
+    const env: NodeJS.ProcessEnv = {
+      ...process.env,
+      PATH: enrichedPath(process.env.PATH, homedir()),
+    };
+    const proc = spawn(execPath, args, { env });
     let stderr = "";
+    let stdout = "";
     proc.stderr.on("data", (chunk: Buffer) => {
       stderr += chunk.toString();
+    });
+    proc.stdout.on("data", (chunk: Buffer) => {
+      stdout += chunk.toString();
     });
     proc.on("close", (code: number | null) => {
       if (code === 0) {
         resolve();
       } else {
-        reject(new Error(stderr.trim() || `exited with code ${code ?? "unknown"}`));
+        // Surface stderr first (the usual error channel); fall back to
+        // stdout (some Click errors emit there) before reporting just the
+        // bare exit code.
+        const detail = [stderr.trim(), stdout.trim()].filter(Boolean).join("\n---\n");
+        reject(new Error(detail || `exited with code ${code ?? "unknown"}`));
       }
     });
     proc.on("error", reject);

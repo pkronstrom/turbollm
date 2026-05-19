@@ -237,3 +237,50 @@ describe("buildArgsForSubmit with array values (FilePicker submits)", () => {
     ]);
   });
 });
+
+
+// ── enrichedPath ──────────────────────────────────────────────────────────────
+//
+// Raycast's stripped login env typically lacks `/opt/homebrew/bin` and
+// `~/.local/bin`. Scripts that shell out to `pi`, `turbo`, etc. by bare
+// name fail with command-not-found and `set -e` aborts. Augment PATH at
+// the spawn layer so workflow scripts find the expected binaries.
+
+import { enrichedPath } from "../src/components/workflow-form";
+
+describe("enrichedPath", () => {
+  it("appends ~/.local/bin, /opt/homebrew/bin, /usr/local/bin", () => {
+    const result = enrichedPath("/usr/bin:/bin", "/Users/test");
+    const parts = result.split(":");
+    expect(parts).toContain("/Users/test/.local/bin");
+    expect(parts).toContain("/opt/homebrew/bin");
+    expect(parts).toContain("/usr/local/bin");
+  });
+
+  it("preserves existing PATH entries first", () => {
+    const result = enrichedPath("/usr/bin:/bin", "/Users/test");
+    const parts = result.split(":");
+    expect(parts[0]).toBe("/usr/bin");
+    expect(parts[1]).toBe("/bin");
+  });
+
+  it("does not duplicate entries already present", () => {
+    const result = enrichedPath("/opt/homebrew/bin:/usr/bin", "/Users/test");
+    const parts = result.split(":");
+    expect(parts.filter((p) => p === "/opt/homebrew/bin")).toHaveLength(1);
+  });
+
+  it("handles undefined PATH (no existing entries)", () => {
+    const result = enrichedPath(undefined, "/Users/test");
+    expect(result).toBe(
+      "/Users/test/.local/bin:/opt/homebrew/bin:/usr/local/bin"
+    );
+  });
+
+  it("handles empty PATH", () => {
+    const result = enrichedPath("", "/Users/test");
+    expect(result).toBe(
+      "/Users/test/.local/bin:/opt/homebrew/bin:/usr/local/bin"
+    );
+  });
+});

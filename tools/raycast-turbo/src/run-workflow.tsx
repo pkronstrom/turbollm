@@ -73,6 +73,14 @@ export default function RunWorkflow() {
     );
   }
 
+  // When launched via a per-workflow Raycast command (record-to-obsidian,
+  // transcribe-file, etc.), show a Detail loading view rather than the full
+  // workflows list. Avoids a brief flash of the list before the useEffect
+  // pushes the form on top.
+  if (preselectedName) {
+    return <Detail isLoading={workflows === null} markdown="Loading…" />;
+  }
+
   return (
     <List isLoading={workflows === null}>
       {(workflows ?? []).map((wf) => (
