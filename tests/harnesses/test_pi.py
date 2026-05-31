@@ -17,7 +17,7 @@ def test_pi_harness_launches_mlx_vlm_gemma_with_thinking_disabled(tmp_path, monk
             "thinking_format": "qwen",
         },
     }
-    model_id = "/Users/pkronstrom/.models/mlx-community/gemma-4-26b-a4b-it-6bit"
+    model_id = "/tmp/models/mlx-community/gemma-4-26b-a4b-it-6bit"
 
     with patch("subprocess.run") as run:
         harness.launch(model_id, 8899, model)

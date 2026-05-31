@@ -71,7 +71,7 @@ class TestIsAvailable:
 
 **Step 2: Run tests to verify they fail**
 
-Run: `cd /Users/pkronstrom/Projects/own/turbollm && python -m pytest tests/providers/test_omlx.py -v`
+Run: `cd <repo> && python -m pytest tests/providers/test_omlx.py -v`
 Expected: FAIL — `ModuleNotFoundError: No module named 'turbollm.providers.omlx'`
 
 **Step 3: Write minimal implementation**
@@ -99,7 +99,7 @@ class OmlxProvider:
 
 **Step 4: Run tests to verify they pass**
 
-Run: `cd /Users/pkronstrom/Projects/own/turbollm && python -m pytest tests/providers/test_omlx.py -v`
+Run: `cd <repo> && python -m pytest tests/providers/test_omlx.py -v`
 Expected: PASS (4 tests)
 
 **Step 5: Commit**
@@ -170,7 +170,7 @@ class TestRemoveSymlink:
 
 **Step 2: Run tests to verify they fail**
 
-Run: `cd /Users/pkronstrom/Projects/own/turbollm && python -m pytest tests/providers/test_omlx.py -v -k "Symlink or Remove"`
+Run: `cd <repo> && python -m pytest tests/providers/test_omlx.py -v -k "Symlink or Remove"`
 Expected: FAIL — `AttributeError: 'OmlxProvider' has no attribute '_ensure_symlink'`
 
 **Step 3: Write implementation**
@@ -195,7 +195,7 @@ def _remove_symlink(self, model: dict) -> None:
 
 **Step 4: Run tests to verify they pass**
 
-Run: `cd /Users/pkronstrom/Projects/own/turbollm && python -m pytest tests/providers/test_omlx.py -v`
+Run: `cd <repo> && python -m pytest tests/providers/test_omlx.py -v`
 Expected: PASS (8 tests)
 
 **Step 5: Commit**
@@ -264,7 +264,7 @@ class TestBuildServeCmd:
 
 **Step 2: Run tests to verify they fail**
 
-Run: `cd /Users/pkronstrom/Projects/own/turbollm && python -m pytest tests/providers/test_omlx.py::TestBuildServeCmd -v`
+Run: `cd <repo> && python -m pytest tests/providers/test_omlx.py::TestBuildServeCmd -v`
 Expected: FAIL
 
 **Step 3: Write implementation**
@@ -312,7 +312,7 @@ def build_serve_cmd(self, model: dict, port: int) -> list[str]:
 
 **Step 4: Run tests to verify they pass**
 
-Run: `cd /Users/pkronstrom/Projects/own/turbollm && python -m pytest tests/providers/test_omlx.py -v`
+Run: `cd <repo> && python -m pytest tests/providers/test_omlx.py -v`
 Expected: PASS (11 tests)
 
 **Step 5: Commit**
@@ -366,7 +366,7 @@ class TestIsDownloaded:
 
 **Step 2: Run tests to verify they fail**
 
-Run: `cd /Users/pkronstrom/Projects/own/turbollm && python -m pytest tests/providers/test_omlx.py::TestIsDownloaded -v`
+Run: `cd <repo> && python -m pytest tests/providers/test_omlx.py::TestIsDownloaded -v`
 Expected: FAIL
 
 **Step 3: Write implementation**
@@ -435,7 +435,7 @@ def pull(self, model: dict) -> None:
 
 **Step 4: Run tests to verify they pass**
 
-Run: `cd /Users/pkronstrom/Projects/own/turbollm && python -m pytest tests/providers/test_omlx.py -v`
+Run: `cd <repo> && python -m pytest tests/providers/test_omlx.py -v`
 Expected: PASS (14 tests)
 
 **Step 5: Commit**
@@ -469,7 +469,7 @@ def get_provider(backend: str) -> Provider:
 
 **Step 2: Verify import works**
 
-Run: `cd /Users/pkronstrom/Projects/own/turbollm && python -c "from turbollm.providers import get_provider; p = get_provider('omlx'); print(p.name)"`
+Run: `cd <repo> && python -c "from turbollm.providers import get_provider; p = get_provider('omlx'); print(p.name)"`
 Expected: `omlx`
 
 **Step 3: Commit**
@@ -523,12 +523,12 @@ tags = ["coding", "moe"]
 
 **Step 2: Verify TOML parses**
 
-Run: `cd /Users/pkronstrom/Projects/own/turbollm && python -c "import tomllib; d = tomllib.loads(open('models.toml').read()); print(list(d['models'].keys())); print(list(d['harnesses'].keys()))"`
+Run: `cd <repo> && python -c "import tomllib; d = tomllib.loads(open('models.toml').read()); print(list(d['models'].keys())); print(list(d['harnesses'].keys()))"`
 Expected: model and harness lists including the new entries
 
 **Step 3: Verify `turbo ls -a` shows the new model**
 
-Run: `cd /Users/pkronstrom/Projects/own/turbollm && python -m turbollm.cli ls -a`
+Run: `cd <repo> && python -m turbollm.cli ls -a`
 Expected: table includes `qwen36-35b-omlx-4bit` with backend `omlx`
 
 **Step 4: Commit**
@@ -543,17 +543,17 @@ feat: add oMLX defaults, Pi.dev harness, and oMLX model entry to models.toml
 
 **Step 1: Verify provider integration end-to-end**
 
-Run: `cd /Users/pkronstrom/Projects/own/turbollm && python -m pytest tests/ -v`
+Run: `cd <repo> && python -m pytest tests/ -v`
 Expected: All tests pass
 
 **Step 2: Verify CLI lists everything correctly**
 
-Run: `cd /Users/pkronstrom/Projects/own/turbollm && python -m turbollm.cli ls -a`
+Run: `cd <repo> && python -m turbollm.cli ls -a`
 Expected: All 3 models shown (vllm-mlx, gguf, omlx)
 
 **Step 3: Verify harness commands are discovered**
 
-Run: `cd /Users/pkronstrom/Projects/own/turbollm && python -m turbollm.cli --help`
+Run: `cd <repo> && python -m turbollm.cli --help`
 Expected: `pi` appears in the command list alongside opencode, hermes, goose, etc.
 
 **Step 4: Final commit**

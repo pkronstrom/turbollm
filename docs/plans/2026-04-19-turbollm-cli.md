@@ -21,7 +21,7 @@
 **Step 1: Init git repo**
 
 ```bash
-cd /Users/pkronstrom/Projects/own/turbollm
+cd <repo>
 git init
 ```
 
@@ -87,7 +87,7 @@ if __name__ == "__main__":
 **Step 6: Verify it installs and runs**
 
 ```bash
-cd /Users/pkronstrom/Projects/own/turbollm
+cd <repo>
 uv venv && uv pip install -e ".[serve]"
 uv run turbo --help
 ```
@@ -487,7 +487,7 @@ git commit -m "feat: turbo opencode command"
 **Step 1: Test full install as uv tool**
 
 ```bash
-cd /Users/pkronstrom/Projects/own/turbollm
+cd <repo>
 uv tool install -e ".[serve]"
 turbo --help
 turbo ls -a
