@@ -1,5 +1,7 @@
 # turbollm
 
+> ⚠️ **Early-stage project.** This is actively under development and rough around the edges — APIs, defaults, and command surface may shift between releases. Tested on the author's machine; mileage may vary. Issues and PRs welcome.
+
 Ollama-like CLI for local LLM serving on Apple Silicon. Supports multiple backends (vllm-mlx, llama-server) and multiple agent harnesses (opencode, hermes, goose, codex, aichat, qwen-code) with a unified interface.
 
 ## Install

@@ -1,6 +1,6 @@
 [project]
 name = "turbollm"
-version = "0.2.0"
+version = "0.1.0"
 description = "Ollama-like CLI for local LLM serving on Apple Silicon"
 requires-python = ">=3.11"
 dependencies = [
