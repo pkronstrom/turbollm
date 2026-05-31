@@ -24,15 +24,25 @@ Turbo bootstraps user config into `~/.turbollm/` on first run:
 
 ### Backends
 
-Install at least one backend:
+Backends are the actual model servers. Install at least one; turbo only uses
+what's on your PATH and tells you what's missing when you try to use it.
 
 ```bash
-# MLX models (recommended for Apple Silicon)
+# vllm-mlx — MLX models, recommended default for Apple Silicon
 uv tool install git+https://github.com/waybarrios/vllm-mlx.git
 
-# GGUF models
+# llama.cpp — GGUF models
 brew install llama.cpp
+
+# Optional extras:
+brew tap jundot/omlx && brew install omlx   # omlx — alternative MLX server
+uv tool install mlx-vlm                     # mlx-vlm — vision-language MLX models
+uv tool install mlx-audio                   # mlx-audio — Parakeet/ASR (used by `turbo transcribe`)
 ```
+
+Run `turbo ls -a` at any time to see which backends are installed, which are
+missing, and the install command for each. If you `turbo serve` a model whose
+backend isn't installed, turbo prints the install hint and exits.
 
 ## Usage
 
@@ -56,12 +66,20 @@ turbo rm qwen36-35b-mlx-4bit
 
 ## Harnesses (agent CLIs)
 
-Harnesses are agentic CLI tools that connect to the turbo server. If a server is already running, harnesses attach to it directly. Otherwise, a model picker is shown.
+Harnesses are agentic CLI tools that connect to the turbo server. If a server
+is already running, harnesses attach to it directly. Otherwise, a model picker
+is shown.
+
+Harnesses are **not** installed automatically — install the ones you actually
+want to use. Like backends, missing harnesses produce a clear install hint
+when invoked, and `turbo ls -a` lists status + install command for every
+registered harness.
 
 ```bash
 # Launch by name — attaches to running server or starts one
 turbo claude [model]       # Claude Code (Anthropic Messages API)
 turbo opencode [model]     # OpenCode IDE
+turbo pi [model]           # pi-coding-agent (default for headless reasoning)
 turbo hermes [model]       # Hermes Agent
 turbo goose [model]        # Goose
 turbo codex [model]        # OpenAI Codex CLI
@@ -70,6 +88,18 @@ turbo qwen-code [model]    # Qwen Code
 
 # Or use the generic run command
 turbo run [model] -H goose
+```
+
+Install commands for the harnesses above (same hints `turbo ls -a` prints):
+
+```bash
+npm install -g @anthropic-ai/claude-code      # claude
+brew install opencode                         # opencode
+npm install -g @mariozechner/pi-coding-agent  # pi
+brew install --cask codex                     # codex
+brew install aichat                           # aichat
+brew install qwen-code                        # qwen-code
+# goose, hermes — see `turbo ls -a` Install column for the latest URL
 ```
 
 ### Adding a harness
