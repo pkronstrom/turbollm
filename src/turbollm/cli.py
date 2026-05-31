@@ -28,7 +28,7 @@ from rich.table import Table
 
 from turbollm.picker import pick as picker_pick
 from turbollm.providers import get_provider
-from turbollm.registry import get_defaults, load_registry, resolve_model
+from turbollm.registry import context_default_tokens, get_defaults, load_registry, resolve_model
 
 console = Console()
 
@@ -299,7 +299,10 @@ def rm(model, yes):
 @click.option("--port", "-p", default=None, type=int, help="Port (default: 8899)")
 @click.option("--backend", "-b", default=None, type=click.Choice(["vllm-mlx", "omlx", "gguf", "mlx-vlm", "mlx-audio"]),
               help="Override backend (default: from model config)")
-def serve(model, port, backend):
+@click.option("--context-window", "context_window", default=None, type=int,
+              help="Override the model's context_default for this server (tokens). "
+                   "Use to start the server at e.g. 192K without editing models.toml.")
+def serve(model, port, backend, context_window):
     """Start model server (auto-detects backend)."""
     alias: str | None = None
     if model:
@@ -313,6 +316,11 @@ def serve(model, port, backend):
         alias, m = pick_model()
     if backend:
         m = {**m, "backend": backend}
+    if context_window:
+        # Flows through both the provider (server --max-tokens) and the port
+        # stamp's max_tokens field used by attaching harnesses to validate
+        # their own --context-window against the server's actual capacity.
+        m = {**m, "context_default": int(context_window)}
 
     provider = _get_provider_for(m)
     defaults = get_defaults()
@@ -331,7 +339,7 @@ def serve(model, port, backend):
     console.print(f"Serving [bold]{m['name']}[/bold] on port {port}")
     console.print(f"  [dim]backend: {provider.name}[/dim]")
     console.print(f"  [dim]{' '.join(cmd)}[/dim]\n")
-    _write_port_stamp(port, alias)
+    _write_port_stamp(port, alias, max_tokens=context_default_tokens(m))
     try:
         subprocess.run(cmd)
     finally:
@@ -657,13 +665,19 @@ def _port_stamp_path(port: int) -> Path:
     return TURBOLLM_STATE_DIR / f"port-{port}.json"
 
 
-def _write_port_stamp(port: int, alias: str | None) -> None:
+def _write_port_stamp(port: int, alias: str | None, max_tokens: int | None = None) -> None:
     """Record the alias served on this port so `turbo <harness>` in another shell
     can resolve back to the full registry entry (including pi/opencode/server
     config) without depending on the server's advertised model id, which may not
-    match any hf_repo (e.g. backends that rename the served model)."""
+    match any hf_repo (e.g. backends that rename the served model).
+
+    ``max_tokens`` records the context size the server was actually started with,
+    so attaching harnesses can refuse oversized --context-window overrides loudly
+    instead of letting them silently get rejected by the server mid-request."""
     TURBOLLM_STATE_DIR.mkdir(parents=True, exist_ok=True)
-    payload = {"alias": alias, "pid": os.getpid(), "started_at": time.time()}
+    payload: dict = {"alias": alias, "pid": os.getpid(), "started_at": time.time()}
+    if max_tokens is not None:
+        payload["max_tokens"] = int(max_tokens)
     _port_stamp_path(port).write_text(json.dumps(payload) + "\n")
 
 
@@ -861,6 +875,9 @@ def _is_backend_compatible(harness_config: dict, backend: str) -> bool:
     return backend in requires
 
 
+_VALID_THINKING_LEVELS = ("off", "minimal", "low", "medium", "high", "xhigh")
+
+
 def _dispatch_harness(
     harness_name: str,
     model: str | None,
@@ -870,6 +887,7 @@ def _dispatch_harness(
     *,
     show_incompat_warning: bool,
     context_window: int | None = None,
+    thinking: str | None = None,
 ) -> None:
     """Shared dispatch for `turbo <harness>` and `turbo run -H <harness>`.
 
@@ -890,12 +908,44 @@ def _dispatch_harness(
     harness_config = reg.get("harnesses", {}).get(harness_name, {})
     requires_backend = harness_config.get("requires_backend")
 
+    def _apply_overrides(d: dict) -> dict:
+        if backend:
+            d = {**d, "backend": backend}
+        if context_window:
+            # Override the picker landing context for this invocation. Flows through
+            # both the provider (server max-model-len) and the harness's models.json
+            # via context_default_tokens().
+            d = {**d, "context_default": int(context_window)}
+        if thinking is not None:
+            # Merge into pi config so PiHarness picks it up and appends `:level`
+            # to the model arg. Harnesses that don't read pi config ignore it.
+            pi_cfg = {**d.get("pi", {}), "thinking": thinking}
+            d = {**d, "pi": pi_cfg}
+        return d
+
     if model:
         m = resolve_model(model)
     elif _server_is_running(port):
         running = _get_running_model(port)
         running_backend = running.get("backend", "unknown") if running else "unknown"
         if running and _is_backend_compatible(harness_config, running_backend):
+            # If the user asked for a larger context than the running server
+            # actually started with, refuse loudly. Silently lying to the
+            # harness here is what produced the autocompact-at-64K bug class:
+            # pi happily plans for 192K, then the server rejects requests.
+            if context_window:
+                stamp = _read_port_stamp(port)
+                served_max = stamp.get("max_tokens") if stamp else None
+                if served_max and int(context_window) > int(served_max):
+                    hint_alias = (stamp or {}).get("alias") or running.get("hf_repo", "<model>")
+                    console.print(
+                        f"[red]--context-window {context_window} exceeds the running "
+                        f"server's max_tokens ({served_max}).[/red]\n"
+                        f"  Stop that server and restart with the larger context:\n"
+                        f"    [bold]turbo serve {hint_alias} --context-window {context_window}[/bold]"
+                    )
+                    raise SystemExit(1)
+            running = _apply_overrides(running)
             _run_harness(harness_name, running, port, prompt=prompt)
             return
         if show_incompat_warning and running:
@@ -907,13 +957,7 @@ def _dispatch_harness(
     else:
         _, m = pick_model(requires_backend=requires_backend)
 
-    if backend:
-        m = {**m, "backend": backend}
-    if context_window:
-        # Override the picker landing context for this invocation. Flows through
-        # both the provider (server max-model-len) and the harness's models.json
-        # via context_default_tokens().
-        m = {**m, "context_default": int(context_window)}
+    m = _apply_overrides(m)
     _run_harness(harness_name, m, port, prompt=prompt)
 
 
@@ -955,11 +999,14 @@ def _make_harness_command(harness_name: str):
                   help="Run harness headlessly with this prompt and exit (no TTY).")
     @click.option("--context-window", "context_window", default=None, type=int,
                   help="Override the model's context_default for this invocation (tokens).")
-    def cmd(model, port, backend, prompt, context_window):
+    @click.option("--thinking", default=None, type=click.Choice(_VALID_THINKING_LEVELS),
+                  help="Override the reasoning budget for this invocation (pi harness).")
+    def cmd(model, port, backend, prompt, context_window, thinking):
         _dispatch_harness(
             harness_name, model, port, backend, prompt,
             show_incompat_warning=True,
             context_window=context_window,
+            thinking=thinking,
         )
     return cmd
 
@@ -1269,12 +1316,15 @@ def hud_status_clear(activity_id):
               help="Run harness headlessly with this prompt and exit (no TTY).")
 @click.option("--context-window", "context_window", default=None, type=int,
               help="Override the model's context_default for this invocation (tokens).")
-def run_cmd(model, harness, port, backend, prompt, context_window):
+@click.option("--thinking", default=None, type=click.Choice(_VALID_THINKING_LEVELS),
+              help="Override the reasoning budget for this invocation (pi harness).")
+def run_cmd(model, harness, port, backend, prompt, context_window, thinking):
     """Start model server + launch a harness by name."""
     _dispatch_harness(
         harness, model, port, backend, prompt,
         show_incompat_warning=False,
         context_window=context_window,
+        thinking=thinking,
     )
 
 
