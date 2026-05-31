@@ -1,10 +1,31 @@
+# Python
 __pycache__/
 *.egg-info/
 dist/
 .venv/
+
+# Local data
 models/
+logs/
 .env
+
+# Worktrees
 .worktrees/
-.claude/scheduled_tasks.lock
+
+# macOS
+.DS_Store
+
+# Editor / agent workflow
+.claude/
+.claire/
+
+# Local-only documentation
 openspec/
 docs/superpowers/
+
+# Swift build artefacts
+.build/
+
+# Raycast (raycast-env.d.ts is generated; bun.lock is per-checkout)
+tools/raycast-turbo/raycast-env.d.ts
+tools/raycast-turbo/bun.lock

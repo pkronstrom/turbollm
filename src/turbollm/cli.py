@@ -33,6 +33,23 @@ from turbollm.registry import context_default_tokens, get_defaults, load_registr
 console = Console()
 
 
+def _beta_gate(feature: str) -> None:
+    """Block BETA-only commands unless TURBO_BETA=1 is set.
+
+    The Swift sidecars (turbo-acquirer, TurboHUD) and the Raycast extension
+    are macOS-specific, not yet code-signed, and require manual TCC grants.
+    They ship in-tree for transparency but are off by default until the
+    bundling/notarization story lands."""
+    if os.environ.get("TURBO_BETA", "").strip() in ("1", "true", "yes"):
+        return
+    console.print(
+        f"[yellow]`turbo {feature}` is BETA[/yellow] — the sidecar/Raycast "
+        f"surface is macOS-only and not yet bundled.\n"
+        f"  Set [bold]TURBO_BETA=1[/bold] to enable it."
+    )
+    raise SystemExit(2)
+
+
 def _get_provider_for(m: dict):
     backend = m.get("backend", get_defaults().get("backend", "vllm-mlx"))
     return get_provider(backend)
@@ -1389,6 +1406,7 @@ def _sidecar_raycast_sync() -> None:
               help="Run `swift build` before launching (default: yes).")
 def sidecar_cmd(build):
     """Build turbo-acquirer + TurboHUD, symlink both, then launch the HUD."""
+    _beta_gate("sidecar")
     hud_dir = _hud_dir()
     if not hud_dir.exists() or not (hud_dir / "Package.swift").exists():
         console.print(
@@ -1466,6 +1484,7 @@ def _to_title_case(slug: str) -> str:
 @cli.group(name="raycast")
 def raycast_grp():
     """Raycast extension helpers."""
+    _beta_gate("raycast")
 
 
 def _do_raycast_sync(extension_dir: Path, quiet: bool) -> None:
