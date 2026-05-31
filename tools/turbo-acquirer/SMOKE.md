@@ -96,7 +96,7 @@ Expected:
 
 With TurboHUD running (launched via `turbo sidecar`):
 
-1. Click the turtle icon in the menu bar.
+1. Click the lightning icon in the menu bar.
 2. Select `record-to-obsidian` → Run.
 3. Observe the menu icon changes to indicate recording is active.
 4. Wait 5+ seconds.
@@ -166,8 +166,8 @@ Obsidian note with interleaved keyframes. Run all three launch paths.
 
 ### Path A — HUD menu
 
-1. Start `turbo sidecar` (menu-bar turtle icon appears).
-2. Click the turtle icon → select **record-meeting-with-screen** → **▶ Run**.
+1. Start `turbo sidecar` (menu-bar lightning icon appears).
+2. Click the lightning icon → select **record-meeting-with-screen** → **▶ Run**.
 3. Change windows / switch slides for ~30 seconds so the screen recorder
    captures several distinct keyframes.
 4. Click **Stop** in the HUD menu.

@@ -42,7 +42,7 @@ final class StatusIconController: @unchecked Sendable {
 
         let count = state.activities.count
         if count == 0 {
-            statusItem.button?.title = "🐢"
+            statusItem.button?.title = "⚡"
             statusItem.button?.toolTip = "Turbo HUD — idle"
         } else if count == 1 {
             statusItem.button?.title = "🟢"
