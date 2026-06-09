@@ -35,6 +35,11 @@ port = 8900
 [sampling.qwen3-thinking-coding]
 # Qwen's published recipe for Qwen3.6 thinking-mode coding tasks.
 # Source: https://huggingface.co/Qwen/Qwen3.6-27B (and 35B-A3B card)
+# Coding wants presence_penalty=0.0 on BOTH the dense 27B and the 35B-A3B MoE,
+# so this preset is correct for the agentic/pi (coding) path on either model.
+# NOTE: the 35B-A3B MoE in GENERAL (non-coding) mode is loop-prone and Qwen
+# recommends presence_penalty=1.5 (see QwenLM/Qwen3.6 #145). That's applied
+# directly in the obsidian summarizer scripts (general-mode MoE use), not here.
 temperature = 0.6
 top_p = 0.95
 top_k = 20
@@ -235,6 +240,44 @@ thinking = "off"
 thinking_format = "qwen-chat-template"
 
 [models.gemma4-31b-it-mlx-4bit.pi.compat]
+thinkingFormat = "qwen-chat-template"
+requiresToolResultName = true
+requiresAssistantAfterToolResult = true
+
+[models.gemma4-12b-it-mlx-4bit]
+name = "Gemma 4 12B IT QAT MLX 4bit"
+backend = "vllm-mlx"
+# QAT 4bit (added 2026-06-09). Smallest Gemma 4 — fast, low memory. No MTP:
+# Gemma server-path MTP gives no gain on mlx-vlm 0.6.2 (see docs/mtp-mlx-learnings.md),
+# so this is a pure-quality QAT entry on vllm-mlx like the 26B/31B.
+hf_repo = "mlx-community/gemma-4-12B-it-qat-4bit"
+size_gb = 11
+min_memory_gb = 20
+tool_use = true
+can_reason = true
+tags = ["coding", "dense", "vision", "gemma", "4bit", "qat"]
+tool_call_parser = "gemma4"
+reasoning_parser = "gemma4"
+
+# Gemma 4 hybrid SWA + global attention bounds local-layer KV → 256K is fine.
+context_default = 65536
+context_max = 262144
+
+sampling = "gemma-4"
+kv_quant = "off"
+
+[models.gemma4-12b-it-mlx-4bit.server]
+paged_cache = true
+cache_memory_percent = 0.40
+timeout = 600
+default_chat_template_kwargs = { enable_thinking = false }
+
+[models.gemma4-12b-it-mlx-4bit.pi]
+reasoning = false
+thinking = "off"
+thinking_format = "qwen-chat-template"
+
+[models.gemma4-12b-it-mlx-4bit.pi.compat]
 thinkingFormat = "qwen-chat-template"
 requiresToolResultName = true
 requiresAssistantAfterToolResult = true
@@ -464,6 +507,7 @@ body = json.dumps({
         {"role": "user", "content": transcript},
     ],
     "max_tokens": 8192,
+    "presence_penalty": 1.5,
 }).encode()
 req = urllib.request.Request(
     "http://127.0.0.1:8899/v1/chat/completions",
@@ -572,6 +616,7 @@ body = json.dumps({
         {"role": "user", "content": transcript},
     ],
     "max_tokens": 8192,
+    "presence_penalty": 1.5,
 }).encode()
 req = urllib.request.Request(
     "http://127.0.0.1:8899/v1/chat/completions",
