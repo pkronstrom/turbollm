@@ -154,18 +154,34 @@ acceptance = more speedup. "Go lower to save space/speed" is the right instinct 
   reasoning/thinking config was unchanged, so any verbose-thinking behavior is Gemma-4 +
   `reasoning-parser gemma4`, not a QAT regression.
 
-## Gotcha: Gemma 4 12B is `gemma4_unified` (backend-incompatible)
+## Gotcha: Gemma 4 12B is `gemma4_unified` (backend-incompatible) — dropped, revisit later
 
 The Gemma 4 **12B** mlx quants (all of them — 4bit/qat-4bit/qat-8bit) use
 `model_type = gemma4_unified`, whereas 26B-A4B/31B are plain `gemma4`. The pinned
-**vllm-mlx 0.2.9** (bundled mlx_vlm) only supports `gemma4`, so it **cannot load the
-12B**. Upgrading vllm-mlx → 0.4.0rc1 (mlx_vlm 0.6.2) adds `gemma4_unified` AND serves
-the 12B at 38 tok/s — but **breaks the Qwen3.6-35B-A3B daily driver** with a
-`quantized_matmul` shape error (group_size/bits incompatibility in the newer mlx_vlm).
-So the 12B can only run on standalone mlx-vlm at ~15.5 tok/s (server) — slower than the
-MoE 26B-A4B (86.5) because the 12B is **dense** (~12B active/token vs the 26B-A4B's ~4B).
-**Decision: 12B entry removed.** Smaller total size ≠ faster — active params + backend
-decide. Revisit if a future vllm-mlx supports `gemma4_unified` *without* breaking Qwen.
+**vllm-mlx 0.2.9** only supports `gemma4`, so it **cannot load the 12B**. Upgrading to
+vllm-mlx **0.4.0rc1** (the latest tag, bundles mlx_vlm 0.6.2) adds `gemma4_unified` and
+serves the 12B at 38 tok/s — but **breaks the Qwen3.6-35B-A3B daily driver**.
+
+**Root cause of the Qwen break (so we don't re-debug):** `mlx-community/Qwen3.6-35B-A3B-4bit`
+is *mixed-precision* — global `bits=4` with **80 per-layer overrides at `bits=8`**
+(the mixed-attention layers). vllm-mlx 0.4.0rc1's load path **ignores the per-layer
+overrides** and applies global `bits=4` to the 8-bit layers → `[quantized_matmul] shapes
+incompatible … group_size=64 bits=4` (exact 2× mismatch: 8-bit packs 4/uint32 vs 4-bit's
+8). vllm-mlx 0.2.9 honors them. Notably, **standalone mlx-vlm 0.6.2 also honors them**
+(it served this Qwen at 86.7 tok/s in the MoE-MTP test) — so the bug is in vllm-mlx
+0.4.0rc1's *wrapper*, not mlx_vlm 0.6.2 itself.
+
+**Decision: 12B dropped.** Even at the fast 38 tok/s it's slower than the MoE 26B-A4B
+(86.5) — dense (~12B active/token) vs MoE (~4B active). Smaller total size ≠ faster.
+
+**FUTURE CHECK — revisit the dense 12B when EITHER:**
+1. a vllm-mlx release loads `gemma4_unified` **and** honors per-layer quant overrides —
+   verify by serving the 12B *and* `qwen36-35b-4bit` on the same binary without the
+   `quantized_matmul` error (the upgrade-and-regression-test loop from this session); or
+2. mlx-vlm's Gemma *server* batching (#1166) matures so the 12B runs fast on the
+   already-working `mlx-vlm` backend (it served at only ~15.5 tok/s as of 0.6.2); or
+3. a two-binary setup is wanted: 12B on a dedicated vllm-mlx 0.4.0rc1 venv via a
+   per-model `[models.X.server].binary` override, Qwen/others on pinned 0.2.9.
 
 ## Open threads
 
