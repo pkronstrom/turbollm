@@ -11,6 +11,14 @@ from click.testing import CliRunner
 from turbollm import cli as turbo_cli
 
 
+@pytest.fixture(autouse=True)
+def _enable_beta(monkeypatch):
+    """These tests exercise BETA-gated raycast/sidecar features
+    (cli._beta_gate / TURBO_BETA). Force the flag on so the gated code path
+    runs; the actual sync/subprocess work is mocked per-test."""
+    monkeypatch.setenv("TURBO_BETA", "1")
+
+
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
