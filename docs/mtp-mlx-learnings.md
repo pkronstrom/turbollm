@@ -136,8 +136,16 @@ acceptance = more speedup. "Go lower to save space/speed" is the right instinct 
   (`mlx-community/Qwen3.6-27B-MTP-5bit`, `server.draft_kind = mtp`). tool-calling +
   headless pi verified.
 - `qwen36-35b-4bit` (MoE) **unchanged** — stays on `vllm-mlx`.
-- Gemma 4 MTP **not adopted**; 15 GB QAT spike target + drafters deleted. Revisit when
-  `mlx-vlm` Gemma server-MTP matures.
+- Gemma 4 MTP **not adopted**; MTP spike drafters deleted. Revisit when `mlx-vlm` Gemma
+  server-MTP matures.
+- Gemma 4 **QAT-4bit adopted** (separately from MTP, purely for quality): both
+  `gemma4-26b-a4b-it-mlx-4bit` and `gemma4-31b-it-mlx-4bit` repointed from Unsloth UD-4bit
+  to `mlx-community/gemma-4-{26B-A4B,31B}-it-qat-4bit`, still on `vllm-mlx`. Behavioral
+  eval (9 verifiable coding/instruction tasks) was **9/9 == 9/9** (QAT == UD, no
+  regression); both load + respond on vllm-mlx. Same size/speed; QAT's trained-in
+  low-bit fidelity is the upside on margins the short eval can't probe. **Note:** the
+  reasoning/thinking config was unchanged, so any verbose-thinking behavior is Gemma-4 +
+  `reasoning-parser gemma4`, not a QAT regression.
 
 ## Open threads
 
@@ -147,9 +155,9 @@ acceptance = more speedup. "Go lower to save space/speed" is the right instinct 
    batching" follow-ups (#1166) or when `mlx-lm` native MTP (#990) merges.
 3. **pi headless permissions:** tool-calls round-trip, but pi's "medium" permission level
    blocks shell execution in headless runs — bump it for fully autonomous delegated runs.
-4. **Gemma QAT as a quality (not speed) upgrade:** evaluate QAT-4bit vs the current
-   Unsloth UD-4bit on real coding tasks; adopt the QAT target on `vllm-mlx` only if it
-   measurably wins. Independent of MTP.
+4. ~~Gemma QAT as a quality upgrade~~ — **done** (adopted QAT-4bit for both Gemma entries;
+   see Decisions). A deeper perplexity/benchmark eval could still quantify QAT's margin
+   over UD beyond the saturated behavioral tasks, if it ever matters.
 
 ## How to reproduce a backend/MTP comparison
 
