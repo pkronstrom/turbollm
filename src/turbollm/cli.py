@@ -75,6 +75,24 @@ def _picker_stats(m: dict) -> tuple[str, str, str, str]:
     return backend, f"{int(ctx / 1024)}k", f"{int(out / 1024)}k", size
 
 
+# Backends grouped by modality. Chat/text harnesses (pi, claude, codex, …) serve
+# text-generation models; mlx-audio is a speech-to-text (ASR) backend and must
+# not appear in their model pickers. The `transcribe` command targets it directly.
+_ALL_BACKENDS = ("vllm-mlx", "gguf", "omlx", "mlx-vlm", "mlx-audio")
+_AUDIO_BACKENDS = ("mlx-audio",)
+_CHAT_BACKENDS = [b for b in _ALL_BACKENDS if b not in _AUDIO_BACKENDS]
+
+
+def _harness_requires_backend(harness_config: dict) -> list[str]:
+    """Effective backend allow-list for a harness's model picker.
+
+    Honors an explicit ``[harnesses.<name>].requires_backend`` when set;
+    otherwise defaults to chat/text-gen backends so ASR (mlx-audio) models are
+    excluded from chat-harness pickers.
+    """
+    return list(harness_config.get("requires_backend") or _CHAT_BACKENDS)
+
+
 def pick_model(requires_backend: list[str] | None = None) -> tuple[str, dict]:
     """Interactive picker for downloaded models.
 
@@ -230,7 +248,7 @@ def ls_cmd(available):
 def _print_backends_table() -> None:
     from turbollm.providers import get_provider
 
-    backends = ["vllm-mlx", "gguf", "omlx", "mlx-vlm", "mlx-audio"]
+    backends = list(_ALL_BACKENDS)
     table = Table(show_header=True, title="\nBackends", title_justify="left")
     table.add_column("Backend", style="bold")
     table.add_column("Binary")
@@ -885,11 +903,12 @@ def _run_harness(harness_name: str, m: dict, port: int, prompt: str | None = Non
 
 
 def _is_backend_compatible(harness_config: dict, backend: str) -> bool:
-    """Check if a backend is compatible with a harness's requires_backend."""
-    requires = harness_config.get("requires_backend")
-    if not requires:
-        return True
-    return backend in requires
+    """Check if a backend is compatible with a harness's effective allow-list.
+
+    Defaults to chat/text-gen backends (excludes ASR mlx-audio) when the harness
+    declares no explicit requires_backend. See _harness_requires_backend.
+    """
+    return backend in _harness_requires_backend(harness_config)
 
 
 _VALID_THINKING_LEVELS = ("off", "minimal", "low", "medium", "high", "xhigh")
@@ -923,7 +942,7 @@ def _dispatch_harness(
     port = port or get_defaults().get("port", 8899)
     reg = load_registry()
     harness_config = reg.get("harnesses", {}).get(harness_name, {})
-    requires_backend = harness_config.get("requires_backend")
+    requires_backend = _harness_requires_backend(harness_config)
 
     def _apply_overrides(d: dict) -> dict:
         if backend:
