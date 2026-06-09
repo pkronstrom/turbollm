@@ -67,9 +67,16 @@ streaming, and long context will shift absolute numbers.
 
 | Model | mlx-vlm off | mlx-vlm + MTP | **vllm-mlx (current)** | Winner |
 |---|---|---|---|---|
-| Gemma 4 26B-A4B | 80 | 83 (**+4%, noise**) | 86.5 | vllm-mlx |
+| Gemma 4 26B-A4B (MoE) | 80 | 83 (**+4%, noise**) | 86.5 | vllm-mlx |
+| Gemma 4 12B (**dense**) | 15.5 | 15.6 (**~0%, noise**) | (vllm faster) | vllm-mlx |
 | **Qwen3.6-27B** | 13.4 | **21.0 (+57%)** | 10.7 | **mlx-vlm+MTP (~2×)** |
 | **Qwen3.6-35B-A3B (MoE)** | 68.6 | 86.7 (+26%) | **98.7** | **vllm-mlx** |
+
+> **Gemma server-MTP failure is Gemma-specific, NOT MoE-specific.** Both a Gemma
+> *MoE* (26B-A4B) and a Gemma *dense* (12B) get +70% in `generate` but ~0 on the
+> server. The dense-vs-MoE split (learning #2) holds for Qwen but not Gemma —
+> mlx-vlm's Gemma *server* batching (#1166) is the blocker regardless of arch.
+> (Gemma 12B `generate`: 38.6→66.0, +71%, 80% accept; server: 15.5→15.6.)
 
 ---
 
