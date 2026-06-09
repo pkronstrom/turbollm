@@ -164,16 +164,19 @@ default_chat_template_kwargs = { preserve_thinking = true }
 # specprefill = true             # draft KV mismatch with target (vllm#36872)
 
 [models.qwen36-27b-6bit]
-name = "Qwen3.6 27B UD 6bit"
-backend = "vllm-mlx"
+name = "Qwen3.6 27B 6bit + MTP (mlx-vlm)"
+backend = "mlx-vlm"
 hf_repo = "unsloth/Qwen3.6-27B-UD-MLX-6bit"
+# MTP speculative-decoding drafter (tiny head). Server-path MTP works for Qwen
+# (validated 2026-06-09): ~13.4 -> 21.0 tok/s (+57%), ~2x prior vllm-mlx (10.7),
+# 89.7% draft acceptance, tool-calling + pi verified. mlx-vlm auto-parses tools,
+# so no tool_call_parser/reasoning_parser flags needed (those are vllm-mlx-only).
+draft_hf_repo = "mlx-community/Qwen3.6-27B-MTP-5bit"
 size_gb = 30
 min_memory_gb = 36
 tool_use = true
 can_reason = true
-tags = ["coding", "dense", "vision"]
-tool_call_parser = "qwen3_coder"
-reasoning_parser = "qwen3"
+tags = ["coding", "dense", "qwen", "mtp"]
 
 # 128GB M4 Max sizing: 192K is safe at 6bit + mixed attention (~38 GB KV);
 # weights are ~30 GB so total stays under ~75 GB peak.
@@ -184,10 +187,8 @@ sampling = "qwen3-thinking-coding"
 kv_quant = "off"
 
 [models.qwen36-27b-6bit.server]
-paged_cache = true
-cache_memory_percent = 0.40
+draft_kind = "mtp"
 timeout = 600
-default_chat_template_kwargs = { preserve_thinking = true }
 
 [models.qwen36-27b-6bit.pi]
 # Default budget for pi sessions — qwen3.6 27B's reasoning can dominate
@@ -271,6 +272,12 @@ thinking_format = "qwen-chat-template"
 thinkingFormat = "qwen-chat-template"
 requiresToolResultName = true
 requiresAssistantAfterToolResult = true
+
+# NOTE (2026-06-09): Gemma 4 MTP on mlx-vlm 0.6.2 does NOT speed up the server
+# (continuous-batching) path — drafter loads but batched decode sees ~0 gain
+# (generate-path got +30%). Revisit when mlx-vlm Gemma server-MTP matures
+# (track "Improve Gemma4 MTP server batching" #1166 / mlx-lm native MTP #990).
+# Spike entry + 15GB QAT target removed. See docs/superpowers/specs/2026-06-09-*.
 
 # --- GGUF models -------------------------------------------------------------
 
