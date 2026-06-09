@@ -154,6 +154,19 @@ acceptance = more speedup. "Go lower to save space/speed" is the right instinct 
   reasoning/thinking config was unchanged, so any verbose-thinking behavior is Gemma-4 +
   `reasoning-parser gemma4`, not a QAT regression.
 
+## Gotcha: Gemma 4 12B is `gemma4_unified` (backend-incompatible)
+
+The Gemma 4 **12B** mlx quants (all of them — 4bit/qat-4bit/qat-8bit) use
+`model_type = gemma4_unified`, whereas 26B-A4B/31B are plain `gemma4`. The pinned
+**vllm-mlx 0.2.9** (bundled mlx_vlm) only supports `gemma4`, so it **cannot load the
+12B**. Upgrading vllm-mlx → 0.4.0rc1 (mlx_vlm 0.6.2) adds `gemma4_unified` AND serves
+the 12B at 38 tok/s — but **breaks the Qwen3.6-35B-A3B daily driver** with a
+`quantized_matmul` shape error (group_size/bits incompatibility in the newer mlx_vlm).
+So the 12B can only run on standalone mlx-vlm at ~15.5 tok/s (server) — slower than the
+MoE 26B-A4B (86.5) because the 12B is **dense** (~12B active/token vs the 26B-A4B's ~4B).
+**Decision: 12B entry removed.** Smaller total size ≠ faster — active params + backend
+decide. Revisit if a future vllm-mlx supports `gemma4_unified` *without* breaking Qwen.
+
 ## Open threads
 
 1. **Gemma decode gains *now*:** llama.cpp speculative decoding via the existing `gguf`

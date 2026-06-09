@@ -244,44 +244,6 @@ thinkingFormat = "qwen-chat-template"
 requiresToolResultName = true
 requiresAssistantAfterToolResult = true
 
-[models.gemma4-12b-it-mlx-4bit]
-name = "Gemma 4 12B IT QAT MLX 4bit"
-backend = "vllm-mlx"
-# QAT 4bit (added 2026-06-09). Smallest Gemma 4 — fast, low memory. No MTP:
-# Gemma server-path MTP gives no gain on mlx-vlm 0.6.2 (see docs/mtp-mlx-learnings.md),
-# so this is a pure-quality QAT entry on vllm-mlx like the 26B/31B.
-hf_repo = "mlx-community/gemma-4-12B-it-qat-4bit"
-size_gb = 11
-min_memory_gb = 20
-tool_use = true
-can_reason = true
-tags = ["coding", "dense", "vision", "gemma", "4bit", "qat"]
-tool_call_parser = "gemma4"
-reasoning_parser = "gemma4"
-
-# Gemma 4 hybrid SWA + global attention bounds local-layer KV → 256K is fine.
-context_default = 65536
-context_max = 262144
-
-sampling = "gemma-4"
-kv_quant = "off"
-
-[models.gemma4-12b-it-mlx-4bit.server]
-paged_cache = true
-cache_memory_percent = 0.40
-timeout = 600
-default_chat_template_kwargs = { enable_thinking = false }
-
-[models.gemma4-12b-it-mlx-4bit.pi]
-reasoning = false
-thinking = "off"
-thinking_format = "qwen-chat-template"
-
-[models.gemma4-12b-it-mlx-4bit.pi.compat]
-thinkingFormat = "qwen-chat-template"
-requiresToolResultName = true
-requiresAssistantAfterToolResult = true
-
 [models.gemma4-26b-a4b-it-mlx-4bit]
 name = "Gemma 4 26B-A4B IT QAT MLX 4bit"
 backend = "vllm-mlx"
