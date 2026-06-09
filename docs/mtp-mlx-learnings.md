@@ -78,6 +78,28 @@ streaming, and long context will shift absolute numbers.
 > mlx-vlm's Gemma *server* batching (#1166) is the blocker regardless of arch.
 > (Gemma 12B `generate`: 38.6→66.0, +71%, 80% accept; server: 15.5→15.6.)
 
+### Gemma MTP — SETTLED: dead on both formats (for agentic use)
+
+MTP drafters exist for Gemma in **both** formats (MLX: mlx-community "Gemma-4 Assistant
+(MTP)"; GGUF: Unsloth/Google `mtp-gemma-4-*.gguf`). Neither pays off for prefill-heavy
+agentic coding, for *different* reasons:
+
+- **MLX (mlx-vlm server): no speedup at all.** ~0 gain on the server (26B-A4B and dense
+  12B both), per above — the immature Gemma server batching. Unsloth ships no MLX QAT-MTP
+  either way (GGUF-only + a tiny E4B MLX), so there's no better MLX drafter to chase.
+- **GGUF (llama.cpp server): real decode speedup, but prefill-unfriendly.** Bench on
+  Gemma 26B-A4B QAT (user-run, 192-token outputs): MTP off ~148 tok/s; MTP on **~200 tok/s
+  (+35% decode), 67% draft accept**, wall −19–23%. BUT MTP **trades prefill overhead for
+  decode speedup** — it only nets out when *generation >> prompt*. Agentic coding is
+  prompt >> generation (big context, small edits), so the **pp (prompt-processing) hit**
+  eats the decode gain; acceptance also varies (creative ~0.49, long-code-review ~0.61).
+  Real-usage end-to-end was a wash-to-loss → **not worth it.**
+
+**Verdict:** Gemma 4 stays **QAT-4bit, no MTP, on vllm-mlx**. MTP would only help a
+decode-bound Gemma workload (long generation from short prompts) — which we don't have
+(even the summarizer is long-input/short-output → prefill-bound). Revisit only if a
+genuinely decode-heavy Gemma use appears, or mlx-vlm's Gemma server batching matures.
+
 ---
 
 ## Key learnings
@@ -185,8 +207,8 @@ incompatible … group_size=64 bits=4` (exact 2× mismatch: 8-bit packs 4/uint32
 
 ## Open threads
 
-1. **Gemma decode gains *now*:** llama.cpp speculative decoding via the existing `gguf`
-   backend (small Gemma draft) — sidesteps `mlx-vlm` server-MTP immaturity.
+1. ~~Gemma decode gains via llama.cpp spec-decode~~ — **SETTLED (see below).** Gemma MTP
+   is a dead end on this stack on *both* formats, for different reasons.
 2. **Re-test Gemma + MoE server-MTP** when `mlx-vlm` ships the "Improve Gemma4 MTP server
    batching" follow-ups (#1166) or when `mlx-lm` native MTP (#990) merges.
 3. **pi headless permissions:** tool-calls round-trip, but pi's "medium" permission level
