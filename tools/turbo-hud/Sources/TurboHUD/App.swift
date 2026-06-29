@@ -27,6 +27,11 @@ class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
             self?.refreshMenu()
         }
 
+        // Wire the screen-recording region picker. MenuBuilder invokes this
+        // callback when the user selects scope=region with no region sticky yet;
+        // without it, selecting "region" silently does nothing.
+        App.installRegionPicker()
+
         let stateDir = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".turbollm").appendingPathComponent("state")
         watcher = HudStateWatcher(stateDir: stateDir)
@@ -44,6 +49,19 @@ class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
         postMigrationNoticeIfNeeded()
 
         refreshMenu()
+    }
+
+    // MARK: - Region picker wiring
+
+    /// Wires `MenuTarget.shared.onOpenRegionPicker` so selecting a
+    /// screen-recording param's `scope = region` opens the drag-to-select
+    /// window (which writes the `<wf>.<param>.region` sticky that
+    /// `turbo workflows run` reads). Static + self-independent so it stays
+    /// unit-testable without launching NSApplication.
+    static func installRegionPicker() {
+        MenuTarget.shared.onOpenRegionPicker = { workflow, param in
+            ParamEditor.openRegionPicker(workflow: workflow, param: param)
+        }
     }
 
     // MARK: - T-24: TCC migration notification

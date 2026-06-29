@@ -5,6 +5,10 @@ enum ParamEditor {
     /// Retains the active popover so ARC does not release it before the user commits.
     static var currentPopover: NSPopover?
 
+    /// Retains the active region-picker window so ARC does not release it while
+    /// it is on screen. Cleared by `RegionPickerWindowCloser` on close.
+    static var currentRegionWindow: NSWindow?
+
     // MARK: - T-18: Region picker logic
 
     /// Returns true when no region sticky exists for `param`, meaning the picker should open.
@@ -40,25 +44,47 @@ enum ParamEditor {
             workflow: workflow, param: param, previousScope: previousScope
         )
 
-        guard let screen = NSScreen.main else { return }
+        // The acquirer captures `content.displays.first` — the primary display
+        // (the one whose AppKit frame origin is (0,0)) — so the picker must
+        // cover that display, NOT `NSScreen.main` (the focused screen, which on
+        // a multi-monitor setup is often a secondary monitor).
+        guard let screen = primaryScreen() else { return }
 
-        let window = NSWindow(
+        let window = RegionPickerWindow(
             contentRect: screen.frame,
             styleMask: [.borderless],
             backing: .buffered,
             defer: false,
             screen: screen
         )
+        // ARC owns the window; we retain it in `currentRegionWindow` for its
+        // lifetime. Leaving the default (release-when-closed = true) double-frees
+        // under ARC and crashes in objc_release on the next autorelease drain.
+        window.isReleasedWhenClosed = false
         window.backgroundColor = NSColor.black.withAlphaComponent(0.3)
         window.isOpaque = false
         window.hasShadow = false
         window.level = .screenSaver
         window.ignoresMouseEvents = false
         window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        window.delegate = RegionPickerWindowCloser.shared
 
         let pickerView = RegionPickerView(controller: controller, owningWindow: window)
         window.contentView = pickerView
+        currentRegionWindow = window
         window.makeKeyAndOrderFront(nil)
+        // Bring the picker forward even though the HUD is an accessory app, and
+        // make the borderless window key so the view receives Esc-to-cancel.
+        NSApp.activate(ignoringOtherApps: true)
+        window.makeFirstResponder(pickerView)
+    }
+
+    /// The primary display (AppKit frame origin (0,0)) — the display the acquirer
+    /// records. Falls back to `NSScreen.main` then the first screen.
+    private static func primaryScreen() -> NSScreen? {
+        NSScreen.screens.first(where: { $0.frame.origin == .zero })
+            ?? NSScreen.main
+            ?? NSScreen.screens.first
     }
 
     /// Open an editor for `param`. On commit, calls `onCommit(newValue)`.
@@ -221,6 +247,25 @@ final class EnumEditorVC: NSViewController {
     }
 }
 
+// MARK: - Region picker window
+
+/// Borderless windows return `false` from `canBecomeKey` by default, which
+/// would stop the picker view from receiving `keyDown` (Esc-to-cancel).
+final class RegionPickerWindow: NSWindow {
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { true }
+}
+
+/// Clears `ParamEditor.currentRegionWindow` once the picker window closes so
+/// ARC can reclaim it. Mirrors `PopoverLifetimeDelegate`.
+final class RegionPickerWindowCloser: NSObject, NSWindowDelegate {
+    static let shared = RegionPickerWindowCloser()
+
+    func windowWillClose(_ notification: Notification) {
+        ParamEditor.currentRegionWindow = nil
+    }
+}
+
 // MARK: - T-fix-3: RegionPickerController (logic, unit-testable)
 
 /// Controller for the region picker; handles commit and cancel without
@@ -289,6 +334,19 @@ final class RegionPickerView: NSView {
 
     override var acceptsFirstResponder: Bool { true }
 
+    /// Converts a drag rectangle in view coordinates (origin bottom-left, y-up)
+    /// to a display-local rectangle with origin top-left, y-down — the space
+    /// SCStream's `sourceRect` expects. `viewHeight` is the display height in
+    /// points (the full-screen view's height).
+    static func displayLocalRect(drag: NSRect, viewHeight: CGFloat) -> NSRect {
+        NSRect(
+            x: drag.minX,
+            y: viewHeight - drag.maxY,
+            width: drag.width,
+            height: drag.height
+        )
+    }
+
     override func draw(_ dirtyRect: NSRect) {
         // Semi-transparent overlay with a clear selection rectangle.
         NSColor.black.withAlphaComponent(0.3).setFill()
@@ -327,9 +385,10 @@ final class RegionPickerView: NSView {
             owningWindow?.close()
             return
         }
-        // Convert from view-flipped coordinates to screen coordinates.
-        let screenRect = window?.convertToScreen(convert(dragRect, to: nil)) ?? dragRect
-        controller.commit(rect: screenRect)
+        // Map the view-space drag (origin bottom-left, y-up) to the display-local,
+        // top-left, y-down rect that SCStream's sourceRect expects.
+        let regionRect = RegionPickerView.displayLocalRect(drag: dragRect, viewHeight: bounds.height)
+        controller.commit(rect: regionRect)
         owningWindow?.close()
     }
 
