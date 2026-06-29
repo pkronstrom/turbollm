@@ -1,22 +1,21 @@
-"""Tests for `turbo raycast sync` CLI subcommand (T-12, T-fix-5)."""
+"""Tests for `turbo raycast sync` (now the macOS plugin: turbollm.plugins.mac).
+
+The raycast group and sidecar command live in turbollm.plugins.mac and attach to
+the core CLI only on supported machines. These tests drive the command objects
+directly and patch the plugin modules' own names (not turbollm.cli).
+"""
 from __future__ import annotations
 
 import json
-import os
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
-import pytest
 from click.testing import CliRunner
 
-from turbollm import cli as turbo_cli
+from turbollm.plugins.mac.raycast import raycast_grp
+from turbollm.plugins.mac.sidecar import sidecar_cmd
 
-
-@pytest.fixture(autouse=True)
-def _enable_beta(monkeypatch):
-    """These tests exercise BETA-gated raycast/sidecar features
-    (cli._beta_gate / TURBO_BETA). Force the flag on so the gated code path
-    runs; the actual sync/subprocess work is mocked per-test."""
-    monkeypatch.setenv("TURBO_BETA", "1")
+_RAY = "turbollm.plugins.mac.raycast"
+_SIDE = "turbollm.plugins.mac.sidecar"
 
 
 # ---------------------------------------------------------------------------
@@ -62,6 +61,15 @@ def _make_package_json(commands: list[dict]) -> dict:
     }
 
 
+def _sync(tmp_path, *extra_args, registry=_FAKE_REGISTRY):
+    """Invoke `raycast sync` against tmp_path with a patched registry."""
+    runner = CliRunner()
+    with patch(f"{_RAY}.load_registry", return_value=registry):
+        return runner.invoke(
+            raycast_grp, ["sync", "--extension-dir", str(tmp_path), *extra_args]
+        )
+
+
 # ---------------------------------------------------------------------------
 # T-12 Step 1: sync adds per-workflow commands
 # ---------------------------------------------------------------------------
@@ -71,16 +79,11 @@ def test_raycast_sync_writes_per_workflow_commands(tmp_path):
     pkg_path = tmp_path / "package.json"
     pkg_path.write_text(json.dumps(_make_package_json(_FIXED_COMMANDS), indent=2) + "\n")
 
-    runner = CliRunner()
-    with patch("turbollm.cli.load_registry", return_value=_FAKE_REGISTRY):
-        result = runner.invoke(turbo_cli.cli, ["raycast", "sync", "--extension-dir", str(tmp_path)])
-
+    result = _sync(tmp_path)
     assert result.exit_code == 0, result.output
 
     pkg = json.loads(pkg_path.read_text())
-    commands = pkg["commands"]
-
-    names = [cmd["name"] for cmd in commands]
+    names = [cmd["name"] for cmd in pkg["commands"]]
     # Both fixed commands preserved.
     assert "run-workflow" in names
     assert "running-workflows" in names
@@ -99,10 +102,7 @@ def test_raycast_sync_emits_description_and_mode_on_per_workflow_commands(tmp_pa
     pkg_path = tmp_path / "package.json"
     pkg_path.write_text(json.dumps(_make_package_json(_FIXED_COMMANDS), indent=2) + "\n")
 
-    runner = CliRunner()
-    with patch("turbollm.cli.load_registry", return_value=_FAKE_REGISTRY):
-        result = runner.invoke(turbo_cli.cli, ["raycast", "sync", "--extension-dir", str(tmp_path)])
-
+    result = _sync(tmp_path)
     assert result.exit_code == 0, result.output
 
     pkg = json.loads(pkg_path.read_text())
@@ -118,10 +118,7 @@ def test_raycast_sync_title_is_title_case_of_slug(tmp_path):
     pkg_path = tmp_path / "package.json"
     pkg_path.write_text(json.dumps(_make_package_json(_FIXED_COMMANDS), indent=2) + "\n")
 
-    runner = CliRunner()
-    with patch("turbollm.cli.load_registry", return_value=_FAKE_REGISTRY):
-        result = runner.invoke(turbo_cli.cli, ["raycast", "sync", "--extension-dir", str(tmp_path)])
-
+    result = _sync(tmp_path)
     assert result.exit_code == 0, result.output
 
     pkg = json.loads(pkg_path.read_text())
@@ -136,10 +133,7 @@ def test_raycast_sync_subtitle_is_workflow_description(tmp_path):
     pkg_path = tmp_path / "package.json"
     pkg_path.write_text(json.dumps(_make_package_json(_FIXED_COMMANDS), indent=2) + "\n")
 
-    runner = CliRunner()
-    with patch("turbollm.cli.load_registry", return_value=_FAKE_REGISTRY):
-        result = runner.invoke(turbo_cli.cli, ["raycast", "sync", "--extension-dir", str(tmp_path)])
-
+    result = _sync(tmp_path)
     assert result.exit_code == 0, result.output
 
     pkg = json.loads(pkg_path.read_text())
@@ -158,13 +152,10 @@ def test_raycast_sync_is_idempotent(tmp_path):
     pkg_path = tmp_path / "package.json"
     pkg_path.write_text(json.dumps(_make_package_json(_FIXED_COMMANDS), indent=2) + "\n")
 
-    runner = CliRunner()
-    with patch("turbollm.cli.load_registry", return_value=_FAKE_REGISTRY):
-        runner.invoke(turbo_cli.cli, ["raycast", "sync", "--extension-dir", str(tmp_path)])
-        first_content = pkg_path.read_text()
-
-        runner.invoke(turbo_cli.cli, ["raycast", "sync", "--extension-dir", str(tmp_path)])
-        second_content = pkg_path.read_text()
+    _sync(tmp_path)
+    first_content = pkg_path.read_text()
+    _sync(tmp_path)
+    second_content = pkg_path.read_text()
 
     assert first_content == second_content
 
@@ -180,10 +171,7 @@ def test_raycast_sync_removes_orphan_commands(tmp_path):
     pkg_path = tmp_path / "package.json"
     pkg_path.write_text(json.dumps(_make_package_json(initial_commands), indent=2) + "\n")
 
-    runner = CliRunner()
-    with patch("turbollm.cli.load_registry", return_value=_FAKE_REGISTRY):
-        result = runner.invoke(turbo_cli.cli, ["raycast", "sync", "--extension-dir", str(tmp_path)])
-
+    result = _sync(tmp_path)
     assert result.exit_code == 0, result.output
 
     pkg = json.loads(pkg_path.read_text())
@@ -199,10 +187,7 @@ def test_raycast_sync_preserves_fixed_commands_intact(tmp_path):
     pkg_path = tmp_path / "package.json"
     pkg_path.write_text(json.dumps(_make_package_json(_FIXED_COMMANDS), indent=2) + "\n")
 
-    runner = CliRunner()
-    with patch("turbollm.cli.load_registry", return_value=_FAKE_REGISTRY):
-        result = runner.invoke(turbo_cli.cli, ["raycast", "sync", "--extension-dir", str(tmp_path)])
-
+    result = _sync(tmp_path)
     assert result.exit_code == 0, result.output
 
     pkg = json.loads(pkg_path.read_text())
@@ -222,12 +207,7 @@ def test_raycast_sync_quiet_suppresses_output(tmp_path):
     pkg_path = tmp_path / "package.json"
     pkg_path.write_text(json.dumps(_make_package_json(_FIXED_COMMANDS), indent=2) + "\n")
 
-    runner = CliRunner()
-    with patch("turbollm.cli.load_registry", return_value=_FAKE_REGISTRY):
-        result = runner.invoke(
-            turbo_cli.cli, ["raycast", "sync", "--extension-dir", str(tmp_path), "--quiet"]
-        )
-
+    result = _sync(tmp_path, "--quiet")
     assert result.exit_code == 0
     assert result.output.strip() == ""
 
@@ -247,10 +227,7 @@ def test_raycast_sync_preserves_other_package_json_fields(tmp_path):
     pkg_path = tmp_path / "package.json"
     pkg_path.write_text(json.dumps(pkg, indent=2) + "\n")
 
-    runner = CliRunner()
-    with patch("turbollm.cli.load_registry", return_value=_FAKE_REGISTRY):
-        result = runner.invoke(turbo_cli.cli, ["raycast", "sync", "--extension-dir", str(tmp_path)])
-
+    result = _sync(tmp_path)
     assert result.exit_code == 0, result.output
 
     updated = json.loads(pkg_path.read_text())
@@ -270,10 +247,7 @@ def test_raycast_sync_with_no_workflows_keeps_only_fixed(tmp_path):
     pkg_path = tmp_path / "package.json"
     pkg_path.write_text(json.dumps(_make_package_json(initial_commands), indent=2) + "\n")
 
-    runner = CliRunner()
-    with patch("turbollm.cli.load_registry", return_value={}):
-        result = runner.invoke(turbo_cli.cli, ["raycast", "sync", "--extension-dir", str(tmp_path)])
-
+    result = _sync(tmp_path, registry={})
     assert result.exit_code == 0, result.output
 
     pkg = json.loads(pkg_path.read_text())
@@ -298,10 +272,7 @@ def test_raycast_sync_creates_workflow_stubs(tmp_path):
     pkg_path = tmp_path / "package.json"
     pkg_path.write_text(json.dumps(_make_package_json(_FIXED_COMMANDS), indent=2) + "\n")
 
-    runner = CliRunner()
-    with patch("turbollm.cli.load_registry", return_value=_FAKE_REGISTRY):
-        result = runner.invoke(turbo_cli.cli, ["raycast", "sync", "--extension-dir", str(tmp_path)])
-
+    result = _sync(tmp_path)
     assert result.exit_code == 0, result.output
     for slug in ("transcribe-file", "record-to-obsidian"):
         stub = src_dir / f"{slug}.tsx"
@@ -318,10 +289,7 @@ def test_raycast_sync_creates_src_dir_if_missing(tmp_path):
     pkg_path.write_text(json.dumps(_make_package_json(_FIXED_COMMANDS), indent=2) + "\n")
     # Deliberately do NOT create src/
 
-    runner = CliRunner()
-    with patch("turbollm.cli.load_registry", return_value=_FAKE_REGISTRY):
-        result = runner.invoke(turbo_cli.cli, ["raycast", "sync", "--extension-dir", str(tmp_path)])
-
+    result = _sync(tmp_path)
     assert result.exit_code == 0, result.output
     assert (tmp_path / "src").is_dir()
     stub = tmp_path / "src" / "transcribe-file.tsx"
@@ -340,10 +308,7 @@ def test_raycast_sync_migrates_legacy_symlinks_to_stubs(tmp_path):
     pkg_path = tmp_path / "package.json"
     pkg_path.write_text(json.dumps(_make_package_json(_FIXED_COMMANDS), indent=2) + "\n")
 
-    runner = CliRunner()
-    with patch("turbollm.cli.load_registry", return_value=_FAKE_REGISTRY):
-        result = runner.invoke(turbo_cli.cli, ["raycast", "sync", "--extension-dir", str(tmp_path)])
-
+    result = _sync(tmp_path)
     assert result.exit_code == 0, result.output
     assert legacy.is_file()
     assert not legacy.is_symlink(), "legacy symlink should have been migrated to a real stub"
@@ -360,10 +325,7 @@ def test_raycast_sync_removes_orphan_stubs(tmp_path):
     pkg_path = tmp_path / "package.json"
     pkg_path.write_text(json.dumps(_make_package_json(_FIXED_COMMANDS), indent=2) + "\n")
 
-    runner = CliRunner()
-    with patch("turbollm.cli.load_registry", return_value=_FAKE_REGISTRY):
-        result = runner.invoke(turbo_cli.cli, ["raycast", "sync", "--extension-dir", str(tmp_path)])
-
+    result = _sync(tmp_path)
     assert result.exit_code == 0, result.output
     assert not orphan.exists(), "orphan stub should have been removed"
 
@@ -378,10 +340,7 @@ def test_raycast_sync_removes_orphan_legacy_symlinks(tmp_path):
     pkg_path = tmp_path / "package.json"
     pkg_path.write_text(json.dumps(_make_package_json(_FIXED_COMMANDS), indent=2) + "\n")
 
-    runner = CliRunner()
-    with patch("turbollm.cli.load_registry", return_value=_FAKE_REGISTRY):
-        result = runner.invoke(turbo_cli.cli, ["raycast", "sync", "--extension-dir", str(tmp_path)])
-
+    result = _sync(tmp_path)
     assert result.exit_code == 0, result.output
     assert not orphan.exists(), "legacy orphan symlink should have been removed"
 
@@ -396,10 +355,7 @@ def test_raycast_sync_does_not_remove_real_tsx_files(tmp_path):
     pkg_path = tmp_path / "package.json"
     pkg_path.write_text(json.dumps(_make_package_json(_FIXED_COMMANDS), indent=2) + "\n")
 
-    runner = CliRunner()
-    with patch("turbollm.cli.load_registry", return_value=_FAKE_REGISTRY):
-        result = runner.invoke(turbo_cli.cli, ["raycast", "sync", "--extension-dir", str(tmp_path)])
-
+    result = _sync(tmp_path)
     assert result.exit_code == 0, result.output
     assert real_file.exists()
     assert real_file.read_text() == "// real file\n"
@@ -412,12 +368,10 @@ def test_raycast_sync_stubs_are_idempotent(tmp_path):
     pkg_path = tmp_path / "package.json"
     pkg_path.write_text(json.dumps(_make_package_json(_FIXED_COMMANDS), indent=2) + "\n")
 
-    runner = CliRunner()
-    with patch("turbollm.cli.load_registry", return_value=_FAKE_REGISTRY):
-        runner.invoke(turbo_cli.cli, ["raycast", "sync", "--extension-dir", str(tmp_path)])
-        first = (src_dir / "transcribe-file.tsx").read_text()
-        runner.invoke(turbo_cli.cli, ["raycast", "sync", "--extension-dir", str(tmp_path)])
-        second = (src_dir / "transcribe-file.tsx").read_text()
+    _sync(tmp_path)
+    first = (src_dir / "transcribe-file.tsx").read_text()
+    _sync(tmp_path)
+    second = (src_dir / "transcribe-file.tsx").read_text()
 
     assert first == second
     assert _STUB_MARKER in first
@@ -432,10 +386,7 @@ def test_raycast_sync_writes_generated_commands_ts(tmp_path):
     pkg_path = tmp_path / "package.json"
     pkg_path.write_text(json.dumps(_make_package_json(_FIXED_COMMANDS), indent=2) + "\n")
 
-    runner = CliRunner()
-    with patch("turbollm.cli.load_registry", return_value=_FAKE_REGISTRY):
-        result = runner.invoke(turbo_cli.cli, ["raycast", "sync", "--extension-dir", str(tmp_path)])
-
+    result = _sync(tmp_path)
     assert result.exit_code == 0, result.output
     gen_path = tmp_path / "src" / "_generated_commands.ts"
     assert gen_path.exists(), "_generated_commands.ts must be written"
@@ -450,10 +401,7 @@ def test_raycast_sync_generated_commands_ts_valid_structure(tmp_path):
     pkg_path = tmp_path / "package.json"
     pkg_path.write_text(json.dumps(_make_package_json(_FIXED_COMMANDS), indent=2) + "\n")
 
-    runner = CliRunner()
-    with patch("turbollm.cli.load_registry", return_value=_FAKE_REGISTRY):
-        runner.invoke(turbo_cli.cli, ["raycast", "sync", "--extension-dir", str(tmp_path)])
-
+    _sync(tmp_path)
     content = (tmp_path / "src" / "_generated_commands.ts").read_text()
     assert content.startswith("// Auto-generated"), "should start with auto-generated comment"
     assert "export const GENERATED_COMMANDS: Record<string, string> = {" in content
@@ -465,10 +413,7 @@ def test_raycast_sync_generated_commands_ts_empty_when_no_workflows(tmp_path):
     pkg_path = tmp_path / "package.json"
     pkg_path.write_text(json.dumps(_make_package_json(_FIXED_COMMANDS), indent=2) + "\n")
 
-    runner = CliRunner()
-    with patch("turbollm.cli.load_registry", return_value={}):
-        runner.invoke(turbo_cli.cli, ["raycast", "sync", "--extension-dir", str(tmp_path)])
-
+    _sync(tmp_path, registry={})
     content = (tmp_path / "src" / "_generated_commands.ts").read_text()
     assert "GENERATED_COMMANDS" in content
     # With no workflows, the map body should be empty.
@@ -480,10 +425,7 @@ def test_raycast_sync_generated_commands_ts_is_sorted(tmp_path):
     pkg_path = tmp_path / "package.json"
     pkg_path.write_text(json.dumps(_make_package_json(_FIXED_COMMANDS), indent=2) + "\n")
 
-    runner = CliRunner()
-    with patch("turbollm.cli.load_registry", return_value=_FAKE_REGISTRY):
-        runner.invoke(turbo_cli.cli, ["raycast", "sync", "--extension-dir", str(tmp_path)])
-
+    _sync(tmp_path)
     content = (tmp_path / "src" / "_generated_commands.ts").read_text()
     record_idx = content.index("record-to-obsidian")
     transcribe_idx = content.index("transcribe-file")
@@ -499,8 +441,6 @@ def test_sidecar_auto_syncs_raycast_on_startup(tmp_path):
 
     After sidecar starts, package.json commands match the workflow registry.
     """
-    from unittest.mock import MagicMock
-
     # Fake HUD dir (sidecar checks its existence + Package.swift).
     hud_dir = tmp_path / "turbo-hud"
     hud_dir.mkdir()
@@ -517,12 +457,13 @@ def test_sidecar_auto_syncs_raycast_on_startup(tmp_path):
     mock_proc.returncode = 0
 
     with (
-        patch("turbollm.cli.subprocess.run", return_value=mock_proc),
-        patch("turbollm.cli._hud_dir", return_value=hud_dir),
-        patch("turbollm.cli._raycast_extension_dir", return_value=ext_dir),
-        patch("turbollm.cli.load_registry", return_value=_FAKE_REGISTRY),
+        patch(f"{_SIDE}.subprocess.run", return_value=mock_proc),
+        patch(f"{_SIDE}.hud_dir", return_value=hud_dir),
+        patch(f"{_SIDE}.acquirer_dir", return_value=tmp_path / "no-acquirer"),
+        patch(f"{_SIDE}.raycast_extension_dir", return_value=ext_dir),
+        patch(f"{_RAY}.load_registry", return_value=_FAKE_REGISTRY),
     ):
-        result = runner.invoke(turbo_cli.cli, ["sidecar", "--no-build"])
+        result = runner.invoke(sidecar_cmd, ["--no-build"])
 
     assert result.exit_code == 0, result.output
 
@@ -539,8 +480,6 @@ def test_sidecar_auto_syncs_raycast_on_startup(tmp_path):
 
 def test_sidecar_skips_sync_gracefully_when_extension_dir_absent(tmp_path):
     """When the Raycast extension dir does not exist, sidecar starts without error."""
-    from unittest.mock import MagicMock
-
     hud_dir = tmp_path / "turbo-hud"
     hud_dir.mkdir()
     (hud_dir / "Package.swift").touch()
@@ -552,12 +491,13 @@ def test_sidecar_skips_sync_gracefully_when_extension_dir_absent(tmp_path):
     mock_proc.returncode = 0
 
     with (
-        patch("turbollm.cli.subprocess.run", return_value=mock_proc),
-        patch("turbollm.cli._hud_dir", return_value=hud_dir),
-        patch("turbollm.cli._raycast_extension_dir", return_value=nonexistent_ext_dir),
-        patch("turbollm.cli.load_registry", return_value=_FAKE_REGISTRY),
+        patch(f"{_SIDE}.subprocess.run", return_value=mock_proc),
+        patch(f"{_SIDE}.hud_dir", return_value=hud_dir),
+        patch(f"{_SIDE}.acquirer_dir", return_value=tmp_path / "no-acquirer"),
+        patch(f"{_SIDE}.raycast_extension_dir", return_value=nonexistent_ext_dir),
+        patch(f"{_RAY}.load_registry", return_value=_FAKE_REGISTRY),
     ):
-        result = runner.invoke(turbo_cli.cli, ["sidecar", "--no-build"])
+        result = runner.invoke(sidecar_cmd, ["--no-build"])
 
     assert result.exit_code == 0, result.output
     assert "skipping sync" in result.output

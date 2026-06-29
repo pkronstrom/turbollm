@@ -176,9 +176,10 @@ turbo workflows config record-to-obsidian
 turbo workflows config record-to-obsidian vault=
 ```
 
-## Sidecars (BETA)
+## macOS sidecar + Raycast (optional plugin)
 
-The repo ships three macOS-only companions under `tools/`:
+The repo ships three macOS-only companions under `tools/`, surfaced through an
+optional in-tree plugin (`turbollm.plugins.mac`):
 
 | Tool | Role |
 |------|------|
@@ -186,13 +187,15 @@ The repo ships three macOS-only companions under `tools/`:
 | `TurboHUD` (Swift menu-bar app) | Shows active workflows and server status; triggers runs from a menu. |
 | `raycast-turbo` (Raycast extension) | Exposes every workflow as a searchable Raycast command with in-flight activities and a one-click Stop. |
 
-These are **BETA** — not code-signed, not bundled as a `.app`, and require
-manual TCC permission grants on first run. They live in-tree for transparency
-but are off by default. Opt in per shell:
+These are **not code-signed**, not bundled as a `.app`, and require manual TCC
+permission grants on first run — so the core `turbo` CLI carries none of this
+surface. The `turbo sidecar` and `turbo raycast` commands **auto-register only**
+when you're on macOS with the Swift toolchain and the in-tree `tools/` sources
+present; on Linux or a core-only install they simply don't appear. (The
+`turbollm[mac]` install extra documents the opt-in; activation itself is
+capability-based.)
 
 ```bash
-export TURBO_BETA=1
-
 turbo sidecar         # build turbo-acquirer + TurboHUD, symlink, launch HUD
 turbo raycast sync    # regenerate Raycast commands from models.toml
 ```
@@ -200,6 +203,9 @@ turbo raycast sync    # regenerate Raycast commands from models.toml
 On first media-capturing run, macOS will prompt you to grant **Microphone**
 (and **Screen Recording** for the `system+mic` scope) to `turbo-acquirer`.
 This is a one-time grant per binary.
+
+Set `TURBO_PLUGIN_DEBUG=1` to print a traceback if a plugin fails to register
+(otherwise such failures are swallowed so they can never break core `turbo`).
 
 See [`tools/raycast-turbo/README.md`](tools/raycast-turbo/README.md) for
 Raycast-specific install steps.

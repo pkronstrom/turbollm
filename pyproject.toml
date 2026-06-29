@@ -9,6 +9,13 @@ dependencies = [
     "rich>=13.0",
 ]
 
+[project.optional-dependencies]
+# macOS sidecar (TurboHUD + turbo-acquirer) + Raycast surface. No hard Python
+# deps — the plugin shells out to `swift` / `ray`. This extra is a documented
+# opt-in marker (`uv tool install "turbollm[mac]"`); the commands themselves
+# auto-register only on a Mac with the swift toolchain and the in-tree tools/.
+mac = []
+
 [project.scripts]
 turbo = "turbollm.cli:cli"
 

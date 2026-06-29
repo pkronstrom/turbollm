@@ -9,9 +9,8 @@ offline and do not touch real UserDefaults.
 """
 from __future__ import annotations
 
-from unittest.mock import call, patch
+from unittest.mock import patch
 
-import pytest
 from click.testing import CliRunner
 
 from turbollm import cli as turbo_cli
@@ -153,3 +152,25 @@ def test_defaults_key_format_matches_hud_convention():
 def test_defaults_suite_matches_hud_suite():
     """The suite name must match Settings.defaultSuiteName in Settings.swift."""
     assert turbo_cli._WORKFLOWS_CONFIG_SUITE == "com.turbollm.hud"
+
+
+# ---------------------------------------------------------------------------
+# Off-macOS hardening: /usr/bin/defaults is absent on Linux. The sticky helpers
+# must degrade to "no sticky" / no-op instead of raising FileNotFoundError.
+# ---------------------------------------------------------------------------
+
+def test_defaults_read_returns_none_when_defaults_binary_missing():
+    with patch.object(turbo_cli.subprocess, "run", side_effect=FileNotFoundError):
+        assert turbo_cli._defaults_read("com.turbollm.hud", "k") is None
+
+
+def test_defaults_read_all_returns_empty_when_defaults_binary_missing():
+    with patch.object(turbo_cli.subprocess, "run", side_effect=FileNotFoundError):
+        assert turbo_cli._defaults_read_all_for_workflow("com.turbollm.hud", "wf") == {}
+
+
+def test_defaults_write_and_delete_do_not_raise_when_binary_missing():
+    with patch.object(turbo_cli.subprocess, "run", side_effect=FileNotFoundError):
+        # Neither should raise.
+        turbo_cli._defaults_write("com.turbollm.hud", "k", "v")
+        turbo_cli._defaults_delete("com.turbollm.hud", "k")

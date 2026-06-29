@@ -33,23 +33,6 @@ from turbollm.registry import context_default_tokens, get_defaults, load_registr
 console = Console()
 
 
-def _beta_gate(feature: str) -> None:
-    """Block BETA-only commands unless TURBO_BETA=1 is set.
-
-    The Swift sidecars (turbo-acquirer, TurboHUD) and the Raycast extension
-    are macOS-specific, not yet code-signed, and require manual TCC grants.
-    They ship in-tree for transparency but are off by default until the
-    bundling/notarization story lands."""
-    if os.environ.get("TURBO_BETA", "").strip() in ("1", "true", "yes"):
-        return
-    console.print(
-        f"[yellow]`turbo {feature}` is BETA[/yellow] — the sidecar/Raycast "
-        f"surface is macOS-only and not yet bundled.\n"
-        f"  Set [bold]TURBO_BETA=1[/bold] to enable it."
-    )
-    raise SystemExit(2)
-
-
 def _get_provider_for(m: dict):
     backend = m.get("backend", get_defaults().get("backend", "vllm-mlx"))
     return get_provider(backend)
@@ -1129,12 +1112,18 @@ def _defaults_key(workflow: str, param: str) -> str:
 
 
 def _defaults_read(suite: str, key: str) -> str | None:
-    """Read a UserDefaults key from the given suite via /usr/bin/defaults."""
-    result = subprocess.run(
-        ["/usr/bin/defaults", "read", suite, key],
-        capture_output=True,
-        text=True,
-    )
+    """Read a UserDefaults key from the given suite via /usr/bin/defaults.
+
+    Workflow param stickies are a macOS/HUD convenience; off-Mac (no
+    /usr/bin/defaults) the correct behavior is "no sticky", not a crash."""
+    try:
+        result = subprocess.run(
+            ["/usr/bin/defaults", "read", suite, key],
+            capture_output=True,
+            text=True,
+        )
+    except FileNotFoundError:
+        return None
     if result.returncode != 0:
         return None
     return result.stdout.strip() or None
@@ -1142,28 +1131,37 @@ def _defaults_read(suite: str, key: str) -> str | None:
 
 def _defaults_write(suite: str, key: str, value: str) -> None:
     """Write a UserDefaults string key to the given suite via /usr/bin/defaults."""
-    subprocess.run(
-        ["/usr/bin/defaults", "write", suite, key, "-string", value],
-        check=True,
-    )
+    try:
+        subprocess.run(
+            ["/usr/bin/defaults", "write", suite, key, "-string", value],
+            check=True,
+        )
+    except FileNotFoundError:
+        console.print("[dim]Sticky values need macOS (/usr/bin/defaults); skipping.[/dim]")
 
 
 def _defaults_delete(suite: str, key: str) -> None:
     """Delete a UserDefaults key from the given suite via /usr/bin/defaults."""
-    subprocess.run(
-        ["/usr/bin/defaults", "delete", suite, key],
-        capture_output=True,  # ignore errors if key doesn't exist
-    )
+    try:
+        subprocess.run(
+            ["/usr/bin/defaults", "delete", suite, key],
+            capture_output=True,  # ignore errors if key doesn't exist
+        )
+    except FileNotFoundError:
+        pass
 
 
 def _defaults_read_all_for_workflow(suite: str, workflow: str) -> dict[str, str]:
     """Read all param sticky values for a workflow from UserDefaults."""
     prefix = f"{_WORKFLOWS_CONFIG_KEY_PREFIX}.{workflow}.param."
-    result = subprocess.run(
-        ["/usr/bin/defaults", "read", suite],
-        capture_output=True,
-        text=True,
-    )
+    try:
+        result = subprocess.run(
+            ["/usr/bin/defaults", "read", suite],
+            capture_output=True,
+            text=True,
+        )
+    except FileNotFoundError:
+        return {}
     if result.returncode != 0:
         return {}
     items: dict[str, str] = {}
@@ -1365,269 +1363,6 @@ def run_cmd(model, harness, port, backend, prompt, context_window, thinking):
 
 
 # ---------------------------------------------------------------------------
-# Sidecar — launch the Swift HUD
-# ---------------------------------------------------------------------------
-
-def _hud_dir() -> Path:
-    """Locate the tools/turbo-hud/ directory next to the turbollm source tree."""
-    return Path(__file__).resolve().parent.parent.parent / "tools" / "turbo-hud"
-
-
-def _raycast_extension_dir() -> Path:
-    """Locate the tools/raycast-turbo/ directory next to the turbollm source tree."""
-    return Path(__file__).resolve().parent.parent.parent / "tools" / "raycast-turbo"
-
-
-def _acquirer_dir() -> Path:
-    """Locate the tools/turbo-acquirer/ directory next to the turbollm source tree."""
-    return Path(__file__).resolve().parent.parent.parent / "tools" / "turbo-acquirer"
-
-
-def _local_bin() -> Path:
-    """Return ~/.local/bin/, creating it if necessary."""
-    p = Path.home() / ".local" / "bin"
-    p.mkdir(parents=True, exist_ok=True)
-    return p
-
-
-def _swift_build_product_path(package_dir: Path, product: str) -> Path:
-    """Return the expected debug binary path for a Swift package product."""
-    return package_dir / ".build" / "debug" / product
-
-
-def _refresh_symlink(link_path: Path, target_path: Path) -> None:
-    """Create or refresh a symlink at link_path → target_path."""
-    if link_path.is_symlink():
-        link_path.unlink()
-    link_path.symlink_to(target_path)
-
-
-def _sidecar_raycast_sync() -> None:
-    """Auto-sync the Raycast extension on sidecar startup (T-26).
-
-    Fails gracefully: if the extension directory is absent (e.g. the user has
-    not installed the Raycast extension yet), a dim warning is printed and
-    startup continues.
-    """
-    ext_dir = _raycast_extension_dir()
-    if not ext_dir.exists():
-        console.print("[dim]Raycast extension not found — skipping sync.[/dim]")
-        return
-    try:
-        _do_raycast_sync(ext_dir, quiet=True)
-        console.print("[dim]Raycast commands synced.[/dim]")
-    except Exception as exc:  # noqa: BLE001
-        console.print(f"[dim]Warning: raycast sync failed: {exc}[/dim]")
-
-
-@cli.command(name="sidecar")
-@click.option("--build/--no-build", default=True,
-              help="Run `swift build` before launching (default: yes).")
-def sidecar_cmd(build):
-    """Build turbo-acquirer + TurboHUD, symlink both, then launch the HUD."""
-    _beta_gate("sidecar")
-    hud_dir = _hud_dir()
-    if not hud_dir.exists() or not (hud_dir / "Package.swift").exists():
-        console.print(
-            f"[red]Swift HUD package not found at {hud_dir}.[/red]\n"
-            "Implement the package (Plan 2) before invoking turbo sidecar."
-        )
-        raise SystemExit(1)
-
-    acquirer_dir = _acquirer_dir()
-    has_acquirer = acquirer_dir.exists() and (acquirer_dir / "Package.swift").exists()
-
-    if build:
-        # Build turbo-acquirer first (independent; fails gracefully if absent).
-        if has_acquirer:
-            console.print(f"[dim]Building turbo-acquirer in {acquirer_dir}...[/dim]")
-            result = subprocess.run(["swift", "build"], cwd=acquirer_dir)
-            if result.returncode != 0:
-                console.print("[yellow]Warning: turbo-acquirer build failed — skipping.[/yellow]")
-                has_acquirer = False
-
-        # Refresh turbo-acquirer symlink if build succeeded.
-        if has_acquirer:
-            acq_bin = _swift_build_product_path(acquirer_dir, "turbo-acquirer")
-            if acq_bin.exists():
-                link = _local_bin() / "turbo-acquirer"
-                _refresh_symlink(link, acq_bin)
-                console.print(f"[dim]Symlinked turbo-acquirer → {acq_bin}[/dim]")
-
-        # Build TurboHUD too so the symlink target exists and the HUD can be
-        # launched via a stable path. This is what gives macOS a consistent
-        # binary identity for TCC grants — `swift run` rebuilds the binary
-        # in place each time and produces a fresh wrapper, which would force
-        # the user to re-grant permissions on every invocation.
-        console.print(f"[dim]Building TurboHUD in {hud_dir}...[/dim]")
-        result = subprocess.run(["swift", "build"], cwd=hud_dir)
-        if result.returncode != 0:
-            console.print("[red]TurboHUD build failed.[/red]")
-            raise SystemExit(1)
-
-    # T-26: Sync Raycast extension on every sidecar launch so per-workflow
-    # commands stay in sync with models.toml without manual intervention.
-    _sidecar_raycast_sync()
-
-    hud_bin = _swift_build_product_path(hud_dir, "TurboHUD")
-    if hud_bin.exists():
-        hud_link = _local_bin() / "TurboHUD"
-        _refresh_symlink(hud_link, hud_bin)
-        console.print(f"[dim]Symlinked TurboHUD → {hud_bin}[/dim]")
-        console.print(f"[dim]Launching HUD via {hud_link}...[/dim]")
-        subprocess.run([str(hud_link)])
-    else:
-        # Fallback (cold start before any build, or unexpected state): use
-        # `swift run` so the user is not left without a HUD. The symlink
-        # path will be wired up on the next `turbo sidecar --build`.
-        args = ["swift", "run"] if build else ["swift", "run", "--skip-build"]
-        console.print(
-            f"[yellow]HUD binary not found at {hud_bin}; "
-            f"launching via `swift run` in {hud_dir}.[/yellow]"
-        )
-        subprocess.run(args, cwd=hud_dir)
-
-
-# ---------------------------------------------------------------------------
-# Raycast integration
-# ---------------------------------------------------------------------------
-
-_RAYCAST_FIXED_COMMANDS = {"run-workflow", "running-workflows"}
-
-
-def _to_title_case(slug: str) -> str:
-    """Convert a kebab-case slug to Title Case. E.g. 'transcribe-file' → 'Transcribe File'."""
-    return " ".join(word.capitalize() for word in slug.split("-"))
-
-
-@cli.group(name="raycast")
-def raycast_grp():
-    """Raycast extension helpers."""
-    _beta_gate("raycast")
-
-
-def _do_raycast_sync(extension_dir: Path, quiet: bool) -> None:
-    """Business logic for `turbo raycast sync`. Also called by `turbo sidecar`."""
-    from turbollm import workflows as _wf
-
-    reg = load_registry()
-    wf_items = []
-    for name, wf in _wf.load_workflows(reg).items():
-        try:
-            _wf.validate_workflow(name, wf)
-        except _wf.WorkflowError:
-            continue
-        wf_items.append({"name": name, **wf})
-
-    pkg_path = Path(extension_dir) / "package.json"
-    if pkg_path.exists():
-        pkg = json.loads(pkg_path.read_text())
-    else:
-        pkg = {}
-
-    commands = pkg.get("commands", [])
-    fixed_commands = [cmd for cmd in commands if cmd.get("name") in _RAYCAST_FIXED_COMMANDS]
-
-    # Raycast's Swift Codable decoder requires `description` and `mode` on every
-    # command entry; omitting either causes "Could not install extension from
-    # development sources" / "No value associated with key description" failures.
-    # Use the workflow's description for both `subtitle` (UI hint) and
-    # `description` (required by decoder).
-    wf_commands = sorted(
-        [
-            {
-                "name": wf["name"],
-                "title": _to_title_case(wf["name"]),
-                "subtitle": wf.get("description", ""),
-                "description": wf.get("description", "") or _to_title_case(wf["name"]),
-                "mode": "view",
-            }
-            for wf in wf_items
-        ],
-        key=lambda c: c["name"],
-    )
-
-    pkg["commands"] = fixed_commands + wf_commands
-    output = json.dumps(pkg, indent=2) + "\n"
-    pkg_path.write_text(output)
-
-    # --- Per-workflow symlinks + _generated_commands.ts ---
-    src_dir = Path(extension_dir) / "src"
-    src_dir.mkdir(parents=True, exist_ok=True)
-
-    wf_names = {wf["name"] for wf in wf_items}
-
-    # Per-workflow command files. Originally symlinks to run-workflow.tsx, but
-    # Raycast's bundler de-dupes symlinks (multiple commands collapsing to one
-    # compiled JS file), causing "Could not find command's executable JS file"
-    # at runtime. Use thin re-export stubs instead — each stub is a real file
-    # so the bundler emits a distinct JS artifact per command.
-    stub_marker = "// turbo raycast sync — per-workflow re-export stub"
-    stub_body = (
-        f"{stub_marker}\n"
-        "// Logic lives in run-workflow.tsx; this file just re-exports the default\n"
-        "// component so Raycast's bundler emits a distinct compiled JS per command.\n"
-        'export { default } from "./run-workflow";\n'
-    )
-
-    for wf_name in wf_names:
-        link = src_dir / f"{wf_name}.tsx"
-        if link.is_symlink():
-            # Migrate legacy symlinks to stubs.
-            link.unlink()
-            link.write_text(stub_body)
-        elif not link.exists():
-            link.write_text(stub_body)
-        # If it's a real non-stub file (user-authored or our stub), leave alone.
-
-    # Remove orphan stub/symlink files — those whose workflow slug is no longer
-    # in the registry. Identify ours by either symlink target or stub marker.
-    for tsx_file in src_dir.glob("*.tsx"):
-        if tsx_file.stem in wf_names or tsx_file.stem in {"run-workflow", "running-workflows"}:
-            continue
-        is_legacy_symlink = tsx_file.is_symlink() and os.readlink(str(tsx_file)) == "run-workflow.tsx"
-        is_stub = tsx_file.is_file() and stub_marker in tsx_file.read_text()
-        if is_legacy_symlink or is_stub:
-            tsx_file.unlink()
-
-    # Write src/_generated_commands.ts — a type-safe command-name → workflow-name map.
-    entries = "".join(
-        f'  "{name}": "{name}",\n'
-        for name in sorted(wf_names)
-    )
-    generated_ts = (
-        "// Auto-generated by `turbo raycast sync`. Do not edit manually.\n"
-        "export const GENERATED_COMMANDS: Record<string, string> = {\n"
-        f"{entries}"
-        "};\n"
-    )
-    gen_path = src_dir / "_generated_commands.ts"
-    gen_path.write_text(generated_ts)
-
-    if not quiet:
-        console.print(
-            f"[green]Synced[/green] {len(wf_commands)} workflow command(s) → {pkg_path}"
-        )
-
-
-@raycast_grp.command(name="sync")
-@click.option(
-    "--extension-dir",
-    required=True,
-    type=click.Path(file_okay=False, path_type=Path),
-    help="Path to the Raycast extension directory (contains package.json).",
-)
-@click.option("--quiet", is_flag=True, help="Suppress output.")
-def raycast_sync(extension_dir, quiet):
-    """Regenerate Raycast package.json commands from the current workflow list.
-
-    Preserves the fixed commands (run-workflow, running-workflows) and removes
-    per-workflow commands that no longer appear in the workflow list.
-    """
-    _do_raycast_sync(Path(extension_dir), quiet)
-
-
-# ---------------------------------------------------------------------------
 # Maintenance: turbo prune
 # ---------------------------------------------------------------------------
 
@@ -1719,6 +1454,17 @@ def prune_cmd(dry_run, vault, audio_dir):
     all_targets = [t for items in targets.values() for t in items]
     deleted, freed = _prune.execute_prune(all_targets)
     console.print(f"[green]Deleted {deleted} item(s), freed {_format_bytes(freed)}[/green]")
+
+
+# ---------------------------------------------------------------------------
+# Optional plugins — attach supported plugin commands (e.g. the macOS sidecar +
+# Raycast surface). Runs at import time, after every core command is defined, so
+# it applies to both the installed `turbo` entry point and `python -m`. A
+# missing/unsupported/broken plugin never breaks core turbo (see plugins loader).
+# ---------------------------------------------------------------------------
+from turbollm.plugins import register_all  # noqa: E402
+
+register_all(cli)
 
 
 if __name__ == "__main__":

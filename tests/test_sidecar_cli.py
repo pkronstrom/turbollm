@@ -1,68 +1,62 @@
-"""Tests for `turbo sidecar` — original + T-15 extensions.
+"""Tests for `turbo sidecar` (now the macOS plugin: turbollm.plugins.mac).
 
-T-15 adds turbo-acquirer build + symlink creation alongside the HUD build.
+The sidecar command lives in turbollm.plugins.mac.sidecar and is attached to the
+core CLI only on supported machines. These tests drive the command object
+directly so they run on any platform without depending on plugin auto-detection,
+and patch the plugin module's own names (not turbollm.cli).
 """
 from __future__ import annotations
 
 import os
-from pathlib import Path
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
-import pytest
 from click.testing import CliRunner
 
-from turbollm import cli as turbo_cli
+from turbollm.plugins.mac import _common
+from turbollm.plugins.mac.sidecar import sidecar_cmd
+
+# Patch targets live in the sidecar module's namespace (it imports the helpers
+# by name from _common) and the raycast sync side-effect.
+_SIDE = "turbollm.plugins.mac.sidecar"
 
 
-@pytest.fixture(autouse=True)
-def _enable_beta(monkeypatch):
-    """These tests exercise BETA-gated sidecar/acquirer features
-    (cli._beta_gate / TURBO_BETA). Force the flag on so the gated code path
-    runs; the actual swift/subprocess work is mocked per-test."""
-    monkeypatch.setenv("TURBO_BETA", "1")
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-def _make_mock_run(returncode: int = 0):
-    """Return a Mock for subprocess.run whose .returncode attribute is set."""
-    m = MagicMock()
-    m.return_value.returncode = returncode
-    return m
+def _no_raycast_sync():
+    """Context-free helper: patch out the Raycast sync that fires on launch so
+    tests never touch the real extension directory."""
+    return patch(f"{_SIDE}._sidecar_raycast_sync", MagicMock())
 
 
 # ---------------------------------------------------------------------------
 # Existing tests (updated for the new two-binary sidecar)
 # ---------------------------------------------------------------------------
 
-def test_sidecar_errors_when_swift_package_missing(monkeypatch, tmp_path):
-    fake_repo_root = tmp_path / "fake-repo"
-    fake_repo_root.mkdir()
-    # No tools/turbo-hud/ inside fake_repo_root
+def test_sidecar_errors_when_swift_package_missing(tmp_path):
+    missing_hud = tmp_path / "tools" / "turbo-hud"  # does not exist
     runner = CliRunner()
-    with patch("turbollm.cli.Path") as mock_path:
-        mock_path.return_value.resolve.return_value.parent.parent.parent = fake_repo_root
-        result = runner.invoke(turbo_cli.cli, ["sidecar"])
+    with (
+        patch.object(_common, "hud_dir", return_value=missing_hud),
+        patch(f"{_SIDE}.hud_dir", return_value=missing_hud),
+    ):
+        result = runner.invoke(sidecar_cmd, [])
     assert result.exit_code == 1
     assert "not found" in result.output.lower()
 
 
 def test_sidecar_invokes_swift_run_for_hud(tmp_path):
-    """sidecar always ends with `swift run` in the HUD directory."""
+    """sidecar falls back to `swift run` in the HUD directory when no built binary."""
     hud_dir = tmp_path / "tools" / "turbo-hud"
     hud_dir.mkdir(parents=True)
     (hud_dir / "Package.swift").write_text("")
 
     runner = CliRunner()
     with (
-        patch("turbollm.cli.subprocess.run") as mock_run,
-        patch.object(turbo_cli, "_hud_dir", return_value=hud_dir),
-        patch.object(turbo_cli, "_acquirer_dir", return_value=tmp_path / "tools" / "no-acquirer"),
+        patch(f"{_SIDE}.subprocess.run") as mock_run,
+        patch(f"{_SIDE}.hud_dir", return_value=hud_dir),
+        patch(f"{_SIDE}.acquirer_dir", return_value=tmp_path / "tools" / "no-acquirer"),
+        _no_raycast_sync(),
     ):
         mock_run.return_value.returncode = 0
-        result = runner.invoke(turbo_cli.cli, ["sidecar"])
+        result = runner.invoke(sidecar_cmd, [])
 
     assert result.exit_code == 0
     # Last call must be `swift run` in the HUD dir.
@@ -87,15 +81,16 @@ def test_sidecar_builds_acquirer_when_present(tmp_path):
 
     runner = CliRunner()
     with (
-        patch("turbollm.cli.subprocess.run") as mock_run,
-        patch.object(turbo_cli, "_hud_dir", return_value=hud_dir),
-        patch.object(turbo_cli, "_acquirer_dir", return_value=acq_dir),
-        patch.object(turbo_cli, "_local_bin", return_value=tmp_path / "local_bin"),
-        patch.object(turbo_cli, "_swift_build_product_path",
-                     side_effect=lambda d, p: tmp_path / "no-binary"),  # binary absent → skip symlink
+        patch(f"{_SIDE}.subprocess.run") as mock_run,
+        patch(f"{_SIDE}.hud_dir", return_value=hud_dir),
+        patch(f"{_SIDE}.acquirer_dir", return_value=acq_dir),
+        patch(f"{_SIDE}.local_bin", return_value=tmp_path / "local_bin"),
+        patch(f"{_SIDE}.swift_build_product_path",
+              side_effect=lambda d, p: tmp_path / "no-binary"),  # binary absent → skip symlink
+        _no_raycast_sync(),
     ):
         mock_run.return_value.returncode = 0
-        result = runner.invoke(turbo_cli.cli, ["sidecar"])
+        result = runner.invoke(sidecar_cmd, [])
 
     assert result.exit_code == 0
     calls = [c.args[0] for c in mock_run.call_args_list]
@@ -130,14 +125,15 @@ def test_sidecar_creates_acquirer_symlink_when_binary_exists(tmp_path):
 
     runner = CliRunner()
     with (
-        patch("turbollm.cli.subprocess.run") as mock_run,
-        patch.object(turbo_cli, "_hud_dir", return_value=hud_dir),
-        patch.object(turbo_cli, "_acquirer_dir", return_value=acq_dir),
-        patch.object(turbo_cli, "_local_bin", return_value=local_bin),
-        patch.object(turbo_cli, "_refresh_symlink", side_effect=_fake_refresh_symlink),
+        patch(f"{_SIDE}.subprocess.run") as mock_run,
+        patch(f"{_SIDE}.hud_dir", return_value=hud_dir),
+        patch(f"{_SIDE}.acquirer_dir", return_value=acq_dir),
+        patch(f"{_SIDE}.local_bin", return_value=local_bin),
+        patch(f"{_SIDE}.refresh_symlink", side_effect=_fake_refresh_symlink),
+        _no_raycast_sync(),
     ):
         mock_run.return_value.returncode = 0
-        result = runner.invoke(turbo_cli.cli, ["sidecar"])
+        result = runner.invoke(sidecar_cmd, [])
 
     assert result.exit_code == 0
     assert len(symlinked) == 1
@@ -154,13 +150,14 @@ def test_sidecar_skips_acquirer_build_when_package_absent(tmp_path):
 
     runner = CliRunner()
     with (
-        patch("turbollm.cli.subprocess.run") as mock_run,
-        patch.object(turbo_cli, "_hud_dir", return_value=hud_dir),
-        patch.object(turbo_cli, "_acquirer_dir",
-                     return_value=tmp_path / "tools" / "turbo-acquirer"),  # doesn't exist
+        patch(f"{_SIDE}.subprocess.run") as mock_run,
+        patch(f"{_SIDE}.hud_dir", return_value=hud_dir),
+        patch(f"{_SIDE}.acquirer_dir",
+              return_value=tmp_path / "tools" / "turbo-acquirer"),  # doesn't exist
+        _no_raycast_sync(),
     ):
         mock_run.return_value.returncode = 0
-        result = runner.invoke(turbo_cli.cli, ["sidecar"])
+        result = runner.invoke(sidecar_cmd, [])
 
     assert result.exit_code == 0
     # No swift build should have been called in the (absent) acquirer dir.
@@ -194,11 +191,12 @@ def test_sidecar_continues_after_acquirer_build_failure(tmp_path):
 
     runner = CliRunner()
     with (
-        patch("turbollm.cli.subprocess.run", side_effect=_failing_first_run),
-        patch.object(turbo_cli, "_hud_dir", return_value=hud_dir),
-        patch.object(turbo_cli, "_acquirer_dir", return_value=acq_dir),
+        patch(f"{_SIDE}.subprocess.run", side_effect=_failing_first_run),
+        patch(f"{_SIDE}.hud_dir", return_value=hud_dir),
+        patch(f"{_SIDE}.acquirer_dir", return_value=acq_dir),
+        _no_raycast_sync(),
     ):
-        result = runner.invoke(turbo_cli.cli, ["sidecar"])
+        result = runner.invoke(sidecar_cmd, [])
 
     assert result.exit_code == 0
     assert "Warning" in result.output or "warning" in result.output.lower()
@@ -227,15 +225,16 @@ def test_sidecar_builds_and_symlinks_hud_then_launches_via_symlink(tmp_path):
 
     runner = CliRunner()
     with (
-        patch("turbollm.cli.subprocess.run") as mock_run,
-        patch.object(turbo_cli, "_hud_dir", return_value=hud_dir),
-        patch.object(turbo_cli, "_acquirer_dir",
-                     return_value=tmp_path / "tools" / "no-acquirer"),
-        patch.object(turbo_cli, "_local_bin", return_value=local_bin),
-        patch.object(turbo_cli, "_refresh_symlink", side_effect=_fake_refresh_symlink),
+        patch(f"{_SIDE}.subprocess.run") as mock_run,
+        patch(f"{_SIDE}.hud_dir", return_value=hud_dir),
+        patch(f"{_SIDE}.acquirer_dir",
+              return_value=tmp_path / "tools" / "no-acquirer"),
+        patch(f"{_SIDE}.local_bin", return_value=local_bin),
+        patch(f"{_SIDE}.refresh_symlink", side_effect=_fake_refresh_symlink),
+        _no_raycast_sync(),
     ):
         mock_run.return_value.returncode = 0
-        result = runner.invoke(turbo_cli.cli, ["sidecar"])
+        result = runner.invoke(sidecar_cmd, [])
 
     assert result.exit_code == 0
 
@@ -259,18 +258,18 @@ def test_sidecar_builds_and_symlinks_hud_then_launches_via_symlink(tmp_path):
 
 
 def test_refresh_symlink_creates_new_symlink(tmp_path):
-    """_refresh_symlink creates a new symlink when none exists."""
+    """refresh_symlink creates a new symlink when none exists."""
     target = tmp_path / "binary"
     target.write_text("bin")
     link = tmp_path / "link"
 
-    turbo_cli._refresh_symlink(link, target)
+    _common.refresh_symlink(link, target)
     assert link.is_symlink()
     assert os.readlink(str(link)) == str(target)
 
 
 def test_refresh_symlink_replaces_existing_symlink(tmp_path):
-    """_refresh_symlink replaces an old symlink."""
+    """refresh_symlink replaces an old symlink."""
     old_target = tmp_path / "old_binary"
     old_target.write_text("old")
     new_target = tmp_path / "new_binary"
@@ -278,6 +277,6 @@ def test_refresh_symlink_replaces_existing_symlink(tmp_path):
     link = tmp_path / "link"
     link.symlink_to(old_target)
 
-    turbo_cli._refresh_symlink(link, new_target)
+    _common.refresh_symlink(link, new_target)
     assert link.is_symlink()
     assert os.readlink(str(link)) == str(new_target)
