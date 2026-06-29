@@ -1,6 +1,7 @@
 import logging
 import os
 import shutil
+import sys
 from pathlib import Path
 
 from rich.console import Console
@@ -24,13 +25,15 @@ class MlxVlmProvider:
             raise SystemExit(1)
 
         srv = model.get("server", {})
+        listen_port = port
+        upstream_port = self._upstream_port(port) if srv.get("tool_call_shim") else port
         cmd = self._cmd_base() + [
             "--model",
             str(local),
             "--host",
             "127.0.0.1",
             "--port",
-            str(port),
+            str(upstream_port),
         ]
 
         draft_path = self._draft_model_path(model)
@@ -66,6 +69,19 @@ class MlxVlmProvider:
         log_level = srv.get("log_level")
         if log_level:
             cmd += ["--log-level", str(log_level)]
+
+        if srv.get("tool_call_shim") == "gemma4_bare":
+            return [
+                sys.executable,
+                "-m",
+                "turbollm.mlx_vlm_tool_proxy",
+                "--listen-port",
+                str(listen_port),
+                "--upstream-port",
+                str(upstream_port),
+                "--",
+                *cmd,
+            ]
 
         return cmd
 
@@ -122,6 +138,11 @@ class MlxVlmProvider:
         if shutil.which("mlx_vlm"):
             return ["mlx_vlm", "server"]
         return ["mlx_vlm.server"]
+
+    def _upstream_port(self, listen_port: int) -> int:
+        if listen_port <= 55535:
+            return listen_port + 10000
+        return listen_port - 10000
 
     def _model_path(self, model: dict) -> Path | None:
         local = self._configured_path(model, "local_path")

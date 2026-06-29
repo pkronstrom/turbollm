@@ -1,4 +1,5 @@
 from pathlib import Path
+import sys
 from unittest.mock import patch
 
 from turbollm.providers import get_provider
@@ -51,6 +52,42 @@ def test_builds_gemma_mtp_server_command():
     assert cmd[cmd.index("--draft-kind") + 1] == "mtp"
     assert cmd[cmd.index("--draft-block-size") + 1] == "6"
     assert "--trust-remote-code" in cmd
+
+
+def test_builds_tool_call_shim_server_command():
+    provider = MlxVlmProvider()
+    model = {
+        "hf_repo": "mlx-community/diffusiongemma-26B-A4B-it-6bit",
+        "local_path": "~/.models/mlx-community/diffusiongemma-26B-A4B-it-6bit",
+        "server": {
+            "tool_call_shim": "gemma4_bare",
+            "trust_remote_code": True,
+        },
+    }
+
+    base_path = Path(
+        "~/.models/mlx-community/diffusiongemma-26B-A4B-it-6bit"
+    ).expanduser()
+
+    with patch.object(provider, "_model_path", return_value=base_path), patch.object(
+        provider, "_draft_model_path", return_value=None
+    ):
+        cmd = provider.build_serve_cmd(model, 8899)
+
+    assert cmd[:5] == [
+        sys.executable,
+        "-m",
+        "turbollm.mlx_vlm_tool_proxy",
+        "--listen-port",
+        "8899",
+    ]
+    assert "--upstream-port" in cmd
+    upstream_port = cmd[cmd.index("--upstream-port") + 1]
+    assert upstream_port != "8899"
+    upstream_cmd = cmd[cmd.index("--") + 1 :]
+    assert upstream_cmd[:2] == ["mlx_vlm.server", "--model"]
+    assert upstream_cmd[upstream_cmd.index("--port") + 1] == upstream_port
+    assert "--trust-remote-code" in upstream_cmd
 
 
 def test_downloaded_requires_base_and_draft_local_paths(tmp_path):

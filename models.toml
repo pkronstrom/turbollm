@@ -282,6 +282,43 @@ thinkingFormat = "qwen-chat-template"
 requiresToolResultName = true
 requiresAssistantAfterToolResult = true
 
+[models.diffusiongemma-26b-a4b-it-mlx-6bit]
+name = "DiffusionGemma 26B-A4B IT MLX 6bit"
+backend = "mlx-vlm"
+# Block-diffusion LLM: denoises a 256-token canvas for up to 48 steps.
+# Requires mlx-vlm 0.6.3+; vllm-mlx has no diffusion_gemma backend.
+hf_repo = "mlx-community/diffusiongemma-26B-A4B-it-6bit"
+size_gb = 22
+# Smoke-tested 2026-06-11 (mlx-vlm 0.6.3, server path): peak ~24 GB at short ctx,
+# coherent block-diffusion output. min set to 32 for KV headroom at longer ctx.
+min_memory_gb = 32
+# DiffusionGemma emits bare Gemma calls like `call:ls{path:.}`; the mlx-vlm
+# shim below rewrites those completions into structured OpenAI tool_calls for pi.
+tool_use = true
+can_reason = false
+tags = ["diffusion", "moe", "vision", "gemma", "6bit", "experimental"]
+
+# config.json text_config.max_position_embeddings = 262144. Keep the default
+# lower for first-use safety; the picker can raise it after smoke testing.
+context_default = 32768
+context_max = 262144
+
+kv_quant = "off"
+
+[models.diffusiongemma-26b-a4b-it-mlx-6bit.server]
+timeout = 600
+trust_remote_code = true
+tool_call_shim = "gemma4_bare"
+
+[models.diffusiongemma-26b-a4b-it-mlx-6bit.pi]
+reasoning = false
+thinking = "off"
+max_tokens = 1024
+
+[models.diffusiongemma-26b-a4b-it-mlx-6bit.pi.compat]
+requiresToolResultName = true
+requiresAssistantAfterToolResult = true
+
 # NOTE (2026-06-09): Gemma 4 MTP on mlx-vlm 0.6.2 does NOT speed up the server
 # (continuous-batching) path — drafter loads but batched decode sees ~0 gain
 # (generate-path got +30%). Revisit when mlx-vlm Gemma server-MTP matures
