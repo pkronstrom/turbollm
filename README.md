@@ -204,6 +204,19 @@ On first media-capturing run, macOS will prompt you to grant **Microphone**
 (and **Screen Recording** for the `system+mic` scope) to `turbo-acquirer`.
 This is a one-time grant per binary.
 
+### Screen-recording scope
+
+For `screen-recording` workflow params, the HUD's scope submenu offers three modes:
+
+| Scope | What it captures |
+|-------|------------------|
+| `full-display` | The whole primary display. |
+| `region` | A rectangle you drag with the built-in picker (re-pick via "Re-pick region…"). |
+| `window` | A specific window you choose via the native macOS picker (`SCContentSharingPicker`) — follows that window. |
+
+Just before capture starts, the acquirer briefly flashes a green outline of the
+exact area it's about to record (~1.5s) so you can confirm the target.
+
 Set `TURBO_PLUGIN_DEBUG=1` to print a traceback if a plugin fails to register
 (otherwise such failures are swallowed so they can never break core `turbo`).
 

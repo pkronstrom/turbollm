@@ -60,6 +60,11 @@ final class RecordScreenTests: XCTestCase {
         XCTAssertEqual(rect, CGRect(x: 10, y: 20, width: 300, height: 400))
     }
 
+    func test_parseArgs_window_scope() {
+        let args = RecordScreen.parseArgs(argv: ["--output-dir", "/tmp/frames", "--scope", "window"])
+        XCTAssertEqual(args?.scope, .pickWindow)
+    }
+
     func test_overlayFrame_flips_y_to_appkit_bottom_left() {
         // sourceRect (top-left y-down) 100,200 300x150 on a 1000pt screen →
         // AppKit y = 1000 - (200+150) = 650.

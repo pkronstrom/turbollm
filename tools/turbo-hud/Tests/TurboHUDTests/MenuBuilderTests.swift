@@ -197,6 +197,41 @@ final class MenuBuilderTests: XCTestCase {
         XCTAssertEqual(killedSig, SIGTERM, "Stop must send SIGTERM specifically")
     }
 
+    func test_stop_row_escalates_to_sigkill_when_acquirer_survives_sigterm() {
+        let state = AppState()
+        state.currentAcquirerActivity = Activity(
+            id: "acq-3", kind: "acquirer", label: "audio (mic-only)",
+            icon: nil, color: nil, phase: nil,
+            startedAt: Date(), ownerPid: 41010, children: [], parentId: nil)
+        let menu = MenuBuilder.build(state: state, settings: Settings(suiteName: "t.\(UUID().uuidString)"),
+                                     onRunWorkflow: { _ in }, onEditParam: { _, _ in })
+        let stopItem = menu.items.first!
+
+        let escalated = expectation(description: "SIGKILL fallback sent")
+        var calls: [(pid_t, Int32)] = []
+        MenuTarget.shared.killFunction = { pid, sig in
+            calls.append((pid, sig))
+            if sig == SIGKILL { escalated.fulfill() }
+            return 0
+        }
+        MenuTarget.shared.processExistsFunction = { _ in true }
+        MenuTarget.shared.stopKillFallbackDelay = 0.01
+        defer {
+            MenuTarget.shared.killFunction = { pid, sig in kill(pid, sig) }
+            MenuTarget.shared.processExistsFunction = { pid in kill(pid, 0) == 0 }
+            MenuTarget.shared.stopKillFallbackDelay = 2.0
+        }
+
+        _ = stopItem.target?.perform(stopItem.action!, with: stopItem)
+        wait(for: [escalated], timeout: 1.0)
+
+        XCTAssertEqual(calls.count, 2)
+        XCTAssertEqual(calls[0].0, 41010)
+        XCTAssertEqual(calls[0].1, SIGTERM)
+        XCTAssertEqual(calls[1].0, 41010)
+        XCTAssertEqual(calls[1].1, SIGKILL)
+    }
+
     // MARK: - T-20: Permissions via test seam
 
     func test_permissions_seam_mic_denied_shows_grant_row() {
@@ -338,7 +373,7 @@ final class MenuBuilderTests: XCTestCase {
         let scopeOptions = scopeItem?.submenu?.items.map(\.title) ?? []
         XCTAssertTrue(scopeOptions.contains("full-display"))
         XCTAssertTrue(scopeOptions.contains("region"))
-        XCTAssertTrue(scopeOptions.contains("active-window"))
+        XCTAssertTrue(scopeOptions.contains("window"))
     }
 
     func test_screen_recording_scope_persists_selection() {
@@ -376,7 +411,7 @@ final class MenuBuilderTests: XCTestCase {
         // We can't inject the suite into MenuTarget easily, so we override the binding target key
         // via direct key write and then verify indirectly via MenuBuilder rebuild.
         // Instead, test the UserDefaults write by simulating the action.
-        let binding = ScreenScopeBinding(workflow: wf, param: param, scope: "active-window")
+        let binding = ScreenScopeBinding(workflow: wf, param: param, scope: "window")
         let item = NSMenuItem()
         item.representedObject = binding
         MenuTarget.shared.selectScreenScope(item)
@@ -384,7 +419,7 @@ final class MenuBuilderTests: XCTestCase {
         // The action writes to the default suite; verify via the global default suite.
         let scopeKey = "\(wf.name).\(param.name).scope"
         let written = UserDefaults(suiteName: Settings.defaultSuiteName)?.string(forKey: scopeKey)
-        XCTAssertEqual(written, "active-window", "selectScreenScope must write scope to UserDefaults")
+        XCTAssertEqual(written, "window", "selectScreenScope must write scope to UserDefaults")
         // Cleanup
         UserDefaults(suiteName: Settings.defaultSuiteName)?.removeObject(forKey: scopeKey)
     }

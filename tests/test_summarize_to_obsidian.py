@@ -18,7 +18,10 @@ import json
 import os
 import stat
 import subprocess
+import threading
 import textwrap
+from contextlib import contextmanager
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
 import pytest
@@ -59,6 +62,45 @@ def _make_stub(bin_dir: Path, name: str, body: str) -> None:
     p = bin_dir / name
     p.write_text("#!/bin/sh\n" + textwrap.dedent(body))
     p.chmod(p.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
+
+
+@contextmanager
+def _summary_server(summary_text: str):
+    """Serve the OpenAI-compatible endpoints used by the Obsidian script."""
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):  # noqa: N802
+            if self.path == "/v1/models":
+                self._json({"data": [{"id": "mlx-community/Qwen3.6-35B-A3B-4bit"}]})
+                return
+            self.send_error(404)
+
+        def do_POST(self):  # noqa: N802
+            if self.path == "/v1/chat/completions":
+                _ = self.rfile.read(int(self.headers.get("Content-Length", "0")))
+                self._json({"choices": [{"message": {"content": summary_text}}]})
+                return
+            self.send_error(404)
+
+        def log_message(self, format, *args):  # noqa: A002
+            pass
+
+        def _json(self, payload: dict) -> None:
+            body = json.dumps(payload).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+    server = HTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{server.server_port}"
+    finally:
+        server.shutdown()
+        server.server_close()
 
 
 # ---------------------------------------------------------------------------
@@ -109,11 +151,11 @@ def _run_script(
 
     # Single `turbo` stub that dispatches on the first arg:
     #   - `turbo transcribe ...` → emit the verbose_json blob
-    #   - `turbo pi ...`         → emit the summary text (consumes stdin transcript)
+    #   - `turbo serve ...`      → must not be called when the fixture server is up
     _make_stub(bin_dir, "turbo", f"""\
 case "$1" in
   transcribe) cat '{blob_file}' ;;
-  pi)         cat > /dev/null; printf '%s' "{summary_text}" ;;
+  serve)      echo "stub: turbo serve should not be called" >&2; exit 2 ;;
   *)          echo "stub: unknown subcommand $1" >&2; exit 2 ;;
 esac
 """)
@@ -133,12 +175,14 @@ esac
     }
 
     script_cmd = _script_command()
-    result = subprocess.run(
-        ["bash", "-c", script_cmd, "summarize-to-obsidian", str(audio)],
-        env=env,
-        capture_output=True,
-        text=True,
-    )
+    with _summary_server(summary_text) as summary_base:
+        env["TURBO_SUMMARIZE_API_BASE"] = summary_base
+        result = subprocess.run(
+            ["bash", "-c", script_cmd, "summarize-to-obsidian", str(audio)],
+            env=env,
+            capture_output=True,
+            text=True,
+        )
     assert result.returncode == 0, (
         f"Script exited {result.returncode}.\nstdout: {result.stdout}\nstderr: {result.stderr}"
     )

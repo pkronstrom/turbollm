@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import subprocess
+from pathlib import Path
 
 import click
 
@@ -15,6 +16,36 @@ from turbollm.plugins.mac._common import (
     refresh_symlink,
     swift_build_product_path,
 )
+
+
+def _state_dir() -> Path:
+    return Path.home() / ".turbollm" / "state"
+
+
+def _reset_stale_state() -> None:
+    """Kill orphaned acquirer processes and clear the activity state dir so the
+    HUD starts clean.
+
+    A recording that didn't shut down (e.g. one that ignored SIGTERM) keeps its
+    process alive and its `~/.turbollm/state/activity-*.json` on disk, so the HUD
+    shows a phantom "recording" with a Stop button on every relaunch. Acquirers
+    can ignore SIGTERM, so use SIGKILL; it's harmless when none are running.
+    """
+    killed = subprocess.run(
+        ["pkill", "-9", "-f", "turbo-acquirer"], capture_output=True
+    ).returncode == 0
+    cleared = 0
+    for f in _state_dir().glob("activity-*.json"):
+        try:
+            f.unlink()
+            cleared += 1
+        except OSError:
+            pass
+    if killed or cleared:
+        console.print(
+            f"[dim]Reset stale state ({'killed acquirers; ' if killed else ''}"
+            f"cleared {cleared} activity file(s)).[/dim]"
+        )
 
 
 def _sidecar_raycast_sync() -> None:
@@ -42,6 +73,9 @@ def _sidecar_raycast_sync() -> None:
               help="Run `swift build` before launching (default: yes).")
 def sidecar_cmd(build):
     """Build turbo-acquirer + TurboHUD, symlink both, then launch the HUD."""
+    # Relaunching resets state: clear any stuck recording so the HUD starts clean.
+    _reset_stale_state()
+
     hud = hud_dir()
     if not hud.exists() or not (hud / "Package.swift").exists():
         console.print(

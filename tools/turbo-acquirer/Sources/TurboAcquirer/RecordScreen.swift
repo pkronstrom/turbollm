@@ -9,6 +9,7 @@ enum RecordScreenScope: Equatable {
     case fullDisplay
     case region(CGRect)
     case activeWindow
+    case pickWindow  // user picks a window via the native SCContentSharingPicker
 }
 
 // MARK: - Manifest types
@@ -95,6 +96,8 @@ enum RecordScreen {
             scope = .region(rect)
         case "active-window":
             scope = .activeWindow
+        case "window":
+            scope = .pickWindow
         default:
             scope = .fullDisplay
         }
@@ -190,9 +193,24 @@ enum RecordScreen {
         maxKeyframes: Int,
         activityFileURL: URL?
     ) -> RecordScreenManifest {
-        // Resolve capture scope, then flash what we're about to record (before
-        // capture starts, so the overlay never lands in the recording).
+        // Resolve capture scope.
         let resolvedScope = resolveScope(scope)
+
+        // For window scope, let the user pick a window via the native macOS
+        // picker (runs on the main thread before the capture Task starts).
+        var pickedFilter: SCContentFilter? = nil
+        if case .pickWindow = resolvedScope {
+            guard let filter = pickWindowFilter() else {
+                return RecordScreenManifest(frames: [], durationMs: 0,
+                                            droppedOvercap: 0, startOffsetMs: computeStartOffsetMs())
+            }
+            pickedFilter = filter
+        }
+        let chosenFilter = pickedFilter
+
+        // Flash what we're about to record (before capture starts, so the
+        // overlay never lands in the recording). No-op for window scope — the
+        // system picker already showed the window.
         flashOverlay(scope: resolvedScope)
 
         let startNs = clock_gettime_nsec_np(CLOCK_MONOTONIC_RAW)
@@ -231,13 +249,20 @@ enum RecordScreen {
 
         Task {
             do {
-                let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
-                guard let display = content.displays.first else {
-                    fputs("record-screen: no display found\n", stderr)
-                    semaphore.signal(); return
+                let filter: SCContentFilter
+                let config: SCStreamConfiguration
+                if let picked = chosenFilter {
+                    filter = picked
+                    config = buildStreamConfigForFilter(picked)
+                } else {
+                    let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+                    guard let display = content.displays.first else {
+                        fputs("record-screen: no display found\n", stderr)
+                        semaphore.signal(); return
+                    }
+                    filter = buildContentFilter(display: display, scope: resolvedScope, content: content)
+                    config = buildStreamConfig(scope: resolvedScope, display: display)
                 }
-                let filter = buildContentFilter(display: display, scope: resolvedScope, content: content)
-                let config = buildStreamConfig(scope: resolvedScope, display: display)
                 let s = SCStream(filter: filter, configuration: config, delegate: nil)
                 try s.addStreamOutput(output, type: .screen, sampleHandlerQueue: .global(qos: .userInteractive))
                 try await s.startCapture()
@@ -311,6 +336,7 @@ enum RecordScreen {
         case .fullDisplay: frame = screen.frame
         case .region(let r): frame = overlayFrame(region: r, screenHeight: screen.frame.height)
         case .activeWindow: return  // resolveScope already turned this into .region
+        case .pickWindow: return    // the system picker already shows the window
         }
 
         _ = NSApplication.shared
@@ -332,6 +358,58 @@ enum RecordScreen {
         win.orderFrontRegardless()
         RunLoop.current.run(until: Date(timeIntervalSinceNow: 1.5))
         win.close()
+    }
+
+    // MARK: - Window picker (native SCContentSharingPicker)
+
+    private static var pickerObserver: WindowPickerObserver?
+
+    /// Presents the native macOS window picker and blocks (pumping the runloop)
+    /// until the user chooses a window or cancels. Returns the chosen filter, or
+    /// nil on cancel / 2-min timeout. Must be called on the main thread.
+    /// ponytail: native chooser — we own no window-enumeration UI; 120s cap.
+    static func pickWindowFilter() -> SCContentFilter? {
+        let picker = SCContentSharingPicker.shared
+        var config = SCContentSharingPickerConfiguration()
+        config.allowedPickerModes = [.singleWindow]
+        picker.configuration = config
+
+        let observer = WindowPickerObserver()
+        pickerObserver = observer  // retain for the picker's lifetime
+        var chosen: SCContentFilter? = nil
+        var done = false
+        observer.onFilter = { chosen = $0; done = true }
+        observer.onCancel = { done = true }
+        picker.add(observer)
+        picker.isActive = true
+
+        _ = NSApplication.shared
+        NSApp.setActivationPolicy(.accessory)
+        NSApp.activate(ignoringOtherApps: true)
+        picker.present()
+
+        let deadline = Date(timeIntervalSinceNow: 120)
+        while !done && Date() < deadline {
+            RunLoop.current.run(mode: .default, before: Date(timeIntervalSinceNow: 0.05))
+        }
+
+        picker.remove(observer)
+        picker.isActive = false
+        pickerObserver = nil
+        // Relinquish foreground so the user can interact with the HUD (e.g. press
+        // Stop) — the recorder activated itself only to present the picker.
+        NSApp.deactivate()
+        return chosen
+    }
+
+    private static func buildStreamConfigForFilter(_ filter: SCContentFilter) -> SCStreamConfiguration {
+        let config = SCStreamConfiguration()
+        config.capturesAudio = false
+        config.minimumFrameInterval = CMTime(value: 1, timescale: 10) // ~10 fps
+        config.pixelFormat = kCVPixelFormatType_32BGRA
+        config.width = max(1, Int(filter.contentRect.width * CGFloat(filter.pointPixelScale)))
+        config.height = max(1, Int(filter.contentRect.height * CGFloat(filter.pointPixelScale)))
+        return config
     }
 
     // MARK: - Scope resolution
@@ -546,5 +624,29 @@ private class ScreenCaptureOutput: NSObject, SCStreamOutput {
         if let updated = try? JSONSerialization.data(withJSONObject: dict) {
             try? updated.write(to: url)
         }
+    }
+}
+
+// MARK: - Window picker observer
+
+/// Bridges SCContentSharingPicker's delegate callbacks to closures so
+/// `pickWindowFilter()` can await a single selection. Retained by
+/// `RecordScreen.pickerObserver` for the picker's lifetime.
+final class WindowPickerObserver: NSObject, SCContentSharingPickerObserver {
+    var onFilter: ((SCContentFilter) -> Void)?
+    var onCancel: (() -> Void)?
+
+    func contentSharingPicker(_ picker: SCContentSharingPicker,
+                              didUpdateWith filter: SCContentFilter,
+                              for stream: SCStream?) {
+        onFilter?(filter)
+    }
+
+    func contentSharingPicker(_ picker: SCContentSharingPicker, didCancelFor stream: SCStream?) {
+        onCancel?()
+    }
+
+    func contentSharingPickerStartDidFailWithError(_ error: Error) {
+        onCancel?()
     }
 }

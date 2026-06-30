@@ -405,6 +405,7 @@ usage = "FILE"
 command = """
 set -euo pipefail
 vault="${OBSIDIAN_VAULT:-$HOME/Documents/Obsidian}"
+summary_base="${TURBO_SUMMARIZE_API_BASE:-http://127.0.0.1:8899}"
 
 # $1 may be either a plain audio path (manual invocation) or the JSON
 # manifest emitted by `turbo-acquirer record-audio` since Phase 2's
@@ -481,17 +482,18 @@ else
 
   # Start qwen on :8899 if no compatible server is up. pkill -P is needed because
   # `turbo serve` runs vllm-mlx as a child and doesn't forward SIGTERM itself.
-  if ! curl -sf -m 2 http://127.0.0.1:8899/v1/models 2>/dev/null | grep -q "Qwen3.6-35B-A3B-4bit"; then
+  if ! curl -sf -m 2 "$summary_base/v1/models" 2>/dev/null | grep -q "Qwen3.6-35B-A3B-4bit"; then
     turbo serve qwen36-35b-4bit --context-window "$ctx" >/dev/null 2>&1 &
     serve_pid=$!
     trap 'pkill -P "$serve_pid" 2>/dev/null; kill "$serve_pid" 2>/dev/null; wait "$serve_pid" 2>/dev/null || true' EXIT
     for _ in $(seq 1 180); do
-      curl -sf -m 2 http://127.0.0.1:8899/v1/models >/dev/null && break
+      curl -sf -m 2 "$summary_base/v1/models" >/dev/null && break
       sleep 1
     done
-    curl -sf -m 2 http://127.0.0.1:8899/v1/models >/dev/null || { echo "qwen server failed to start within 180s" >&2; exit 1; }
+    curl -sf -m 2 "$summary_base/v1/models" >/dev/null || { echo "qwen server failed to start within 180s" >&2; exit 1; }
   fi
 
+  export SUMMARY_API_BASE="$summary_base"
   export SYS_PROMPT='You are a note-taking assistant. The user records audio of varied content: meetings, lectures, voice memos, brainstorms, interviews, walking thoughts. Produce a faithful markdown summary that will land in their Obsidian vault. The transcript on stdin is authoritative ground truth — base every claim on it. Never reference yourself, the user, "the workspace", "the message", "the snippet", or your own context. Output markdown only, with no preamble or sign-off.
 
 Summarize the transcript on stdin. Choose section headings that fit the actual content — do NOT force a fixed structure. Prefer concrete bullet points where they fit, prose where they do not. Use shapes like Decisions / Action items / Open questions / Key points / Notable quotes / Topics ONLY when the content genuinely contains them. Detect the transcript language and write the summary in that same language; do not translate.'
@@ -509,7 +511,7 @@ body = json.dumps({
     "presence_penalty": 1.5,
 }).encode()
 req = urllib.request.Request(
-    "http://127.0.0.1:8899/v1/chat/completions",
+    os.environ["SUMMARY_API_BASE"] + "/v1/chat/completions",
     data=body, headers={"Content-Type": "application/json"})
 with urllib.request.urlopen(req, timeout=900) as r:
     print(json.loads(r.read())["choices"][0]["message"]["content"])
@@ -547,6 +549,7 @@ usage = "AUDIO_MANIFEST_JSON SCREEN_MANIFEST_JSON"
 command = """
 set -euo pipefail
 vault="${OBSIDIAN_VAULT:-$HOME/Documents/Obsidian}"
+summary_base="${TURBO_SUMMARIZE_API_BASE:-http://127.0.0.1:8899}"
 audio_manifest_json="$1"
 manifest_json="$2"
 # Extract audio file path from the audio manifest JSON via Python.
@@ -590,17 +593,18 @@ else
   fi
   echo "[summarize] transcript=${n_chars} chars; sizing qwen context_window=${ctx}" >&2
 
-  if ! curl -sf -m 2 http://127.0.0.1:8899/v1/models 2>/dev/null | grep -q "Qwen3.6-35B-A3B-4bit"; then
+  if ! curl -sf -m 2 "$summary_base/v1/models" 2>/dev/null | grep -q "Qwen3.6-35B-A3B-4bit"; then
     turbo serve qwen36-35b-4bit --context-window "$ctx" >/dev/null 2>&1 &
     serve_pid=$!
     trap 'pkill -P "$serve_pid" 2>/dev/null; kill "$serve_pid" 2>/dev/null; wait "$serve_pid" 2>/dev/null || true' EXIT
     for _ in $(seq 1 180); do
-      curl -sf -m 2 http://127.0.0.1:8899/v1/models >/dev/null && break
+      curl -sf -m 2 "$summary_base/v1/models" >/dev/null && break
       sleep 1
     done
-    curl -sf -m 2 http://127.0.0.1:8899/v1/models >/dev/null || { echo "qwen server failed to start within 180s" >&2; exit 1; }
+    curl -sf -m 2 "$summary_base/v1/models" >/dev/null || { echo "qwen server failed to start within 180s" >&2; exit 1; }
   fi
 
+  export SUMMARY_API_BASE="$summary_base"
   export SYS_PROMPT='You are a note-taking assistant. The user records audio of varied content: meetings, lectures, voice memos, brainstorms, interviews, walking thoughts. Produce a faithful markdown summary that will land in their Obsidian vault. The transcript on stdin is authoritative ground truth — base every claim on it. Never reference yourself, the user, "the workspace", "the message", "the snippet", or your own context. Output markdown only, with no preamble or sign-off.
 
 Summarize the transcript on stdin. Choose section headings that fit the actual content — do NOT force a fixed structure. Prefer concrete bullet points where they fit, prose where they do not. Use shapes like Decisions / Action items / Open questions / Key points / Notable quotes / Topics ONLY when the content genuinely contains them. Detect the transcript language and write the summary in that same language; do not translate.'
@@ -618,7 +622,7 @@ body = json.dumps({
     "presence_penalty": 1.5,
 }).encode()
 req = urllib.request.Request(
-    "http://127.0.0.1:8899/v1/chat/completions",
+    os.environ["SUMMARY_API_BASE"] + "/v1/chat/completions",
     data=body, headers={"Content-Type": "application/json"})
 with urllib.request.urlopen(req, timeout=900) as r:
     print(json.loads(r.read())["choices"][0]["message"]["content"])

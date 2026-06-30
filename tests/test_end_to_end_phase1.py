@@ -28,7 +28,10 @@ import json
 import os
 import stat
 import subprocess
+import threading
 import textwrap
+from contextlib import contextmanager
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from unittest.mock import patch
 
@@ -53,6 +56,45 @@ def _make_stub(bin_dir: Path, name: str, body: str) -> None:
     p = bin_dir / name
     p.write_text("#!/bin/sh\n" + textwrap.dedent(body))
     p.chmod(p.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
+
+
+@contextmanager
+def _summary_server(summary_text: str):
+    """Serve the OpenAI-compatible endpoints used by the Obsidian script."""
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):  # noqa: N802
+            if self.path == "/v1/models":
+                self._json({"data": [{"id": "mlx-community/Qwen3.6-35B-A3B-4bit"}]})
+                return
+            self.send_error(404)
+
+        def do_POST(self):  # noqa: N802
+            if self.path == "/v1/chat/completions":
+                _ = self.rfile.read(int(self.headers.get("Content-Length", "0")))
+                self._json({"choices": [{"message": {"content": summary_text}}]})
+                return
+            self.send_error(404)
+
+        def log_message(self, format, *args):  # noqa: A002
+            pass
+
+        def _json(self, payload: dict) -> None:
+            body = json.dumps(payload).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+    server = HTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{server.server_port}"
+    finally:
+        server.shutdown()
+        server.server_close()
 
 
 def _models_toml() -> dict:
@@ -87,7 +129,7 @@ FAKE_SEGMENTS = json.dumps([
 
 def test_record_to_obsidian_produces_md_and_raw_md(tmp_path):
     """
-    Full pipeline: fake acquirer -> stubbed transcribe -> stubbed pi ->
+    Full pipeline: fake acquirer -> stubbed transcribe -> fixture summary server ->
     assert Meetings/<slug>.md and Meetings/<slug>.raw.md exist.
 
     This is the automated portion of the T-25 scenario:
@@ -109,17 +151,17 @@ def test_record_to_obsidian_produces_md_and_raw_md(tmp_path):
     # (In production it would record real audio and then print the path.)
     _make_stub(bin_dir, "turbo-acquirer", f"printf '%s' '{fake_wav}'\n")
 
-    # turbo stub: handles both plain transcribe and --format segments.
+    # turbo stub: handles transcribe; serve must not be called because the
+    # fixture summary server already reports a compatible model.
     blob_file = tmp_path / "blob.json"
     blob_file.write_text(json.dumps({
         "text": "Hello Phase 1. One minute mark.",
         "segments": json.loads(FAKE_SEGMENTS),
     }))
-    # Dispatching stub: handle both `transcribe` and `pi` subcommands.
     _make_stub(bin_dir, "turbo", f"""\
 case "$1" in
   transcribe) cat '{blob_file}' ;;
-  pi)         cat > /dev/null; printf '%s' 'Fake AI summary of the meeting.' ;;
+  serve)      echo "stub: turbo serve should not be called" >&2; exit 2 ;;
   *)          echo "stub: unknown subcommand $1" >&2; exit 2 ;;
 esac
 """)
@@ -133,12 +175,14 @@ esac
         "OBSIDIAN_VAULT": str(vault),
     }
 
-    result = subprocess.run(
-        ["bash", "-c", script_cmd, "summarize-to-obsidian", str(fake_wav)],
-        env=env,
-        capture_output=True,
-        text=True,
-    )
+    with _summary_server("Fake AI summary of the meeting.") as summary_base:
+        env["TURBO_SUMMARIZE_API_BASE"] = summary_base
+        result = subprocess.run(
+            ["bash", "-c", script_cmd, "summarize-to-obsidian", str(fake_wav)],
+            env=env,
+            capture_output=True,
+            text=True,
+        )
     assert result.returncode == 0, (
         f"Script failed (exit {result.returncode}).\n"
         f"stdout: {result.stdout}\nstderr: {result.stderr}"
@@ -175,7 +219,7 @@ def test_record_to_obsidian_raw_md_has_timestamp_lines(tmp_path):
     _make_stub(bin_dir, "turbo", f"""\
 case "$1" in
   transcribe) cat '{blob_file}' ;;
-  pi)         cat > /dev/null; printf '%s' 'Summary.' ;;
+  serve)      echo "stub: turbo serve should not be called" >&2; exit 2 ;;
   *)          echo "stub: unknown subcommand $1" >&2; exit 2 ;;
 esac
 """)
@@ -189,12 +233,14 @@ esac
         "OBSIDIAN_VAULT": str(vault),
     }
 
-    result = subprocess.run(
-        ["bash", "-c", script_cmd, "summarize-to-obsidian", str(fake_wav)],
-        env=env,
-        capture_output=True,
-        text=True,
-    )
+    with _summary_server("Summary.") as summary_base:
+        env["TURBO_SUMMARIZE_API_BASE"] = summary_base
+        result = subprocess.run(
+            ["bash", "-c", script_cmd, "summarize-to-obsidian", str(fake_wav)],
+            env=env,
+            capture_output=True,
+            text=True,
+        )
     assert result.returncode == 0, f"Script failed:\n{result.stderr}"
 
     raw_md = vault / "Meetings" / "phase1-test.raw.md"

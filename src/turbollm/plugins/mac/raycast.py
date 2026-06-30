@@ -131,9 +131,9 @@ def _do_raycast_sync(extension_dir: Path, quiet: bool) -> None:
 @raycast_grp.command(name="sync")
 @click.option(
     "--extension-dir",
-    required=True,
+    default=None,
     type=click.Path(file_okay=False, path_type=Path),
-    help="Path to the Raycast extension directory (contains package.json).",
+    help="Raycast extension directory (default: the in-tree tools/raycast-turbo).",
 )
 @click.option("--quiet", is_flag=True, help="Suppress output.")
 def raycast_sync(extension_dir, quiet):
@@ -142,4 +142,6 @@ def raycast_sync(extension_dir, quiet):
     Preserves the fixed commands (run-workflow, running-workflows) and removes
     per-workflow commands that no longer appear in the workflow list.
     """
-    _do_raycast_sync(Path(extension_dir), quiet)
+    from turbollm.plugins.mac._common import raycast_extension_dir
+
+    _do_raycast_sync(Path(extension_dir) if extension_dir else raycast_extension_dir(), quiet)

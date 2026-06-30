@@ -13,7 +13,8 @@ from unittest.mock import MagicMock, patch
 from click.testing import CliRunner
 
 from turbollm.plugins.mac import _common
-from turbollm.plugins.mac.sidecar import sidecar_cmd
+from turbollm.plugins.mac import sidecar as sidecar_mod
+from turbollm.plugins.mac.sidecar import _reset_stale_state, sidecar_cmd
 
 # Patch targets live in the sidecar module's namespace (it imports the helpers
 # by name from _common) and the raycast sync side-effect.
@@ -26,6 +27,12 @@ def _no_raycast_sync():
     return patch(f"{_SIDE}._sidecar_raycast_sync", MagicMock())
 
 
+def _no_reset():
+    """Patch out the stale-state reset so tests never SIGKILL real acquirers or
+    delete the real ~/.turbollm/state."""
+    return patch(f"{_SIDE}._reset_stale_state", MagicMock())
+
+
 # ---------------------------------------------------------------------------
 # Existing tests (updated for the new two-binary sidecar)
 # ---------------------------------------------------------------------------
@@ -36,6 +43,7 @@ def test_sidecar_errors_when_swift_package_missing(tmp_path):
     with (
         patch.object(_common, "hud_dir", return_value=missing_hud),
         patch(f"{_SIDE}.hud_dir", return_value=missing_hud),
+        _no_reset(),
     ):
         result = runner.invoke(sidecar_cmd, [])
     assert result.exit_code == 1
@@ -54,6 +62,7 @@ def test_sidecar_invokes_swift_run_for_hud(tmp_path):
         patch(f"{_SIDE}.hud_dir", return_value=hud_dir),
         patch(f"{_SIDE}.acquirer_dir", return_value=tmp_path / "tools" / "no-acquirer"),
         _no_raycast_sync(),
+        _no_reset(),
     ):
         mock_run.return_value.returncode = 0
         result = runner.invoke(sidecar_cmd, [])
@@ -88,6 +97,7 @@ def test_sidecar_builds_acquirer_when_present(tmp_path):
         patch(f"{_SIDE}.swift_build_product_path",
               side_effect=lambda d, p: tmp_path / "no-binary"),  # binary absent → skip symlink
         _no_raycast_sync(),
+        _no_reset(),
     ):
         mock_run.return_value.returncode = 0
         result = runner.invoke(sidecar_cmd, [])
@@ -131,6 +141,7 @@ def test_sidecar_creates_acquirer_symlink_when_binary_exists(tmp_path):
         patch(f"{_SIDE}.local_bin", return_value=local_bin),
         patch(f"{_SIDE}.refresh_symlink", side_effect=_fake_refresh_symlink),
         _no_raycast_sync(),
+        _no_reset(),
     ):
         mock_run.return_value.returncode = 0
         result = runner.invoke(sidecar_cmd, [])
@@ -155,6 +166,7 @@ def test_sidecar_skips_acquirer_build_when_package_absent(tmp_path):
         patch(f"{_SIDE}.acquirer_dir",
               return_value=tmp_path / "tools" / "turbo-acquirer"),  # doesn't exist
         _no_raycast_sync(),
+        _no_reset(),
     ):
         mock_run.return_value.returncode = 0
         result = runner.invoke(sidecar_cmd, [])
@@ -195,6 +207,7 @@ def test_sidecar_continues_after_acquirer_build_failure(tmp_path):
         patch(f"{_SIDE}.hud_dir", return_value=hud_dir),
         patch(f"{_SIDE}.acquirer_dir", return_value=acq_dir),
         _no_raycast_sync(),
+        _no_reset(),
     ):
         result = runner.invoke(sidecar_cmd, [])
 
@@ -232,6 +245,7 @@ def test_sidecar_builds_and_symlinks_hud_then_launches_via_symlink(tmp_path):
         patch(f"{_SIDE}.local_bin", return_value=local_bin),
         patch(f"{_SIDE}.refresh_symlink", side_effect=_fake_refresh_symlink),
         _no_raycast_sync(),
+        _no_reset(),
     ):
         mock_run.return_value.returncode = 0
         result = runner.invoke(sidecar_cmd, [])
@@ -255,6 +269,33 @@ def test_sidecar_builds_and_symlinks_hud_then_launches_via_symlink(tmp_path):
     assert last_call.args[0] == [str(local_bin / "TurboHUD")], (
         f"HUD launch must go through the symlink; got {last_call}"
     )
+
+
+def test_reset_stale_state_kills_acquirers_and_clears_activity_files(tmp_path):
+    """Reset SIGKILLs orphaned acquirers (which may ignore SIGTERM) and removes
+    stale activity-*.json so the HUD doesn't show a phantom recording."""
+    state = tmp_path / "state"
+    state.mkdir()
+    (state / "activity-abc.json").write_text("{}")
+    (state / "activity-def.json").write_text("{}")
+    (state / "keep.txt").write_text("unrelated")  # must be left alone
+
+    calls = []
+
+    def _fake_run(args, **kwargs):
+        calls.append(args)
+        return MagicMock(returncode=0)
+
+    with (
+        patch.object(sidecar_mod.subprocess, "run", side_effect=_fake_run),
+        patch.object(sidecar_mod, "_state_dir", return_value=state),
+    ):
+        _reset_stale_state()
+
+    assert calls == [["pkill", "-9", "-f", "turbo-acquirer"]]
+    assert not (state / "activity-abc.json").exists()
+    assert not (state / "activity-def.json").exists()
+    assert (state / "keep.txt").exists()
 
 
 def test_refresh_symlink_creates_new_symlink(tmp_path):

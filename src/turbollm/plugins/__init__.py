@@ -17,17 +17,18 @@ list is trivially extensible and easy to test.
 
 from __future__ import annotations
 
+import importlib
 import os
 import sys
 import traceback
 from typing import TYPE_CHECKING
 
-from turbollm.plugins import mac as _mac
-
 if TYPE_CHECKING:
     import click
 
-_PLUGINS = [_mac]
+# Plugin submodule names — imported lazily inside register_all's try/except so
+# that even an import-time failure in a plugin can never break core ``turbo``.
+_PLUGINS = ["turbollm.plugins.mac"]
 
 
 def _debug_enabled() -> bool:
@@ -36,8 +37,9 @@ def _debug_enabled() -> bool:
 
 def register_all(cli: "click.Group") -> None:
     """Attach every supported plugin's root commands onto ``cli``."""
-    for plugin in _PLUGINS:
+    for name in _PLUGINS:
         try:
+            plugin = importlib.import_module(name)
             if plugin.is_supported():
                 plugin.register_root_commands(cli)
         except Exception:  # noqa: BLE001 — a plugin must never break core turbo

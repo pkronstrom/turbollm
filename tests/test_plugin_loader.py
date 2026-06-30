@@ -75,3 +75,11 @@ def test_mac_is_supported_false_off_darwin():
     """On a non-macOS platform the mac plugin reports unsupported."""
     with patch("sys.platform", "linux"):
         assert mac.is_supported() is False
+
+
+def test_register_all_swallows_plugin_import_failure(monkeypatch):
+    """An import-time failure in a plugin must not break core turbo."""
+    g = _fresh_group()
+    monkeypatch.setattr(plugins, "_PLUGINS", ["turbollm.plugins.does_not_exist"])
+    plugins.register_all(g)  # must not raise
+    assert g.commands == {}

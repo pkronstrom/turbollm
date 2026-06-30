@@ -20,7 +20,10 @@ import os
 import re
 import stat
 import subprocess
+import threading
 import textwrap
+from contextlib import contextmanager
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
 import pytest
@@ -58,6 +61,45 @@ def _make_stub(bin_dir: Path, name: str, body: str) -> None:
     p = bin_dir / name
     p.write_text("#!/bin/sh\n" + textwrap.dedent(body))
     p.chmod(p.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
+
+
+@contextmanager
+def _summary_server(summary_text: str):
+    """Serve the OpenAI-compatible endpoints used by the bundled script."""
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):  # noqa: N802
+            if self.path == "/v1/models":
+                self._json({"data": [{"id": "mlx-community/Qwen3.6-35B-A3B-4bit"}]})
+                return
+            self.send_error(404)
+
+        def do_POST(self):  # noqa: N802
+            if self.path == "/v1/chat/completions":
+                _ = self.rfile.read(int(self.headers.get("Content-Length", "0")))
+                self._json({"choices": [{"message": {"content": summary_text}}]})
+                return
+            self.send_error(404)
+
+        def log_message(self, format, *args):  # noqa: A002
+            pass
+
+        def _json(self, payload: dict) -> None:
+            body = json.dumps(payload).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+    server = HTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{server.server_port}"
+    finally:
+        server.shutdown()
+        server.server_close()
 
 
 # ---------------------------------------------------------------------------
@@ -126,7 +168,7 @@ def _run_bundled_script(
     _make_stub(bin_dir, "turbo", f"""\
 case "$1" in
   transcribe) cat '{blob_file}' ;;
-  pi)         cat > /dev/null; printf '%s' "{summary_text}" ;;
+  serve)      echo "stub: turbo serve should not be called" >&2; exit 2 ;;
   *)          echo "stub: unknown subcommand $1" >&2; exit 2 ;;
 esac
 """)
@@ -150,13 +192,15 @@ esac
     }
 
     script_cmd = _script_command()
-    result = subprocess.run(
-        ["bash", "-c", script_cmd, "summarize-to-obsidian-bundled",
-         audio_manifest_json, manifest_json],
-        env=env,
-        capture_output=True,
-        text=True,
-    )
+    with _summary_server(summary_text) as summary_base:
+        env["TURBO_SUMMARIZE_API_BASE"] = summary_base
+        result = subprocess.run(
+            ["bash", "-c", script_cmd, "summarize-to-obsidian-bundled",
+             audio_manifest_json, manifest_json],
+            env=env,
+            capture_output=True,
+            text=True,
+        )
     assert result.returncode == 0, (
         f"Script exited {result.returncode}.\nstdout: {result.stdout}\nstderr: {result.stderr}"
     )
@@ -209,7 +253,7 @@ def test_raw_md_interleaves_segments_and_keyframes(tmp_path):
 
     # Strip YAML frontmatter.
     content = re.sub(r'^---\n.*?\n---\n\n?', '', raw_text, flags=re.DOTALL)
-    content_lines = [l for l in content.splitlines() if l.strip()]
+    content_lines = [line for line in content.splitlines() if line.strip()]
 
     slug = paths["slug"]
     assert len(content_lines) == 5, (
@@ -248,7 +292,7 @@ def test_bundled_accepts_parakeet_sentences_shape(tmp_path):
     paths = _run_bundled_script(tmp_path, shape="sentences")
     raw_text = paths["raw_md"].read_text()
     content = re.sub(r'^---\n.*?\n---\n\n?', '', raw_text, flags=re.DOTALL)
-    content_lines = [l for l in content.splitlines() if l.strip()]
+    content_lines = [line for line in content.splitlines() if line.strip()]
     slug = paths["slug"]
     assert len(content_lines) == 5, "\n".join(content_lines)
     assert content_lines[0] == "[00:00] First."
@@ -280,7 +324,7 @@ def test_audio_start_offset_shifts_segment_times(tmp_path):
 
     # Strip YAML frontmatter.
     content = re.sub(r'^---\n.*?\n---\n\n?', '', raw_text, flags=re.DOTALL)
-    content_lines = [l for l in content.splitlines() if l.strip()]
+    content_lines = [line for line in content.splitlines() if line.strip()]
 
     slug = paths["slug"]
     assert len(content_lines) == 5, (

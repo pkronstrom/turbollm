@@ -365,7 +365,10 @@ enum MenuBuilder {
 
     // MARK: - Screen scope submenu (T-17, T-19)
 
-    private static let screenScopeValues = ["full-display", "region", "active-window"]
+    // "window" lets the user pick a window via the native macOS picker (handled
+    // by the acquirer at record time). Replaces the old frontmost-guessing
+    // "active-window".
+    private static let screenScopeValues = ["full-display", "region", "window"]
 
     private static func makeScreenScopeSubmenuItem(
         param: WorkflowParam, workflow: Workflow, settings: Settings
@@ -461,10 +464,20 @@ final class MenuTarget: NSObject {
 
     /// T-19 test seam: allows tests to intercept the kill call.
     var killFunction: (pid_t, Int32) -> Int32 = { pid, sig in kill(pid, sig) }
+    var processExistsFunction: (pid_t) -> Bool = { pid in
+        if kill(pid, 0) == 0 { return true }
+        return errno != ESRCH
+    }
+    var stopKillFallbackDelay: TimeInterval = 2.0
 
     @objc func stopAcquirer(_ sender: NSMenuItem) {
         guard let pidNumber = sender.representedObject as? NSNumber else { return }
-        _ = killFunction(pid_t(pidNumber.intValue), SIGTERM)
+        let pid = pid_t(pidNumber.intValue)
+        _ = killFunction(pid, SIGTERM)
+        DispatchQueue.main.asyncAfter(deadline: .now() + stopKillFallbackDelay) { [weak self] in
+            guard let self, self.processExistsFunction(pid) else { return }
+            _ = self.killFunction(pid, SIGKILL)
+        }
     }
 
     @objc func selectScope(_ sender: NSMenuItem) {

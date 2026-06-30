@@ -462,6 +462,7 @@ def test_sidecar_auto_syncs_raycast_on_startup(tmp_path):
         patch(f"{_SIDE}.acquirer_dir", return_value=tmp_path / "no-acquirer"),
         patch(f"{_SIDE}.raycast_extension_dir", return_value=ext_dir),
         patch(f"{_RAY}.load_registry", return_value=_FAKE_REGISTRY),
+        patch(f"{_SIDE}._reset_stale_state", MagicMock()),
     ):
         result = runner.invoke(sidecar_cmd, ["--no-build"])
 
@@ -496,6 +497,7 @@ def test_sidecar_skips_sync_gracefully_when_extension_dir_absent(tmp_path):
         patch(f"{_SIDE}.acquirer_dir", return_value=tmp_path / "no-acquirer"),
         patch(f"{_SIDE}.raycast_extension_dir", return_value=nonexistent_ext_dir),
         patch(f"{_RAY}.load_registry", return_value=_FAKE_REGISTRY),
+        patch(f"{_SIDE}._reset_stale_state", MagicMock()),
     ):
         result = runner.invoke(sidecar_cmd, ["--no-build"])
 
