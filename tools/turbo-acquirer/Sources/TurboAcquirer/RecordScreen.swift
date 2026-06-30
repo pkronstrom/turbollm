@@ -190,8 +190,10 @@ enum RecordScreen {
         maxKeyframes: Int,
         activityFileURL: URL?
     ) -> RecordScreenManifest {
-        // Resolve capture scope.
+        // Resolve capture scope, then flash what we're about to record (before
+        // capture starts, so the overlay never lands in the recording).
         let resolvedScope = resolveScope(scope)
+        flashOverlay(scope: resolvedScope)
 
         let startNs = clock_gettime_nsec_np(CLOCK_MONOTONIC_RAW)
         let startOffsetMs = computeStartOffsetMs()
@@ -286,6 +288,50 @@ enum RecordScreen {
             droppedOvercap: droppedOvercap,
             startOffsetMs: startOffsetMs
         )
+    }
+
+    // MARK: - Record confirmation flash
+
+    /// AppKit window frame (origin bottom-left, y-up) for a sourceRect-space
+    /// region (origin top-left, y-down) on a screen `screenHeight` points tall.
+    static func overlayFrame(region: CGRect, screenHeight: CGFloat) -> CGRect {
+        CGRect(x: region.minX, y: screenHeight - region.maxY,
+               width: region.width, height: region.height)
+    }
+
+    /// Briefly outlines the region about to be recorded (~1.5s) so the user can
+    /// confirm it. Best-effort: a missing screen or display server is a no-op,
+    /// and the 1.5s deadline means it can never hang the recording.
+    /// ponytail: borderless NSWindow + RunLoop pump; no NSApp.run() needed.
+    static func flashOverlay(scope: RecordScreenScope) {
+        guard let screen = NSScreen.screens.first(where: { $0.frame.origin == .zero })
+            ?? NSScreen.main else { return }
+        let frame: CGRect
+        switch scope {
+        case .fullDisplay: frame = screen.frame
+        case .region(let r): frame = overlayFrame(region: r, screenHeight: screen.frame.height)
+        case .activeWindow: return  // resolveScope already turned this into .region
+        }
+
+        _ = NSApplication.shared
+        NSApp.setActivationPolicy(.accessory)
+        let win = NSWindow(contentRect: frame, styleMask: .borderless,
+                           backing: .buffered, defer: false)
+        win.isReleasedWhenClosed = false
+        win.level = .screenSaver
+        win.backgroundColor = .clear
+        win.isOpaque = false
+        win.ignoresMouseEvents = true
+        win.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
+        let v = NSView(frame: CGRect(origin: .zero, size: frame.size))
+        v.wantsLayer = true
+        v.layer?.borderWidth = 8
+        v.layer?.borderColor = NSColor.systemGreen.cgColor
+        v.layer?.backgroundColor = NSColor.systemGreen.withAlphaComponent(0.18).cgColor
+        win.contentView = v
+        win.orderFrontRegardless()
+        RunLoop.current.run(until: Date(timeIntervalSinceNow: 1.5))
+        win.close()
     }
 
     // MARK: - Scope resolution

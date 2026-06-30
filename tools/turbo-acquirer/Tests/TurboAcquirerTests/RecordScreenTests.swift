@@ -60,6 +60,14 @@ final class RecordScreenTests: XCTestCase {
         XCTAssertEqual(rect, CGRect(x: 10, y: 20, width: 300, height: 400))
     }
 
+    func test_overlayFrame_flips_y_to_appkit_bottom_left() {
+        // sourceRect (top-left y-down) 100,200 300x150 on a 1000pt screen →
+        // AppKit y = 1000 - (200+150) = 650.
+        let f = RecordScreen.overlayFrame(region: CGRect(x: 100, y: 200, width: 300, height: 150),
+                                          screenHeight: 1000)
+        XCTAssertEqual(f, CGRect(x: 100, y: 650, width: 300, height: 150))
+    }
+
     func test_parseRegionString_invalid_returns_nil() {
         XCTAssertNil(RecordScreen.parseRegionString("bad"))
         XCTAssertNil(RecordScreen.parseRegionString("1,2,3"))
