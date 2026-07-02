@@ -55,7 +55,6 @@ def start_activity(
     activity_id: str | None = None,
 ) -> str:
     """Write a new activity file. Returns the activity id."""
-    STATE_DIR.mkdir(parents=True, exist_ok=True)
     aid = activity_id or f"{kind}-{_uuid.uuid4().hex[:12]}"
     data = {
         "id": aid,
@@ -72,20 +71,26 @@ def start_activity(
 
 
 def update_activity(activity_id: str, **fields) -> None:
-    """Merge `fields` into the activity file. Silently no-ops if missing."""
+    """Merge `fields` into the activity file. Silently no-ops if missing.
+
+    Reads via try/except rather than exists()-then-read to avoid a TOCTOU
+    race: the file can be removed (e.g. by `clear_activity` in another
+    thread/process, or `turbo prune`) between an existence check and the
+    read that follows it.
+    """
     path = activity_path(activity_id)
-    if not path.exists():
+    try:
+        raw = path.read_text()
+    except FileNotFoundError:
         return
-    data = _json.loads(path.read_text())
+    data = _json.loads(raw)
     data.update({k: v for k, v in fields.items() if v is not None})
     _atomic_write(path, _json.dumps(data, indent=2))
 
 
 def clear_activity(activity_id: str) -> None:
     """Delete an activity file. No-op if it doesn't exist."""
-    path = activity_path(activity_id)
-    if path.exists():
-        path.unlink()
+    activity_path(activity_id).unlink(missing_ok=True)
 
 
 def list_activities() -> list[dict]:
@@ -99,7 +104,7 @@ def list_activities() -> list[dict]:
         except (OSError, _json.JSONDecodeError):
             continue
         pid = data.get("owner_pid")
-        if pid and not _pid_alive(pid):
+        if pid and not pid_alive(pid):
             try:
                 path.unlink()
             except OSError:
@@ -109,14 +114,26 @@ def list_activities() -> list[dict]:
     return items
 
 
-def _pid_alive(pid: int) -> bool:
-    """Check whether `pid` is still running. Uses signal-0 trick — no permissions check.
+def pid_alive(pid: int) -> bool:
+    """Check whether `pid` is still running.
+
+    Uses the signal-0 trick: `kill(pid, 0)` sends no actual signal but still
+    performs the kernel's existence + permission check, per POSIX kill(2). A
+    `PermissionError` means the process exists but we lack rights to signal
+    it — that still counts as alive.
+
+    `pid <= 0` is guarded explicitly: 0 means "every process in the caller's
+    process group" and negative values address a process group, so
+    `os.kill(pid, 0)` on either would report "alive" without checking any
+    single real process.
 
     Caveat: macOS recycles PIDs over time (~30k cycle), so a long-running
     activity file whose owner died days ago could theoretically have its PID
     re-issued to an unrelated process and look "alive" here. In practice the
     24h-staleness filter + sequential PID issuance make this negligible.
     """
+    if pid <= 0:
+        return False
     try:
         _os.kill(pid, 0)
     except ProcessLookupError:

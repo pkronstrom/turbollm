@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import json
 import subprocess
 from pathlib import Path
 
 import click
 
+from turbollm.activity import pid_alive as _pid_alive
 from turbollm.plugins.mac._common import (
     acquirer_dir,
     console,
@@ -23,19 +25,37 @@ def _state_dir() -> Path:
 
 
 def _reset_stale_state() -> None:
-    """Kill orphaned acquirer processes and clear the activity state dir so the
-    HUD starts clean.
+    """Kill orphaned acquirer processes and clear dead-owner activity files so
+    the HUD starts clean.
 
     A recording that didn't shut down (e.g. one that ignored SIGTERM) keeps its
     process alive and its `~/.turbollm/state/activity-*.json` on disk, so the HUD
     shows a phantom "recording" with a Stop button on every relaunch. Acquirers
     can ignore SIGTERM, so use SIGKILL; it's harmless when none are running.
+
+    Uses `-x` (exact process-name match) rather than `-f` (full command-line
+    match): `-f` matches against argv of *any* process, including e.g. an
+    editor or `swift build` running inside this repo's own
+    `tools/turbo-acquirer/` dev tree — SIGKILLing those is not "harmless".
+
+    Only activity files whose owner_pid is no longer alive are removed — a
+    live workflow's activity file must survive a relaunch, otherwise it
+    vanishes from the HUD and its subsequent `update_activity` calls silently
+    no-op (they're keyed on the file existing).
     """
     killed = subprocess.run(
-        ["pkill", "-9", "-f", "turbo-acquirer"], capture_output=True
+        ["pkill", "-9", "-x", "turbo-acquirer"], capture_output=True
     ).returncode == 0
     cleared = 0
     for f in _state_dir().glob("activity-*.json"):
+        try:
+            data = json.loads(f.read_text())
+        except (OSError, ValueError):
+            # Malformed — can't have a live owner we'd be clobbering.
+            data = {}
+        pid = data.get("owner_pid")
+        if isinstance(pid, int) and _pid_alive(pid):
+            continue
         try:
             f.unlink()
             cleared += 1

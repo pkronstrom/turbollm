@@ -4,10 +4,11 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 from turbollm.harnesses import register
-from turbollm.registry import get_defaults
+from turbollm.registry import effective_context, get_defaults
 
 
 @register("opencode")
@@ -23,7 +24,9 @@ class OpenCodeHarness:
     def launch(self, model_id: str, port: int, model: dict) -> None:
         defaults_oc = get_defaults().get("opencode", {})
         model_oc = model.get("opencode", {})
-        ctx = model_oc.get("context_length", defaults_oc.get("context_length", 32768))
+        # Registry's single source of truth for the server's actual context
+        # window, not a fixed 32768 that ignores what the picker/model chose.
+        ctx = model_oc.get("context_length") or effective_context(model)
         out = model_oc.get("output_length", defaults_oc.get("output_length", 8192))
 
         turbo_cfg = {
@@ -46,9 +49,25 @@ class OpenCodeHarness:
         }
 
         oc_path = Path.home() / ".config" / "opencode" / "opencode.json"
+        existing = None
         if oc_path.exists():
-            existing = json.loads(oc_path.read_text())
+            raw_text = oc_path.read_text()
+            try:
+                existing = json.loads(raw_text)
+            except json.JSONDecodeError as e:
+                print(
+                    f"[turbo opencode] warning: {oc_path} is corrupt ({e}); "
+                    f"falling back to a turbo-only config",
+                    file=sys.stderr,
+                )
+
+        if existing is not None:
             existing.setdefault("provider", {}).update(turbo_cfg["provider"])
+            # The turbo-served model must actually be selected — this config
+            # is passed via OPENCODE_CONFIG_CONTENT (not persisted back to
+            # opencode.json), so overriding the user's previous default here
+            # is safe and doesn't touch their file.
+            existing["model"] = turbo_cfg["model"]
             config = existing
         else:
             config = turbo_cfg

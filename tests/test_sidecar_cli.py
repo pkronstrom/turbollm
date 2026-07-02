@@ -10,6 +10,7 @@ from __future__ import annotations
 import os
 from unittest.mock import MagicMock, patch
 
+import pytest
 from click.testing import CliRunner
 
 from turbollm.plugins.mac import _common
@@ -273,7 +274,7 @@ def test_sidecar_builds_and_symlinks_hud_then_launches_via_symlink(tmp_path):
 
 def test_reset_stale_state_kills_acquirers_and_clears_activity_files(tmp_path):
     """Reset SIGKILLs orphaned acquirers (which may ignore SIGTERM) and removes
-    stale activity-*.json so the HUD doesn't show a phantom recording."""
+    dead-owner activity-*.json so the HUD doesn't show a phantom recording."""
     state = tmp_path / "state"
     state.mkdir()
     (state / "activity-abc.json").write_text("{}")
@@ -292,10 +293,38 @@ def test_reset_stale_state_kills_acquirers_and_clears_activity_files(tmp_path):
     ):
         _reset_stale_state()
 
-    assert calls == [["pkill", "-9", "-f", "turbo-acquirer"]]
+    # -x (exact process-name match), not -f (full command-line match) — -f
+    # would also match e.g. an editor open on tools/turbo-acquirer/ in this
+    # very repo.
+    assert calls == [["pkill", "-9", "-x", "turbo-acquirer"]]
+    # Owner-less (no owner_pid) files can't have a live owner — removed.
     assert not (state / "activity-abc.json").exists()
     assert not (state / "activity-def.json").exists()
     assert (state / "keep.txt").exists()
+
+
+def test_reset_stale_state_preserves_activity_of_live_owner(tmp_path):
+    """An activity file whose owner_pid is still alive must survive a reset —
+    otherwise a running workflow vanishes from the HUD and its subsequent
+    activity.update_activity calls silently no-op."""
+    import json
+    import os
+
+    state = tmp_path / "state"
+    state.mkdir()
+    live = state / "activity-live.json"
+    live.write_text(json.dumps({"owner_pid": os.getpid()}))
+    dead = state / "activity-dead.json"
+    dead.write_text(json.dumps({"owner_pid": 999999}))  # unlikely to exist
+
+    with (
+        patch.object(sidecar_mod.subprocess, "run", return_value=MagicMock(returncode=0)),
+        patch.object(sidecar_mod, "_state_dir", return_value=state),
+    ):
+        _reset_stale_state()
+
+    assert live.exists()
+    assert not dead.exists()
 
 
 def test_refresh_symlink_creates_new_symlink(tmp_path):
@@ -321,3 +350,30 @@ def test_refresh_symlink_replaces_existing_symlink(tmp_path):
     _common.refresh_symlink(link, new_target)
     assert link.is_symlink()
     assert os.readlink(str(link)) == str(new_target)
+
+
+def test_refresh_symlink_replaces_regular_file_at_link_path(tmp_path):
+    """A plain regular file occupying link_path (not a symlink) must be
+    replaced rather than raising FileExistsError."""
+    target = tmp_path / "binary"
+    target.write_text("bin")
+    link = tmp_path / "link"
+    link.write_text("stray real file, not a symlink")  # e.g. a stray touch
+
+    _common.refresh_symlink(link, target)
+    assert link.is_symlink()
+    assert os.readlink(str(link)) == str(target)
+
+
+def test_refresh_symlink_refuses_to_delete_real_directory(tmp_path):
+    """A real directory at link_path must be left alone — refresh_symlink
+    should not silently rm -rf it to make room for a symlink."""
+    target = tmp_path / "binary"
+    target.write_text("bin")
+    link = tmp_path / "link"
+    link.mkdir()
+
+    with pytest.raises(OSError):
+        _common.refresh_symlink(link, target)
+    assert link.is_dir()
+    assert not link.is_symlink()

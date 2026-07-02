@@ -84,3 +84,38 @@ def test_list_activities_keeps_alive_pid(monkeypatch, tmp_path):
     aid = activity.start_activity(kind="workflow", label="Alive")  # uses os.getpid()
     items = activity.list_activities()
     assert any(it["id"] == aid for it in items)
+
+
+def test_update_activity_tolerates_file_removed_concurrently(monkeypatch, tmp_path):
+    """update_activity must not raise if the file vanished between an
+    existence check and the read (e.g. removed by clear_activity or
+    `turbo prune` running concurrently) — it should just no-op."""
+    _redirect_state_dir(monkeypatch, tmp_path)
+    # No start_activity call — activity_path("ghost") never existed.
+    activity.update_activity("ghost", label="whatever")  # must not raise
+
+
+def test_clear_activity_is_atomic_missing_ok(monkeypatch, tmp_path):
+    """clear_activity uses unlink(missing_ok=True) rather than
+    exists()-then-unlink, so a file removed between the two by another
+    process can't cause a FileNotFoundError here."""
+    state_dir = _redirect_state_dir(monkeypatch, tmp_path)
+    aid = activity.start_activity(kind="workflow", label="X")
+    # Simulate another process having already removed it.
+    activity.activity_path(aid).unlink()
+    activity.clear_activity(aid)  # must not raise
+    assert list(state_dir.glob("activity-*.json")) == []
+
+
+def test_pid_alive_rejects_zero_and_negative_pid():
+    """pid 0 addresses the caller's own process group and negative pids
+    address a process group — os.kill(pid, 0) on either "succeeds" without
+    checking any single real process, so pid_alive must special-case them
+    rather than reporting them as alive."""
+    assert activity.pid_alive(0) is False
+    assert activity.pid_alive(-1) is False
+    assert activity.pid_alive(-999) is False
+
+
+def test_pid_alive_true_for_self():
+    assert activity.pid_alive(os.getpid()) is True

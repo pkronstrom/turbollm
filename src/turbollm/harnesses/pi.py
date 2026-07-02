@@ -4,10 +4,11 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 from turbollm.harnesses import register
-from turbollm.registry import get_defaults
+from turbollm.registry import effective_context, get_defaults
 
 
 @register("pi")
@@ -50,27 +51,16 @@ class PiHarness:
         model_name = str(model.get("name", model_id))
         model_repo = str(model.get("hf_repo", ""))
         is_qwen = "qwen" in model_id.lower() or "qwen" in model_name.lower() or "qwen" in model_repo.lower()
-        defaults_oc = get_defaults().get("opencode", {})
-        model_oc = model.get("opencode", {})
+        defaults_pi = get_defaults().get("pi", {})
         pi_cfg = model.get("pi", {})
-        srv = model.get("server", {})
         # Picker writes pi.context_window at runtime if invoked; otherwise
-        # derive from the model's unified context_default (with legacy
-        # [opencode].context_length and [server].max_tokens as fallbacks).
-        context_window = pi_cfg.get(
-            "context_window",
-            model.get(
-                "context_default",
-                model_oc.get(
-                    "context_length",
-                    srv.get("max_tokens", defaults_oc.get("context_length", 32768)),
-                ),
-            ),
-        )
-        max_tokens = pi_cfg.get(
-            "max_tokens",
-            model_oc.get("output_length", defaults_oc.get("output_length", 8192)),
-        )
+        # derive from registry.effective_context() — the single source of
+        # truth for what the server will actually serve (server.max_tokens
+        # / server.context first, then context_default). Previously this
+        # fell back through [opencode].context_length / [defaults.opencode]
+        # — cross-harness borrowing that could disagree with the server.
+        context_window = pi_cfg.get("context_window") or effective_context(model)
+        max_tokens = pi_cfg.get("max_tokens", defaults_pi.get("output_length", 8192))
         reasoning = pi_cfg.get("reasoning", model.get("can_reason", False))
 
         model_entry = {
@@ -102,7 +92,18 @@ class PiHarness:
         }
 
         if models_json.exists():
-            existing = json.loads(models_json.read_text())
+            raw_text = models_json.read_text()
+            try:
+                existing = json.loads(raw_text)
+            except json.JSONDecodeError as e:
+                backup = models_json.with_name(models_json.name + ".bak")
+                backup.write_text(raw_text)
+                print(
+                    f"[turbo pi] warning: {models_json} is corrupt ({e}); "
+                    f"backed up to {backup} and starting fresh",
+                    file=sys.stderr,
+                )
+                existing = {}
         else:
             pi_dir.mkdir(parents=True, exist_ok=True)
             existing = {}

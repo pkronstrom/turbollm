@@ -1,10 +1,9 @@
-import logging
-import os
 import shutil
 from pathlib import Path
 
 from rich.console import Console
 
+from turbollm.hf_download import quiet_hf, translate_hf_errors
 from turbollm.registry import _hf_snapshot_path
 
 console = Console()
@@ -29,13 +28,12 @@ class MlxAudioProvider:
         # transcription call doesn't stall on a download.
         return ["mlx_audio.server", "--host", "127.0.0.1", "--port", str(port)]
 
+    @translate_hf_errors
     def pull(self, model: dict) -> None:
         from huggingface_hub import snapshot_download
 
         repo = model["hf_repo"]
-        logging.getLogger("httpx").setLevel(logging.WARNING)
-        logging.getLogger("huggingface_hub").setLevel(logging.WARNING)
-        os.environ["HF_HUB_DISABLE_TELEMETRY"] = "1"
+        quiet_hf()
 
         console.print(f"  [dim]downloading {repo}…[/dim]")
         local = snapshot_download(repo_id=repo)

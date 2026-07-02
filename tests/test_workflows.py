@@ -1,3 +1,5 @@
+import shlex as _shlex
+
 import pytest
 
 from turbollm import workflows
@@ -111,6 +113,68 @@ def test_expand_template_handles_multiple_tokens():
     assert out == "audio=/tmp/a.wav title=Meeting"
 
 
+# ---------- BUG-6: expand_template(quote=True) shell-quotes substituted values ----------
+
+
+def test_expand_template_quote_false_is_unchanged_by_default():
+    """Default behavior (quote=False) is byte-for-byte unchanged — used by
+    script-reference workflows' positional args and env values, which are
+    never spliced into a shell string so quoting would be wrong there."""
+    out = workflows.expand_template("hi {{name}}", params={"name": "world"})
+    assert out == "hi world"
+
+
+def test_expand_template_quote_true_leaves_safe_values_unquoted():
+    """shlex.quote is a no-op for values that need no quoting — so existing
+    inline-command templates with simple values are unaffected."""
+    out = workflows.expand_template("echo {{name}}", params={"name": "hello-world"}, quote=True)
+    assert out == "echo hello-world"
+
+
+def test_expand_template_quote_true_quotes_value_with_spaces():
+    out = workflows.expand_template(
+        "turbo transcribe {{file}}", params={"file": "/tmp/my recording.wav"}, quote=True
+    )
+    assert out == "turbo transcribe '/tmp/my recording.wav'"
+
+
+def test_expand_template_quote_true_neutralizes_shell_injection():
+    """A `--param` value containing shell metacharacters must not execute as
+    a second command when the expanded template is handed to `sh -c`."""
+    malicious = "x; touch /tmp/should-not-exist-from-workflow-test"
+    out = workflows.expand_template("echo {{val}}", params={"val": malicious}, quote=True)
+    # The whole malicious string must be a single shell-quoted token, not
+    # unquoted text that a shell would split on `;`.
+    assert out == f"echo {_shlex.quote(malicious)}"
+    assert ";" not in out.split("'", 1)[0]  # semicolon only appears inside the quotes
+
+
+def test_run_workflow_inline_command_quotes_param_with_space(tmp_path):
+    """End-to-end: a recorded path containing a space must survive intact
+    through an inline `command` workflow instead of being word-split.
+
+    Note the template below does *not* manually wrap `{{audio}}` in quotes —
+    `expand_template(quote=True)` (used for all inline `command` workflows,
+    see run_workflow) already shell-quotes the substituted value. Manually
+    quoting on top of that (`"{{audio}}"`) would nest quoting and corrupt the
+    value; workflow authors should stop hand-quoting params in `command`
+    strings now that this is automatic.
+    """
+    out_file = tmp_path / "out.txt"
+    audio_dir = tmp_path / "my recordings"
+    audio_dir.mkdir()
+    audio_path = audio_dir / "clip.wav"
+    audio_path.write_bytes(b"RIFF")
+
+    wf = {
+        "command": f'echo {{{{audio}}}} > "{out_file}"',
+        "params": [{"name": "audio", "type": "audio-recording", "mode": "primary"}],
+    }
+    rc = workflows.run_workflow("x", wf, overrides={"audio": str(audio_path)}, registry={})
+    assert rc == 0
+    assert out_file.read_text().strip() == str(audio_path)
+
+
 def test_resolve_params_uses_default_when_no_override():
     params = [{"name": "title", "type": "string", "default": "untitled"}]
     out = workflows.resolve_params(params, overrides={})
@@ -158,6 +222,142 @@ def test_resolve_params_empty_string_when_no_default():
     params = [{"name": "title", "type": "string"}]
     out = workflows.resolve_params(params, overrides={})
     assert out == {"title": ""}
+
+
+# ---------- auto templates referencing background-acquired params ----------
+
+
+def test_auto_template_referencing_background_param_raises_clear_error(monkeypatch, tmp_path):
+    """An `auto` template referencing a background-mode acquired param must
+    fail with a dedicated, actionable error — not the generic 'undefined
+    param' message expand_template raises for genuine typos."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    _make_fake_acquirer(bin_dir, "turbo-acquirer", """\
+case "$1" in
+  record-screen) sleep 5; printf 'unused' ;;
+  *) exit 1 ;;
+esac
+""")
+    monkeypatch.setenv("TURBO_ACQUIRER_BIN", str(bin_dir / "turbo-acquirer"))
+
+    params = [
+        {"name": "screen", "type": "screen-recording", "mode": "background"},
+        {"name": "title", "type": "string", "auto": "{{screen}}-title"},
+    ]
+    with pytest.raises(workflows.WorkflowError, match="acquired in the background"):
+        workflows.resolve_params(
+            params, overrides={}, acquirer_bin=workflows.find_acquirer_bin()
+        )
+
+
+def test_auto_template_referencing_resolved_param_still_works():
+    """Sanity: `auto` referencing an earlier *non*-background param is unaffected."""
+    params = [
+        {"name": "who", "type": "string", "default": "world"},
+        {"name": "greeting", "type": "string", "auto": "hi {{who}}"},
+    ]
+    out = workflows.resolve_params(params, overrides={})
+    assert out["greeting"] == "hi world"
+
+
+def test_auto_template_referencing_overridden_background_param_is_fine():
+    """If the background param was supplied via --param (so it's already in
+    `resolved`), the auto template can reference it without error."""
+    params = [
+        {"name": "screen", "type": "screen-recording", "mode": "background"},
+        {"name": "title", "type": "string", "auto": "{{screen}}-title"},
+    ]
+    out = workflows.resolve_params(params, overrides={"screen": "/tmp/manifest.json"})
+    assert out["title"] == "/tmp/manifest.json-title"
+
+
+# ---------- `turbo workflows config` stickies consulted by resolve_params ----------
+
+
+def test_resolve_params_reads_workflow_config_sticky(monkeypatch):
+    def fake_sticky(workflow_name, param_name):
+        assert workflow_name == "record-to-obsidian"
+        assert param_name == "vault"
+        return "/sticky/vault"
+
+    monkeypatch.setattr(workflows, "_read_workflow_config_sticky", fake_sticky)
+    params = [{"name": "vault", "type": "directory", "default": "/default/vault"}]
+    out = workflows.resolve_params(params, overrides={}, workflow_name="record-to-obsidian")
+    assert out == {"vault": "/sticky/vault"}
+
+
+def test_resolve_params_override_beats_sticky(monkeypatch):
+    monkeypatch.setattr(workflows, "_read_workflow_config_sticky", lambda *a: "/sticky/vault")
+    params = [{"name": "vault", "type": "directory", "default": "/default/vault"}]
+    out = workflows.resolve_params(
+        params, overrides={"vault": "/cli/vault"}, workflow_name="wf"
+    )
+    assert out == {"vault": "/cli/vault"}
+
+
+def test_resolve_params_sticky_beats_default():
+    params = [{"name": "vault", "type": "directory", "default": "/default/vault"}]
+
+    def sticky(workflow_name, param_name):
+        return "/sticky/vault"
+
+    import unittest.mock as _mock
+
+    with _mock.patch.object(workflows, "_read_workflow_config_sticky", side_effect=sticky):
+        out = workflows.resolve_params(params, overrides={}, workflow_name="wf")
+    assert out == {"vault": "/sticky/vault"}
+
+
+def test_resolve_params_no_sticky_falls_back_to_default(monkeypatch):
+    monkeypatch.setattr(workflows, "_read_workflow_config_sticky", lambda *a: None)
+    params = [{"name": "vault", "type": "directory", "default": "/default/vault"}]
+    out = workflows.resolve_params(params, overrides={}, workflow_name="wf")
+    assert out == {"vault": "/default/vault"}
+
+
+def test_resolve_params_no_sticky_lookup_without_workflow_name(monkeypatch):
+    """No workflow_name → sticky lookup must not be attempted at all (this is
+    also what keeps every other resolve_params test in this file, which don't
+    pass workflow_name, from shelling out to /usr/bin/defaults)."""
+    def fail(*a, **kw):
+        raise AssertionError("_read_workflow_config_sticky must not be called")
+
+    monkeypatch.setattr(workflows, "_read_workflow_config_sticky", fail)
+    params = [{"name": "vault", "type": "directory", "default": "/default/vault"}]
+    out = workflows.resolve_params(params, overrides={})
+    assert out == {"vault": "/default/vault"}
+
+
+def test_read_workflow_config_sticky_returns_none_when_defaults_missing(monkeypatch):
+    """Non-macOS / no /usr/bin/defaults degrades to 'no sticky', not a crash."""
+    def fail_run(*a, **kw):
+        raise FileNotFoundError()
+
+    monkeypatch.setattr(workflows._subprocess, "run", fail_run)
+    assert workflows._read_workflow_config_sticky("wf", "param") is None
+
+
+def test_read_workflow_config_sticky_uses_matching_key_convention(monkeypatch):
+    """Key format must match cli.py's `_defaults_key` convention exactly, so
+    a value set via `turbo workflows config <wf> <param>=<value>` is found."""
+    captured = []
+
+    def fake_run(argv, **kw):
+        captured.append(argv)
+
+        class _R:
+            returncode = 0
+            stdout = "hello\n"
+
+        return _R()
+
+    monkeypatch.setattr(workflows._subprocess, "run", fake_run)
+    value = workflows._read_workflow_config_sticky("record-to-obsidian", "vault")
+    assert value == "hello"
+    assert captured == [
+        ["/usr/bin/defaults", "read", "com.turbollm.hud", "workflow.record-to-obsidian.param.vault"]
+    ]
 
 
 def test_run_workflow_executes_inline_command(monkeypatch, tmp_path):
@@ -967,6 +1167,37 @@ def test_workflow_lock_refuses_concurrent_run(tmp_path, monkeypatch):
         holder.close()
 
 
+def test_workflow_lock_losing_attempt_does_not_erase_holder_stamp(tmp_path, monkeypatch):
+    """Regression for BUG-4: a second `run_workflow` racing a live holder must
+    not truncate the lock file before the flock attempt — that erased the
+    running instance's PID stamp, leaving `workflow_status`/`stop_workflow`
+    unable to find it even though it's still running."""
+    import fcntl
+    from turbollm import activity, workflows
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(activity, "STATE_DIR", tmp_path / "state")
+
+    lock_path = workflows._workflow_lock_path("stamped-holder")
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    holder = open(lock_path, "w")
+    fcntl.flock(holder.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    holder.write("424242")
+    holder.flush()
+    try:
+        wf = {"command": "true"}
+        with pytest.raises(workflows.WorkflowError, match="already running"):
+            workflows.run_workflow("stamped-holder", wf, overrides={}, registry={})
+
+        # The holder's PID stamp must still be intact on disk.
+        assert lock_path.read_text().strip() == "424242"
+        info = workflows.workflow_status("stamped-holder")
+        assert info == {"state": "running", "pid": 424242}
+    finally:
+        fcntl.flock(holder.fileno(), fcntl.LOCK_UN)
+        holder.close()
+
+
 def test_workflow_lock_released_after_success(tmp_path, monkeypatch):
     """After a normal run, the lock is releasable — sequential runs work."""
     import fcntl
@@ -1052,8 +1283,8 @@ def test_stop_workflow_returns_none_when_idle(tmp_path, monkeypatch):
     assert workflows.stop_workflow("never-ran") is None
 
 
-def test_stop_workflow_signals_holder_pgid(tmp_path, monkeypatch):
-    """stop_workflow targets the holder's process group, tearing down a real child shell."""
+def test_stop_workflow_signals_holder_directly(tmp_path, monkeypatch):
+    """stop_workflow signals the holder process directly, tearing down a real child."""
     import os
     import signal
     import subprocess
@@ -1102,6 +1333,40 @@ def test_stop_workflow_signals_holder_pgid(tmp_path, monkeypatch):
             except ProcessLookupError:
                 pass
             proc.wait(timeout=2)
+
+
+def test_stop_workflow_uses_kill_not_killpg(tmp_path, monkeypatch):
+    """Regression for BUG-17: stop_workflow must signal the holder pid directly
+    via os.kill, never the process group via killpg — killpg on a launcher
+    that wasn't spawned in its own group can hit a shared HUD/Raycast host."""
+    import fcntl
+    import os
+    import signal
+
+    from turbollm import workflows
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    lock_path = workflows._workflow_lock_path("kill-not-killpg")
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    holder = open(lock_path, "w")
+    fcntl.flock(holder.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    holder.write(str(os.getpid()))
+    holder.flush()
+
+    calls = []
+    monkeypatch.setattr(workflows._os, "kill", lambda pid, sig: calls.append((pid, sig)))
+
+    def _fail_killpg(*a, **kw):
+        raise AssertionError("stop_workflow must not call killpg")
+
+    monkeypatch.setattr(workflows._os, "killpg", _fail_killpg)
+    try:
+        signaled = workflows.stop_workflow("kill-not-killpg", sig=signal.SIGTERM)
+        assert signaled == os.getpid()
+        assert calls == [(os.getpid(), signal.SIGTERM)]
+    finally:
+        fcntl.flock(holder.fileno(), fcntl.LOCK_UN)
+        holder.close()
 
 
 def test_run_workflow_stamps_holder_pid(tmp_path, monkeypatch):

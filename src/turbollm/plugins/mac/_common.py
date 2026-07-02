@@ -51,7 +51,14 @@ def swift_build_product_path(package_dir: Path, product: str) -> Path:
 
 
 def refresh_symlink(link_path: Path, target_path: Path) -> None:
-    """Create or refresh a symlink at ``link_path`` → ``target_path``."""
-    if link_path.is_symlink():
+    """Create or refresh a symlink at ``link_path`` → ``target_path``.
+
+    Also removes a plain regular file occupying ``link_path`` (e.g. left over
+    from a build layout that predates symlinking, or a stray touch) so the
+    symlink can be created — only ``symlink_to`` would otherwise raise
+    ``FileExistsError``. A real *directory* at ``link_path`` is left alone;
+    deleting a directory here is never the right silent fallback.
+    """
+    if link_path.is_symlink() or (link_path.exists() and link_path.is_file()):
         link_path.unlink()
     link_path.symlink_to(target_path)

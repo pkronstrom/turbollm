@@ -14,7 +14,50 @@ import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+from turbollm import multipart as mp
 from turbollm import transcribe_split as ts
+
+
+# ---------------------------------------------------------------------------
+# find_silences
+# ---------------------------------------------------------------------------
+
+
+def test_find_silences_returns_empty_and_warns_on_ffmpeg_failure(capsys):
+    """A nonzero ffmpeg returncode must not be silently treated as "no
+    silences found" — it degrades to fixed-interval cuts with a warning."""
+    with patch.object(ts.subprocess, "run") as mock_run:
+        mock_run.return_value = MagicMock(stdout="", stderr="some ffmpeg error", returncode=1)
+        result = ts.find_silences(Path("/tmp/whatever.wav"))
+
+    assert result == []
+    err = capsys.readouterr().err
+    assert "silence detection failed" in err
+    assert "fixed-interval" in err
+
+
+def test_find_silences_parses_stderr_on_success():
+    stderr = (
+        "[silencedetect @ 0x1] silence_start: 10.0\n"
+        "[silencedetect @ 0x1] silence_end: 12.0 | silence_duration: 2.0\n"
+    )
+    with patch.object(ts.subprocess, "run") as mock_run:
+        mock_run.return_value = MagicMock(stdout="", stderr=stderr, returncode=0)
+        result = ts.find_silences(Path("/tmp/whatever.wav"))
+    assert result == [(10.0, 12.0)]
+
+
+# ---------------------------------------------------------------------------
+# multipart dedup
+# ---------------------------------------------------------------------------
+
+
+def test_transcribe_split_uses_shared_multipart_builder():
+    """transcribe_split must use the shared turbollm.multipart.build_multipart
+    rather than a hand-rolled local copy (BUG: two hand-rolled multipart
+    encoders is two places to fix an encoding bug)."""
+    assert ts.build_multipart is mp.build_multipart
+    assert not hasattr(ts, "_build_multipart")
 
 
 # ---------------------------------------------------------------------------
@@ -58,6 +101,22 @@ def test_plan_chunks_single_chunk_for_short_audio():
                           target_s=300.0, max_s=600.0)
     assert len(plan) == 1
     assert plan[0].start == 0.0 and plan[0].end == 200.0
+
+
+def test_plan_chunks_silence_pick_near_end_snaps_to_avoid_tiny_tail():
+    """A silence-picked cut that leaves less than min_chunk_s remaining must
+    be extended to the full duration instead of producing a tiny trailing
+    chunk."""
+    # Only candidate silence midpoint is 600s; duration is 610s, so picking
+    # end=600 would leave a 10s tail (< min_chunk_s=30).
+    plan = ts.plan_chunks(
+        duration=610.0,
+        silences=[(598.0, 602.0)],
+        target_s=300.0, max_s=600.0, min_chunk_s=30.0,
+    )
+    assert len(plan) == 1
+    assert plan[0].start == 0.0
+    assert plan[0].end == 610.0
 
 
 def test_plan_chunks_skips_silences_too_close_to_start():
@@ -246,4 +305,10 @@ def test_transcribe_split_continues_on_chunk_failure(tmp_path):
     # Only the second chunk produced output; first chunk failed but didn't abort.
     assert out["text"] == "Second."
     assert any("FAILED" in line for line in progress_log)
-    assert len(out["chunks"]) == 1  # only succeeded chunk recorded
+    # Both chunks are represented in the meta — the failed one is visible,
+    # not silently dropped — and the top-level failure count reflects it.
+    assert len(out["chunks"]) == 2
+    assert out["chunks"][0]["error"] == "simulated network error"
+    assert out["chunks"][0]["sentences"] == 0
+    assert "error" not in out["chunks"][1]
+    assert out["failed_chunks"] == 1

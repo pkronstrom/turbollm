@@ -19,10 +19,11 @@ import subprocess
 import sys
 import tempfile
 import urllib.request
-import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Optional
+
+from .multipart import build_multipart
 
 
 # ---------------------------------------------------------------------------
@@ -61,6 +62,12 @@ def find_silences(
          "-f", "null", "-"],
         capture_output=True, text=True,
     )
+    if proc.returncode != 0:
+        print(
+            "[split] silence detection failed, falling back to fixed-interval cuts",
+            file=sys.stderr,
+        )
+        return []
     silences: list[tuple[float, float]] = []
     current_start: float | None = None
     for line in proc.stderr.splitlines():
@@ -119,6 +126,12 @@ def plan_chunks(
         ]
         if candidates:
             end = min(candidates, key=lambda c: abs(c - ideal))
+            if duration - end < min_chunk_s:
+                # A silence-picked cut can still leave a sub-min_chunk_s tail
+                # (e.g. a silence sitting just before the very end of the
+                # audio) — fold it into this chunk rather than emitting a
+                # tiny trailing one.
+                end = duration
         elif duration - t <= max_s + min_chunk_s:
             # Remaining audio fits in one chunk (possibly slightly over max_s
             # to avoid a tiny tail).
@@ -155,27 +168,6 @@ def extract_chunk_wav(
     )
 
 
-def _build_multipart(fields: dict, file_field: str, filename: str,
-                     content_type: str, file_bytes: bytes) -> tuple[bytes, str]:
-    """Hand-rolled multipart/form-data (mirrors cli._build_multipart)."""
-    boundary = "----turbollm" + uuid.uuid4().hex
-    parts: list[bytes] = []
-    for name, value in fields.items():
-        if value is None:
-            continue
-        parts.append(f"--{boundary}\r\n".encode())
-        parts.append(f'Content-Disposition: form-data; name="{name}"\r\n\r\n'.encode())
-        parts.append(f"{value}\r\n".encode())
-    parts.append(f"--{boundary}\r\n".encode())
-    parts.append(
-        f'Content-Disposition: form-data; name="{file_field}"; filename="{filename}"\r\n'.encode()
-    )
-    parts.append(f"Content-Type: {content_type}\r\n\r\n".encode())
-    parts.append(file_bytes)
-    parts.append(f"\r\n--{boundary}--\r\n".encode())
-    return b"".join(parts), f"multipart/form-data; boundary={boundary}"
-
-
 def transcribe_one_chunk(
     chunk_wav_bytes: bytes,
     filename: str,
@@ -193,7 +185,7 @@ def transcribe_one_chunk(
     fields = {"model": model_id, "response_format": "verbose_json"}
     if language:
         fields["language"] = language
-    body, ctype = _build_multipart(fields, "file", filename, "audio/wav", chunk_wav_bytes)
+    body, ctype = build_multipart(fields, "file", filename, "audio/wav", chunk_wav_bytes)
     req = urllib.request.Request(
         f"http://127.0.0.1:{port}/v1/audio/transcriptions",
         data=body,
@@ -219,11 +211,32 @@ def merge_chunk_results(results: list[tuple[Chunk, dict]]) -> dict:
 
     Each sentence's ``start``/``end`` is shifted by its chunk's absolute
     offset; tokens inside sentences are likewise shifted when present.
+
+    A chunk entry whose data dict carries an ``"error"`` key (a failed
+    transcription — see ``transcribe_split``) contributes no text/sentences
+    but still gets a ``chunks_meta`` entry (with the error message) so the
+    failure is visible in the merged result instead of silently vanishing.
+    When one or more chunks failed, a top-level ``"failed_chunks"`` count is
+    added. Neither key appears when every chunk succeeded, so the all-success
+    shape is unchanged (backward compatible).
     """
     out_text_parts: list[str] = []
     out_sentences: list[dict] = []
     chunks_meta: list[dict] = []
+    failed_chunks = 0
     for chunk, data in results:
+        if "error" in data:
+            failed_chunks += 1
+            chunks_meta.append({
+                "index": chunk.index,
+                "start": chunk.start,
+                "end": chunk.end,
+                "duration": chunk.duration,
+                "sentences": 0,
+                "text_chars": 0,
+                "error": data["error"],
+            })
+            continue
         text = (data.get("text") or "").strip()
         sents = data.get("sentences") or []
         # Support both shapes (sentences from parakeet, segments from whisper).
@@ -258,11 +271,14 @@ def merge_chunk_results(results: list[tuple[Chunk, dict]]) -> dict:
             "sentences": len(shifted),
             "text_chars": len(text),
         })
-    return {
+    out = {
         "text": " ".join(out_text_parts),
         "sentences": out_sentences,
         "chunks": chunks_meta,
     }
+    if failed_chunks:
+        out["failed_chunks"] = failed_chunks
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -292,8 +308,11 @@ def transcribe_split(
     """End-to-end: probe → silencedetect → plan → per-chunk POST → merge.
 
     Returns a verbose_json-shaped dict identical to a single-call response.
-    Failures on individual chunks are logged and skipped (rest of the audio
-    is still transcribed).
+    Failures on individual chunks are logged and don't abort the run (rest of
+    the audio is still transcribed) — but they're not silently dropped
+    either: each failed chunk gets a `chunks_meta` entry with an `"error"`
+    field, and the result carries a top-level `"failed_chunks"` count, via
+    `merge_chunk_results`.
     """
     duration = probe_duration_seconds(audio_path, ffprobe_bin=ffprobe_bin)
     progress(f"[split] duration={duration:.1f}s")
@@ -340,5 +359,6 @@ def transcribe_split(
                     f"[split] chunk {chunk.index + 1}/{len(plan)} FAILED "
                     f"[{chunk.start:.1f}–{chunk.end:.1f}]s: {e}"
                 )
+                results.append((chunk, {"error": str(e)}))
 
     return merge_chunk_results(results)

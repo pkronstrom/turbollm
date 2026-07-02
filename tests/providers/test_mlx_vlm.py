@@ -2,6 +2,9 @@ from pathlib import Path
 import sys
 from unittest.mock import patch
 
+import click
+import pytest
+
 from turbollm.providers import get_provider
 from turbollm.providers.mlx_vlm import MlxVlmProvider
 from turbollm.cli import _get_model_id
@@ -90,6 +93,40 @@ def test_builds_tool_call_shim_server_command():
     assert "--trust-remote-code" in upstream_cmd
 
 
+def test_unknown_tool_call_shim_raises_clear_error():
+    provider = MlxVlmProvider()
+    model = {
+        "hf_repo": "mlx-community/some-model",
+        "local_path": "~/.models/mlx-community/some-model",
+        "server": {"tool_call_shim": "not_a_real_shim"},
+    }
+    base_path = Path("~/.models/mlx-community/some-model").expanduser()
+
+    with patch.object(provider, "_model_path", return_value=base_path), patch.object(
+        provider, "_draft_model_path", return_value=None
+    ):
+        with pytest.raises(click.UsageError, match="not_a_real_shim"):
+            provider.build_serve_cmd(model, 8899)
+
+
+def test_no_tool_call_shim_does_not_shift_port():
+    provider = MlxVlmProvider()
+    model = {
+        "hf_repo": "mlx-community/some-model",
+        "local_path": "~/.models/mlx-community/some-model",
+        "server": {},
+    }
+    base_path = Path("~/.models/mlx-community/some-model").expanduser()
+
+    with patch.object(provider, "_model_path", return_value=base_path), patch.object(
+        provider, "_draft_model_path", return_value=None
+    ):
+        cmd = provider.build_serve_cmd(model, 8899)
+
+    assert cmd[:2] == ["mlx_vlm.server", "--model"]
+    assert cmd[cmd.index("--port") + 1] == "8899"
+
+
 def test_downloaded_requires_base_and_draft_local_paths(tmp_path):
     provider = MlxVlmProvider()
     base = tmp_path / "base"
@@ -113,13 +150,27 @@ def test_downloaded_requires_base_and_draft_local_paths(tmp_path):
     assert provider.is_downloaded(model) is False
 
 
-def test_model_id_uses_local_path_for_mlx_vlm():
+def test_model_id_uses_local_path_when_server_actually_resolved_there():
+    model = {
+        "backend": "mlx-vlm",
+        "hf_repo": "mlx-community/gemma-4-26b-a4b-it-6bit",
+        "local_path": "~/.models/mlx-community/gemma-4-26b-a4b-it-6bit",
+    }
+    resolved = Path("~/.models/mlx-community/gemma-4-26b-a4b-it-6bit").expanduser()
+
+    with patch.object(MlxVlmProvider, "_model_path", return_value=resolved):
+        assert _get_model_id(model) == str(resolved)
+
+
+def test_model_id_falls_back_to_hf_repo_when_local_path_unresolved():
+    # local_path is configured but has no safetensors (e.g. empty/missing
+    # dir) — _model_path falls back to the HF snapshot, so get_model_id must
+    # report hf_repo, not the local_path the server never actually loaded.
     model = {
         "backend": "mlx-vlm",
         "hf_repo": "mlx-community/gemma-4-26b-a4b-it-6bit",
         "local_path": "~/.models/mlx-community/gemma-4-26b-a4b-it-6bit",
     }
 
-    assert _get_model_id(model) == str(
-        Path("~/.models/mlx-community/gemma-4-26b-a4b-it-6bit").expanduser()
-    )
+    with patch.object(MlxVlmProvider, "_model_path", return_value=None):
+        assert _get_model_id(model) == "mlx-community/gemma-4-26b-a4b-it-6bit"

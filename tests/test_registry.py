@@ -53,3 +53,50 @@ def test_load_registry_returns_empty_when_no_config_exists(monkeypatch, tmp_path
 
     assert registry.load_registry() == {"defaults": {}, "models": {}}
     assert not user_toml.exists()
+
+
+def test_hf_snapshot_path_ignores_stray_files(tmp_path, monkeypatch):
+    monkeypatch.setattr(registry, "HF_CACHE", tmp_path)
+    snapshots = tmp_path / "models--org--repo" / "snapshots"
+    snapshots.mkdir(parents=True)
+    # A stray file (e.g. .DS_Store) must never be returned as "the snapshot".
+    (snapshots / ".DS_Store").touch()
+    real_snapshot = snapshots / "abcdef0123456789"
+    real_snapshot.mkdir()
+
+    result = registry._hf_snapshot_path("org/repo")
+
+    assert result == real_snapshot
+
+
+def test_hf_snapshot_path_returns_none_when_only_stray_files(tmp_path, monkeypatch):
+    monkeypatch.setattr(registry, "HF_CACHE", tmp_path)
+    snapshots = tmp_path / "models--org--repo" / "snapshots"
+    snapshots.mkdir(parents=True)
+    (snapshots / ".DS_Store").touch()
+
+    assert registry._hf_snapshot_path("org/repo") is None
+
+
+def test_parse_model_input_passes_through_bare_repo():
+    assert registry.parse_model_input("org/repo") == "org/repo"
+
+
+def test_parse_model_input_passes_through_alias():
+    assert registry.parse_model_input("my-alias") == "my-alias"
+
+
+def test_resolve_model_skips_entries_missing_hf_repo(monkeypatch):
+    # A user-added model missing hf_repo shouldn't break resolution of an
+    # unrelated model by hf_repo lookup.
+    reg = {
+        "models": {
+            "broken": {"name": "Broken entry, no hf_repo"},
+            "good": {"name": "Good", "hf_repo": "org/good-repo"},
+        }
+    }
+    monkeypatch.setattr(registry, "load_registry", lambda: reg)
+
+    resolved = registry.resolve_model("org/good-repo")
+
+    assert resolved is reg["models"]["good"]

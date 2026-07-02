@@ -174,3 +174,18 @@ def test_defaults_write_and_delete_do_not_raise_when_binary_missing():
         # Neither should raise.
         turbo_cli._defaults_write("com.turbollm.hud", "k", "v")
         turbo_cli._defaults_delete("com.turbollm.hud", "k")
+
+
+def test_defaults_write_prints_clean_error_on_called_process_error(capsys):
+    """A non-zero `/usr/bin/defaults write` (e.g. malformed suite/key) must
+    surface a clean message, not an uncaught CalledProcessError traceback."""
+    import subprocess
+
+    def fail(*a, **kw):
+        raise subprocess.CalledProcessError(1, ["/usr/bin/defaults", "write"])
+
+    with patch.object(turbo_cli.subprocess, "run", side_effect=fail):
+        turbo_cli._defaults_write("com.turbollm.hud", "k", "v")  # must not raise
+
+    captured = capsys.readouterr()
+    assert "Failed to write sticky" in captured.out

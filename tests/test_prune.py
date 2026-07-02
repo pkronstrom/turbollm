@@ -176,11 +176,39 @@ def test_session_dirs_scanner_reports_size(tmp_path: pathlib.Path):
     d.mkdir()
     nested = d / "nested"
     nested.mkdir()
-    (d / "a.png").write_bytes(b"a" * 100)
-    (nested / "b.png").write_bytes(b"b" * 250)
+    a = d / "a.png"
+    a.write_bytes(b"a" * 100)
+    b = nested / "b.png"
+    b.write_bytes(b"b" * 250)
+    # Staleness is judged by the newest file mtime inside the dir, not the
+    # dir's own mtime — age everything.
     _set_old_mtime(d)
+    _set_old_mtime(a)
+    _set_old_mtime(b)
     [target] = prune.scan_orphan_session_dirs(tmp_path)
     assert target.size_bytes == 350
+
+
+def test_session_dirs_scanner_protects_dir_with_recently_touched_file(tmp_path: pathlib.Path):
+    """A session dir with an old dir-mtime but a recently-written file inside
+    (e.g. the acquirer still appending to the recording) must NOT be pruned —
+    the dir mtime alone doesn't change while a file inside it is written to."""
+    d = tmp_path / "turbo-session-live"
+    d.mkdir()
+    _set_old_mtime(d)
+    live_file = d / "recording.wav"
+    live_file.write_bytes(b"still recording")  # fresh mtime (now)
+
+    assert prune.scan_orphan_session_dirs(tmp_path) == []
+
+
+def test_session_dirs_scanner_empty_dir_falls_back_to_dir_mtime(tmp_path: pathlib.Path):
+    """An empty aged dir has no files to check — falls back to the dir's own mtime."""
+    d = tmp_path / "turbo-session-empty"
+    d.mkdir()
+    _set_old_mtime(d)
+    targets = prune.scan_orphan_session_dirs(tmp_path)
+    assert [t.path for t in targets] == [d]
 
 
 # ── aggregator + execute ──────────────────────────────────────────────────────
@@ -222,6 +250,67 @@ def test_execute_prune_tolerates_missing_targets(tmp_path: pathlib.Path):
     deleted, freed = prune.execute_prune([prune.PruneTarget(path=gone, size_bytes=10)])
     assert deleted == 0
     assert freed == 0
+
+
+def test_execute_prune_result_unpacks_as_two_tuple_and_carries_failures(tmp_path: pathlib.Path):
+    """PruneResult stays unpackable as (deleted, freed) for existing callers
+    (e.g. cli.py's `deleted, freed = execute_prune(...)`), while new callers
+    can additionally read `.failures`."""
+    ok = tmp_path / "ok.bin"
+    ok.write_bytes(b"x" * 3)
+    result = prune.execute_prune([prune.PruneTarget(path=ok, size_bytes=3)])
+    deleted, freed = result  # must not raise
+    assert (deleted, freed) == (1, 3)
+    assert result.failures == []
+
+
+def test_execute_prune_reports_oserror_failures_instead_of_swallowing(tmp_path: pathlib.Path, monkeypatch):
+    """A deletion that raises OSError (other than FileNotFoundError) must be
+    collected in `.failures`, not silently dropped."""
+    target = tmp_path / "stubborn.bin"
+    target.write_bytes(b"x")
+
+    def _boom(self):
+        raise PermissionError("nope")
+
+    monkeypatch.setattr(pathlib.Path, "unlink", _boom)
+    result = prune.execute_prune([prune.PruneTarget(path=target, size_bytes=1)])
+    deleted, freed = result
+    assert deleted == 0
+    assert freed == 0
+    assert len(result.failures) == 1
+    assert result.failures[0][0] == target
+
+
+def test_execute_prune_reprobes_lock_before_unlink_and_skips_if_reheld(tmp_path: pathlib.Path):
+    """A lock file re-acquired by a workflow between scan and delete (the
+    split-brain race) must not be unlinked out from under its new holder."""
+    lock_path = tmp_path / "reacquired.lock"
+    lock_path.write_text("")
+    holder = open(lock_path, "w")
+    fcntl.flock(holder.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    try:
+        result = prune.execute_prune([prune.PruneTarget(path=lock_path, size_bytes=0)])
+        deleted, freed = result
+        assert deleted == 0
+        assert freed == 0
+        assert len(result.failures) == 1
+        assert result.failures[0][0] == lock_path
+        assert lock_path.exists()  # not deleted — still held
+    finally:
+        fcntl.flock(holder.fileno(), fcntl.LOCK_UN)
+        holder.close()
+
+
+def test_execute_prune_deletes_lock_confirmed_still_unheld(tmp_path: pathlib.Path):
+    """An unheld lock file is deleted normally (the re-probe doesn't false-positive)."""
+    lock_path = tmp_path / "still-unheld.lock"
+    lock_path.write_text("")
+    result = prune.execute_prune([prune.PruneTarget(path=lock_path, size_bytes=0)])
+    deleted, freed = result
+    assert deleted == 1
+    assert not lock_path.exists()
+    assert result.failures == []
 
 
 # ── CLI command ───────────────────────────────────────────────────────────────

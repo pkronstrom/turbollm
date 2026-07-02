@@ -64,6 +64,54 @@ def test_pi_harness_applies_gemma_tool_compatibility(tmp_path, monkeypatch):
     run.assert_called_once_with(["pi", "--model", f"turbo/{model['hf_repo']}:off"])
 
 
+def test_pi_harness_derives_context_from_effective_context_not_opencode(tmp_path, monkeypatch):
+    # No pi.context_window configured, but a large opencode.context_length is
+    # present — pi must NOT borrow it (cross-harness borrowing, item BUG-1/18).
+    # It should derive purely from registry.effective_context() instead.
+    monkeypatch.setenv("PI_CODING_AGENT_DIR", str(tmp_path))
+    harness = PiHarness({"binary": "pi"})
+    model = {
+        "name": "Qwen3.6 27B UD 6bit",
+        "hf_repo": "unsloth/Qwen3.6-27B-UD-MLX-6bit",
+        "can_reason": True,
+        "context_default": 65536,
+        "opencode": {
+            "context_length": 999999,
+        },
+    }
+
+    with patch("subprocess.run"):
+        harness.launch(model["hf_repo"], 8899, model)
+
+    models_json = json.loads((tmp_path / "models.json").read_text())
+    entry = models_json["providers"]["turbo"]["models"][0]
+
+    assert entry["contextWindow"] == 65536
+
+
+def test_pi_harness_recovers_from_corrupt_models_json(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("PI_CODING_AGENT_DIR", str(tmp_path))
+    models_json_path = tmp_path / "models.json"
+    models_json_path.write_text("{not valid json")
+
+    harness = PiHarness({"binary": "pi"})
+    model = {
+        "name": "Qwen3.6 27B UD 6bit",
+        "hf_repo": "unsloth/Qwen3.6-27B-UD-MLX-6bit",
+        "can_reason": True,
+    }
+
+    with patch("subprocess.run"):
+        harness.launch(model["hf_repo"], 8899, model)  # must not raise
+
+    # Original corrupt content backed up, fresh config written.
+    backup = tmp_path / "models.json.bak"
+    assert backup.read_text() == "{not valid json"
+    models_json = json.loads(models_json_path.read_text())
+    assert "turbo" in models_json["providers"]
+    assert "corrupt" in capsys.readouterr().err
+
+
 def test_pi_harness_uses_pi_context_and_max_token_overrides(tmp_path, monkeypatch):
     monkeypatch.setenv("PI_CODING_AGENT_DIR", str(tmp_path))
     harness = PiHarness({"binary": "pi"})

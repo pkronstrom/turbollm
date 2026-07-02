@@ -9,6 +9,8 @@ import shutil
 import subprocess
 from typing import Protocol
 
+import click
+
 
 class Harness(Protocol):
     name: str
@@ -17,6 +19,22 @@ class Harness(Protocol):
     def is_available(self) -> bool: ...
     def launch(self, model_id: str, port: int, model: dict) -> None: ...
     def headless(self, model_id: str, port: int, model: dict, prompt: str) -> int: ...
+
+
+def _format_template(template: str, ctx: dict, what: str) -> str:
+    """`str.format` a TOML-supplied cmd/env value against {model_id}/{port}.
+
+    Harness authors can put arbitrary literal text (including a stray `{`)
+    in models.toml `cmd`/`env` entries; `str.format` raises on that with a
+    traceback that doesn't name the offending config value. Catch and
+    re-raise with a clear pointer instead.
+    """
+    try:
+        return template.format(**ctx)
+    except (KeyError, IndexError, ValueError) as e:
+        raise click.UsageError(
+            f"Invalid template in harness config ({what}): {template!r}: {e}"
+        )
 
 
 class GenericHarness:
@@ -45,9 +63,9 @@ class GenericHarness:
 
         ctx = {"model_id": model_id, "port": port}
         for k, v in self._env.items():
-            env[k] = v.format(**ctx)
+            env[k] = _format_template(v, ctx, f"env.{k}")
 
-        cmd = [part.format(**ctx) for part in self._cmd]
+        cmd = [_format_template(part, ctx, "cmd") for part in self._cmd]
         subprocess.run(cmd, env=env)
 
     def headless(self, model_id: str, port: int, model: dict, prompt: str) -> int:

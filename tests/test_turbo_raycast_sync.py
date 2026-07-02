@@ -11,7 +11,7 @@ from unittest.mock import MagicMock, patch
 
 from click.testing import CliRunner
 
-from turbollm.plugins.mac.raycast import raycast_grp
+from turbollm.plugins.mac.raycast import _to_title_case, raycast_grp
 from turbollm.plugins.mac.sidecar import sidecar_cmd
 
 _RAY = "turbollm.plugins.mac.raycast"
@@ -126,6 +126,15 @@ def test_raycast_sync_title_is_title_case_of_slug(tmp_path):
 
     assert by_name["transcribe-file"]["title"] == "Transcribe File"
     assert by_name["record-to-obsidian"]["title"] == "Record To Obsidian"
+
+
+def test_to_title_case_preserves_existing_uppercase_beyond_first_letter():
+    """_to_title_case must not mangle an acronym already present in a word:
+    str.capitalize() would lower-case everything after the first letter
+    (e.g. turning "mP3" into "Mp3"); only the first character should be
+    upper-cased here, so "mP3" becomes "MP3" (case beyond the first letter
+    preserved, not lower-cased)."""
+    assert _to_title_case("foo-mP3") == "Foo MP3"
 
 
 def test_raycast_sync_subtitle_is_workflow_description(tmp_path):
@@ -343,6 +352,32 @@ def test_raycast_sync_removes_orphan_legacy_symlinks(tmp_path):
     result = _sync(tmp_path)
     assert result.exit_code == 0, result.output
     assert not orphan.exists(), "legacy orphan symlink should have been removed"
+
+
+def test_raycast_sync_skips_unreadable_tsx_file_with_warning(tmp_path):
+    """An orphan-candidate .tsx file that can't be decoded as UTF-8 must not
+    abort the whole sync — it's skipped with a stderr warning instead."""
+    src_dir = tmp_path / "src"
+    src_dir.mkdir()
+    bad = src_dir / "old-workflow.tsx"
+    bad.write_bytes(b"\xff\xfe\x00\x01 not valid utf-8 \x80\x81")
+
+    pkg_path = tmp_path / "package.json"
+    pkg_path.write_text(json.dumps(_make_package_json(_FIXED_COMMANDS), indent=2) + "\n")
+
+    result = _sync(tmp_path)
+    assert result.exit_code == 0, result.output
+
+    # Sync completed and still produced valid output for the real workflows.
+    pkg = json.loads(pkg_path.read_text())
+    names = [cmd["name"] for cmd in pkg["commands"]]
+    assert "transcribe-file" in names
+
+    # The unreadable file itself is left alone (not blindly deleted or
+    # crashed on), and a warning was printed (CliRunner mixes stderr into
+    # `result.output` by default).
+    assert bad.exists()
+    assert "old-workflow.tsx" in result.output
 
 
 def test_raycast_sync_does_not_remove_real_tsx_files(tmp_path):

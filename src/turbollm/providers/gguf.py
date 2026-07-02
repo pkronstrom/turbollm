@@ -1,10 +1,9 @@
-import logging
-import os
 import shutil
 from pathlib import Path
 
 from rich.console import Console
 
+from turbollm.hf_download import configured_path, quiet_hf, translate_hf_errors
 from turbollm.registry import (
     _hf_cache_path,
     _hf_snapshot_path,
@@ -105,9 +104,15 @@ class GgufProvider:
         draft_file = self._draft_gguf_file(model)
         if draft_file:
             cmd += ["--model-draft", str(draft_file)]
+        elif model.get("draft_hf_repo") and model.get("draft_hf_file"):
+            # Configured but not found on disk (parity with vllm_mlx's
+            # specprefill warning) — don't silently serve without it.
+            console.print(f"  [yellow]Draft model {model['draft_hf_repo']} not found — speculative decoding disabled.[/yellow]")
+            console.print(f"  [yellow]Run: turbo pull {model.get('hf_repo')}[/yellow]")
 
         return cmd
 
+    @translate_hf_errors
     def pull(self, model: dict) -> None:
         from huggingface_hub import hf_hub_download
 
@@ -117,11 +122,10 @@ class GgufProvider:
             console.print("[red]GGUF models need hf_file in models.toml[/red]")
             raise SystemExit(1)
 
-        logging.getLogger("httpx").setLevel(logging.WARNING)
-        logging.getLogger("huggingface_hub").setLevel(logging.WARNING)
+        quiet_hf()
 
         console.print(f"  Downloading {hf_file}...")
-        local_path = self._configured_path(model, "local_path")
+        local_path = configured_path(model, "local_path")
         kwargs = {"repo_id": repo, "filename": hf_file}
         if local_path is not None:
             local_path.mkdir(parents=True, exist_ok=True)
@@ -135,7 +139,7 @@ class GgufProvider:
         draft_file = model.get("draft_hf_file")
         if draft_repo and draft_file:
             console.print(f"  Downloading draft model {draft_file}...")
-            draft_path = self._configured_path(model, "draft_local_path")
+            draft_path = configured_path(model, "draft_local_path")
             draft_kwargs = {"repo_id": draft_repo, "filename": draft_file}
             if draft_path is not None:
                 draft_path.mkdir(parents=True, exist_ok=True)
@@ -149,7 +153,7 @@ class GgufProvider:
         hf_file = model.get("hf_file")
         if not hf_file:
             return False
-        local = self._configured_path(model, "local_path")
+        local = configured_path(model, "local_path")
         if local is not None:
             return (local / hf_file).exists()
         snap = _hf_snapshot_path(model["hf_repo"])
@@ -178,7 +182,7 @@ class GgufProvider:
 
     def _gguf_file(self, model: dict) -> Path:
         hf_file = model.get("hf_file")
-        configured = self._configured_path(model, "local_path")
+        configured = configured_path(model, "local_path")
 
         if configured and hf_file:
             p = configured / hf_file
@@ -210,13 +214,14 @@ class GgufProvider:
         draft_file = model.get("draft_hf_file")
         if not draft_repo or not draft_file:
             return None
+        # pull() honors draft_local_path — check it first so a draft model
+        # downloaded there is actually found at serve time.
+        configured = configured_path(model, "draft_local_path")
+        if configured:
+            p = configured / draft_file
+            if p.exists():
+                return p
         snap = _hf_snapshot_path(draft_repo)
         if snap and (snap / draft_file).exists():
             return snap / draft_file
         return None
-
-    def _configured_path(self, model: dict, key: str) -> Path | None:
-        value = model.get(key)
-        if not value:
-            return None
-        return Path(os.path.expanduser(str(value)))

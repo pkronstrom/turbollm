@@ -78,23 +78,76 @@ def _parse_value(raw: str) -> Any:
         return value
 
 
+def _find_brace_close(text: str, open_brace: int) -> int | None:
+    """Return the index just past the ``}``/``]`` matching ``text[open_brace]``.
+
+    Returns ``None`` if the braces never balance out before the string ends
+    (an unterminated/truncated call — tolerated by the caller since there's
+    nothing *after* it to worry about folding in).
+    """
+    depth = 0
+    in_string = False
+    quote = ""
+    escape = False
+    for i in range(open_brace, len(text)):
+        ch = text[i]
+        if escape:
+            escape = False
+            continue
+        if ch == "\\":
+            escape = True
+            continue
+        if in_string:
+            if ch == quote:
+                in_string = False
+            continue
+        if ch in ("'", '"'):
+            in_string = True
+            quote = ch
+            continue
+        if ch in "{[":
+            depth += 1
+        elif ch in "}]":
+            depth -= 1
+            if depth == 0:
+                return i + 1
+    return None
+
+
 def parse_bare_gemma_tool_call(text: str) -> dict[str, Any] | None:
     """Parse ``call:name{k:v}`` into an OpenAI tool call dict.
 
     Gemma's native tool syntax uses bare identifiers and often unquoted scalar
     values, so JSON parsing is not enough here.
+
+    Only matches when the *entire* (stripped) message is the call: it must
+    start with ``call:`` at position 0, and once the ``{...}`` braces close,
+    nothing but whitespace may follow. A substring match here would hijack
+    ordinary prose that merely mentions the ``call:`` syntax (discarding the
+    model's actual answer) and would fold any trailing text after a real call
+    into the last parsed argument.
     """
     stripped = text.strip()
-    start = stripped.find("call:")
-    open_brace = stripped.find("{", start)
-    if start < 0 or open_brace < 0:
+    if not stripped.startswith("call:"):
         return None
-    name = stripped[start + len("call:") : open_brace].strip()
+    open_brace = stripped.find("{")
+    if open_brace < 0:
+        return None
+    name = stripped[len("call:") : open_brace].strip()
     if not name or not all(ch.isalnum() or ch in "_-" for ch in name):
         return None
-    args_text = stripped[open_brace + 1 :]
-    if args_text.endswith("}"):
-        args_text = args_text[:-1]
+
+    close = _find_brace_close(stripped, open_brace)
+    if close is None:
+        # Unterminated — tolerate it (nothing trails an unterminated call).
+        args_text = stripped[open_brace + 1 :]
+        if args_text.endswith("}"):
+            args_text = args_text[:-1]
+    else:
+        if stripped[close:].strip():
+            # Trailing prose after a complete call — not a bare exact call.
+            return None
+        args_text = stripped[open_brace + 1 : close - 1]
 
     args: dict[str, Any] = {}
     for part in _split_top_level(args_text):
@@ -173,12 +226,25 @@ def _stream_from_chat_response(payload: dict[str, Any]) -> bytes:
     return (chunk(delta, None) + chunk({}, finish_reason) + "data: [DONE]\n\n").encode()
 
 
+# Generous upstream timeout: mlx-vlm generations on long prompts/outputs can
+# legitimately take minutes; this only guards against a truly wedged upstream.
+_UPSTREAM_TIMEOUT_S = 600
+
+
 class ProxyHandler(BaseHTTPRequestHandler):
     upstream_host = "127.0.0.1"
     upstream_port = 0
 
     def log_message(self, fmt: str, *args: Any) -> None:
         return
+
+    def _send_json_error(self, status: int, message: str) -> None:
+        body = json.dumps({"error": {"message": message}}).encode()
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
 
     def _proxy(self, body: bytes | None = None) -> None:
         upstream = f"http://{self.upstream_host}:{self.upstream_port}{self.path}"
@@ -209,7 +275,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
             method=self.command,
         )
         try:
-            with urllib.request.urlopen(req) as resp:
+            with urllib.request.urlopen(req, timeout=_UPSTREAM_TIMEOUT_S) as resp:
                 data = resp.read()
                 status = resp.status
                 content_type = resp.headers.get("Content-Type", "application/json")
@@ -217,8 +283,18 @@ class ProxyHandler(BaseHTTPRequestHandler):
             data = e.read()
             status = e.code
             content_type = e.headers.get("Content-Type", "application/json")
+        except (urllib.error.URLError, ConnectionError, TimeoutError) as e:
+            # Upstream unreachable/down/timed out — respond with a real 502
+            # instead of letting the handler thread crash (which the client
+            # would just see as a reset connection).
+            self._send_json_error(502, f"upstream unavailable: {e}")
+            return
 
-        if self.path == "/v1/chat/completions" and data:
+        # Only rewrite/convert on a successful upstream response. A non-200
+        # body is the real error the client needs to see — rewriting it (or
+        # forcing it through the streamed-chunk shape) would replace an
+        # informative error with an empty/garbled one.
+        if status == 200 and self.path == "/v1/chat/completions" and data:
             try:
                 payload = rewrite_chat_response(json.loads(data))
                 if original_stream:
@@ -227,7 +303,10 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 else:
                     data = json.dumps(payload).encode()
                     content_type = "application/json"
-            except json.JSONDecodeError:
+            except Exception:  # noqa: BLE001 — best-effort rewrite
+                # Anything goes wrong parsing/rewriting: fall back to passing
+                # the upstream bytes through untouched rather than dropping
+                # the response or crashing the handler.
                 pass
 
         self.send_response(status)
@@ -275,7 +354,11 @@ def main(argv: list[str] | None = None) -> int:
         server.serve_forever()
     finally:
         proc.terminate()
-        proc.wait(timeout=5)
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
     return 0
 
 

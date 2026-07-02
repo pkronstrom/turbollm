@@ -7,8 +7,11 @@ Covers:
 - --format segments with text-only response synthesises one segment + warns on stderr
 """
 import json
+import subprocess
 import sys
 import io
+import tempfile
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from click.testing import CliRunner
@@ -276,3 +279,110 @@ def test_verbose_json_is_always_sent_to_server(tmp_path):
     assert captured_bodies, "urlopen was not called"
     body_text = captured_bodies[0]
     assert "verbose_json" in body_text
+
+
+# ---------------------------------------------------------------------------
+# Split mode ignoring -f srt/vtt: must refuse instead of silently emitting
+# JSON (json/verbose_json stay supported).
+# ---------------------------------------------------------------------------
+
+
+def test_split_mode_refuses_srt_format(tmp_path):
+    wav = tmp_path / "test.wav"
+    wav.write_bytes(b"RIFF\x00\x00\x00\x00WAVEfmt ")
+
+    runner = CliRunner()
+    with (
+        patch.object(turbo_cli, "_get_running_model", return_value=None),
+        patch.object(turbo_cli, "resolve_model", return_value=FAKE_MODEL),
+        patch.object(turbo_cli, "_get_provider_for", return_value=_FakeProvider()),
+        patch.object(turbo_cli, "_server_is_running", return_value=True),
+    ):
+        result = runner.invoke(
+            turbo_cli.cli, ["transcribe", str(wav), "--format", "srt", "--split"]
+        )
+    assert result.exit_code != 0
+    assert "not supported with split mode" in result.output
+
+
+def test_split_mode_refuses_vtt_format(tmp_path):
+    wav = tmp_path / "test.wav"
+    wav.write_bytes(b"RIFF\x00\x00\x00\x00WAVEfmt ")
+
+    runner = CliRunner()
+    with (
+        patch.object(turbo_cli, "_get_running_model", return_value=None),
+        patch.object(turbo_cli, "resolve_model", return_value=FAKE_MODEL),
+        patch.object(turbo_cli, "_get_provider_for", return_value=_FakeProvider()),
+        patch.object(turbo_cli, "_server_is_running", return_value=True),
+    ):
+        result = runner.invoke(
+            turbo_cli.cli, ["transcribe", str(wav), "--format", "vtt", "--split"]
+        )
+    assert result.exit_code != 0
+    assert "not supported with split mode" in result.output
+
+
+def test_split_mode_json_format_still_supported(tmp_path):
+    """json/verbose_json are explicitly still allowed in split mode — the
+    merged result is already a JSON-shaped dict."""
+    wav = tmp_path / "test.wav"
+    wav.write_bytes(b"RIFF\x00\x00\x00\x00WAVEfmt ")
+    fake_result = {"text": "Hello.", "segments": [{"start": 0.0, "end": 1.0, "text": "Hello."}]}
+
+    runner = CliRunner()
+    with (
+        patch.object(turbo_cli, "_get_running_model", return_value=None),
+        patch.object(turbo_cli, "resolve_model", return_value=FAKE_MODEL),
+        patch.object(turbo_cli, "_get_provider_for", return_value=_FakeProvider()),
+        patch.object(turbo_cli, "_server_is_running", return_value=True),
+        patch("turbollm.transcribe_split.transcribe_split", return_value=fake_result),
+    ):
+        result = runner.invoke(
+            turbo_cli.cli, ["transcribe", str(wav), "--format", "json", "--split"]
+        )
+    assert result.exit_code == 0, result.output
+    assert "Hello." in result.output
+
+
+# ---------------------------------------------------------------------------
+# ffmpeg pre-convert: a failed conversion must not leak the temp .wav nor
+# surface a raw traceback (BUG-20).
+# ---------------------------------------------------------------------------
+
+
+def test_ffmpeg_convert_failure_cleans_up_temp_file_and_prints_clean_error(tmp_path):
+    src = tmp_path / "meeting.m4a"
+    src.write_bytes(b"fake-m4a-bytes")
+
+    created_tmp_paths = []
+    real_ntf = tempfile.NamedTemporaryFile
+
+    def spying_ntf(*args, **kwargs):
+        f = real_ntf(*args, **kwargs)
+        created_tmp_paths.append(f.name)
+        return f
+
+    def failing_run(cmd, **kwargs):
+        if cmd[0] == "ffmpeg":
+            raise subprocess.CalledProcessError(1, cmd, output=b"", stderr=b"boom")
+        raise AssertionError(f"unexpected subprocess.run call: {cmd}")
+
+    runner = CliRunner()
+    with (
+        patch.object(turbo_cli, "_get_running_model", return_value=None),
+        patch.object(turbo_cli, "resolve_model", return_value=FAKE_MODEL),
+        patch.object(turbo_cli, "_get_provider_for", return_value=_FakeProvider()),
+        patch.object(turbo_cli, "_server_is_running", return_value=True),
+        patch("shutil.which", return_value="/usr/bin/ffmpeg"),
+        patch.object(turbo_cli.tempfile, "NamedTemporaryFile", side_effect=spying_ntf),
+        patch.object(turbo_cli.subprocess, "run", side_effect=failing_run),
+    ):
+        result = runner.invoke(turbo_cli.cli, ["transcribe", str(src)])
+
+    assert result.exit_code != 0
+    assert "Traceback" not in result.output
+    assert "ffmpeg failed to convert" in result.output
+    assert created_tmp_paths, "ffmpeg conversion path was not exercised"
+    for p in created_tmp_paths:
+        assert not Path(p).exists(), f"leaked temp file: {p}"

@@ -1,6 +1,7 @@
 from pathlib import Path
 from unittest.mock import patch
 
+import click
 import pytest
 
 from turbollm.providers.omlx import OMLX_MODELS_DIR, OmlxProvider
@@ -71,6 +72,27 @@ class TestEnsureSymlink:
         assert target.resolve() == new_snapshot.resolve()
 
 
+class TestEnsureSymlinkRealDirectory:
+    def test_raises_clear_error_on_real_directory(self, provider, fake_model, tmp_path):
+        # A real (non-symlink) directory at the link path — e.g. a manually
+        # placed model — must not be blown away or crash with a raw
+        # traceback from Path.unlink() on a directory.
+        snapshot = tmp_path / "snapshot"
+        snapshot.mkdir()
+        target = tmp_path / "omlx_models" / "mlx-community" / "Qwen3.6-35B-A3B-4bit"
+        target.mkdir(parents=True)
+        (target / "manually-placed.txt").touch()
+
+        with patch.object(provider, "_symlink_path", return_value=target):
+            with pytest.raises(click.ClickException, match="isn't a symlink"):
+                provider._ensure_symlink(fake_model, snapshot)
+
+        # The real directory (and its contents) must survive.
+        assert target.is_dir()
+        assert not target.is_symlink()
+        assert (target / "manually-placed.txt").exists()
+
+
 class TestRemoveSymlink:
     def test_removes_symlink(self, provider, fake_model, tmp_path):
         target = tmp_path / "omlx_models" / "mlx-community" / "Qwen3.6-35B-A3B-4bit"
@@ -87,6 +109,16 @@ class TestRemoveSymlink:
 
         with patch.object(provider, "_symlink_path", return_value=target):
             provider._remove_symlink(fake_model)  # should not raise
+
+    def test_raises_clear_error_on_real_directory(self, provider, fake_model, tmp_path):
+        target = tmp_path / "omlx_models" / "mlx-community" / "Qwen3.6-35B-A3B-4bit"
+        target.mkdir(parents=True)
+
+        with patch.object(provider, "_symlink_path", return_value=target):
+            with pytest.raises(click.ClickException, match="isn't a symlink"):
+                provider._remove_symlink(fake_model)
+
+        assert target.is_dir()
 
 
 class TestBuildServeCmd:
@@ -161,3 +193,23 @@ class TestIsDownloaded:
         with patch("turbollm.providers.omlx._hf_snapshot_path", return_value=snapshot), \
              patch.object(provider, "_symlink_path", return_value=link):
             assert provider.is_downloaded(fake_model) is False
+
+
+class TestPull:
+    def test_honors_configured_local_path(self, provider, fake_model, tmp_path):
+        # omlx.pull previously called snapshot_download() with no local_dir,
+        # silently dropping local_path support that gguf/vllm_mlx/mlx_vlm all
+        # honor. The shared download_repo_with_progress() helper must be
+        # called with the model's configured local_path.
+        local_dir = tmp_path / "custom"
+        snapshot = tmp_path / "snapshot"
+        snapshot.mkdir()
+        fake_model = {**fake_model, "local_path": str(local_dir)}
+
+        with patch(
+            "turbollm.providers.omlx.download_repo_with_progress", return_value=snapshot
+        ) as download, patch.object(provider, "_ensure_symlink") as ensure_symlink:
+            provider.pull(fake_model)
+
+        download.assert_called_once_with(fake_model["hf_repo"], local_dir)
+        ensure_symlink.assert_called_once_with(fake_model, snapshot)

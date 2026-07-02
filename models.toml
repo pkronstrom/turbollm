@@ -741,7 +741,10 @@ echo "Wrote: $attachments" >&2
 
 [workflows.transcribe-file]
 description = "Transcribe an audio file to stdout"
-command = 'turbo transcribe "{{file}}"'
+# No manual quotes around {{file}}: inline-command substitutions are
+# shell-quoted automatically (shlex.quote); wrapping the token in "" would
+# nest the quoting and hand turbo a literal-quoted path.
+command = 'turbo transcribe {{file}}'
 
 [[workflows.transcribe-file.params]]
 name = "file"

@@ -1,10 +1,11 @@
-import logging
 import os
 import shutil
 from pathlib import Path
 
+import click
 from rich.console import Console
 
+from turbollm.hf_download import configured_path, download_repo_with_progress, translate_hf_errors
 from turbollm.registry import _hf_snapshot_path, get_defaults
 
 console = Console()
@@ -28,15 +29,28 @@ class OmlxProvider:
         """Create or update symlink from oMLX model dir to HF snapshot."""
         link = self._symlink_path(model)
         link.parent.mkdir(parents=True, exist_ok=True)
-        if link.is_symlink() or link.exists():
+        if link.is_symlink():
             link.unlink()
+        elif link.exists():
+            # A real (non-symlink) directory/file at the link path — e.g. a
+            # manually placed model. `.unlink()` raises on a directory, and
+            # blowing it away automatically risks deleting something the
+            # user put there on purpose after a multi-GB download.
+            raise click.ClickException(
+                f"{link} exists and isn't a symlink turbo manages. "
+                f"Move or remove it, then re-run `turbo pull`."
+            )
         link.symlink_to(snapshot_path)
 
     def _remove_symlink(self, model: dict) -> None:
         """Remove oMLX symlink for a model."""
         link = self._symlink_path(model)
-        if link.is_symlink() or link.exists():
+        if link.is_symlink():
             link.unlink()
+        elif link.exists():
+            raise click.ClickException(
+                f"{link} exists and isn't a symlink turbo manages. Remove it manually."
+            )
 
     def build_serve_cmd(self, model: dict, port: int) -> list[str]:
         defaults = get_defaults()
@@ -71,48 +85,11 @@ class OmlxProvider:
 
         return cmd
 
+    @translate_hf_errors
     def pull(self, model: dict) -> None:
-        from huggingface_hub import hf_hub_download, list_repo_files, snapshot_download
-        from rich.progress import (
-            BarColumn, DownloadColumn, Progress, SpinnerColumn,
-            TextColumn, TimeRemainingColumn, TransferSpeedColumn,
-        )
-
         repo = model["hf_repo"]
-
-        logging.getLogger("httpx").setLevel(logging.WARNING)
-        logging.getLogger("huggingface_hub").setLevel(logging.WARNING)
-        os.environ["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"
-        os.environ["HF_HUB_DISABLE_TELEMETRY"] = "1"
-
-        files = list_repo_files(repo_id=repo)
-        model_files = [f for f in files if not f.startswith(".")]
-        safetensor_files = [f for f in model_files if f.endswith(".safetensors")]
-        other_files = [f for f in model_files if not f.endswith(".safetensors")]
-
-        for f in other_files:
-            hf_hub_download(repo_id=repo, filename=f)
-
-        with Progress(
-            SpinnerColumn(),
-            TextColumn("[bold blue]{task.fields[filename]}"),
-            BarColumn(bar_width=30), DownloadColumn(),
-            TransferSpeedColumn(), TimeRemainingColumn(),
-            console=console, transient=True,
-        ) as progress:
-            for f in safetensor_files:
-                fname = f.split("/")[-1]
-                task = progress.add_task("dl", filename=fname, total=None, start=True)
-                local_file = hf_hub_download(repo_id=repo, filename=f)
-                fsize = Path(local_file).stat().st_size
-                progress.update(task, completed=fsize, total=fsize)
-                progress.remove_task(task)
-                console.print(f"  [green]done[/green] {fname} ({fsize / 1e9:.1f}GB)")
-
-        local = snapshot_download(repo_id=repo)
-        snapshot_path = Path(local)
-        total_size = sum(f.stat().st_size for f in snapshot_path.rglob("*") if f.is_file()) / 1e9
-        console.print(f"\n  [green]Done![/green] {total_size:.1f}GB total")
+        local_path = configured_path(model, "local_path")
+        snapshot_path = download_repo_with_progress(repo, local_path)
 
         # Create oMLX symlink
         self._ensure_symlink(model, snapshot_path)

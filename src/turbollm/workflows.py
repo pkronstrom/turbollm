@@ -12,6 +12,7 @@ import fcntl as _fcntl
 import os as _os
 import pathlib as _pathlib
 import re as _re
+import shlex as _shlex
 import shutil as _shutil
 import signal as _signal
 import subprocess as _subprocess
@@ -103,12 +104,23 @@ def _default_mode(param: dict) -> str:
 _TEMPLATE_RE = _re.compile(r"\{\{([^}]+)\}\}")
 
 
-def expand_template(template: str, params: dict[str, str]) -> str:
+def expand_template(template: str, params: dict[str, str], *, quote: bool = False) -> str:
     """Expand `{{date:FMT}}`, `{{env:VAR}}`, and `{{param-name}}` tokens.
 
     Raises WorkflowError on `{{name}}` references that aren't in `params`.
     Missing env vars expand to the empty string.
+
+    ``quote=True`` shell-quotes (`shlex.quote`) every expanded param/env value
+    before substitution — for inline `command` templates, which are handed to
+    `/bin/sh -c` as a single string, so an unquoted value containing spaces or
+    shell metacharacters (a recorded path, a `--param` override) would break
+    or inject into the shell command. Script-reference workflows pass params
+    as positional argv entries instead of splicing them into a string, so
+    they don't need this (and callers should leave `quote` at its default).
     """
+    def _q(value: str) -> str:
+        return _shlex.quote(value) if quote else value
+
     def _replace(match: _re.Match) -> str:
         token = match.group(1).strip()
         if token.startswith("date:"):
@@ -116,12 +128,37 @@ def expand_template(template: str, params: dict[str, str]) -> str:
             return _dt.datetime.now().strftime(fmt)
         if token.startswith("env:"):
             var = token[len("env:"):]
-            return _os.environ.get(var, "")
+            return _q(_os.environ.get(var, ""))
         if token in params:
-            return str(params[token])
+            return _q(str(params[token]))
         raise WorkflowError(f"undefined param '{token}' in template")
 
     return _TEMPLATE_RE.sub(_replace, template)
+
+
+def _check_auto_template_refs(template: str, all_params: list[dict], resolved: dict[str, str]) -> None:
+    """Raise a clear WorkflowError if an `auto` template references a param
+    that's acquired in the background.
+
+    Background acquirers (mode="background") only resolve after the primary
+    acquirer exits (see the post-flight loop below), so they're never in
+    `resolved` at the point an earlier `auto` template would need them — that
+    used to fail inside `expand_template` as a generic "undefined param"
+    error, which reads like a typo rather than a structural workflow bug.
+    """
+    background_names = {
+        bp["name"] for bp in all_params
+        if bp.get("type") in ACQUIRED_TYPES and bp.get("mode", _default_mode(bp)) == "background"
+    }
+    for match in _TEMPLATE_RE.finditer(template):
+        token = match.group(1).strip()
+        if token.startswith("date:") or token.startswith("env:"):
+            continue
+        if token in background_names and token not in resolved:
+            raise WorkflowError(
+                f"param '{token}' is acquired in the background and can't be referenced "
+                "by auto templates (it only resolves after the primary acquirer exits)"
+            )
 
 
 def resolve_params(
@@ -136,10 +173,12 @@ def resolve_params(
     """Resolve each param's value, checking sources in priority order:
     1. `overrides` (typically CLI `--param` flags)
     2. `acquirer_bin` spawn (for acquired-type params not in overrides, when acquirer is available)
-    3. `auto = "..."` template (expanded against params already resolved)
-    4. `default_env = "VAR"` (when the env var is set and non-empty)
-    5. `default = "..."`
-    6. empty string
+    3. sticky value from `turbo workflows config` (configured-type params only, when
+       `workflow_name` is given — see `_read_workflow_config_sticky`)
+    4. `auto = "..."` template (expanded against params already resolved)
+    5. `default_env = "VAR"` (when the env var is set and non-empty)
+    6. `default = "..."`
+    7. empty string
 
     Acquired params (audio-recording, screenshot-manual, command, screen-recording) are spawned
     via `turbo-acquirer` when `acquirer_bin` is provided and the param is not
@@ -155,6 +194,10 @@ def resolve_params(
     Note: `auto` templates can only reference params that appear earlier in the
     param list (the resolution is sequential and only earlier results are in
     scope). Workflow authors should order params with this constraint in mind.
+    A template referencing a background-acquired param raises a dedicated
+    WorkflowError (that value is never in scope for `auto`, since it only
+    resolves after the primary acquirer exits) rather than the generic
+    "undefined param" error.
     """
     resolved: dict[str, str] = {}
 
@@ -219,7 +262,14 @@ def resolve_params(
                     "when running from the CLI; the HUD performs acquisition natively"
                 )
 
+            if workflow_name is not None and ptype in CONFIGURED_TYPES:
+                sticky = _read_workflow_config_sticky(workflow_name, name)
+                if sticky is not None:
+                    resolved[name] = sticky
+                    continue
+
             if "auto" in p:
+                _check_auto_template_refs(p["auto"], params, resolved)
                 resolved[name] = expand_template(p["auto"], params=resolved)
                 continue
 
@@ -239,7 +289,13 @@ def resolve_params(
                     pass
 
             for name, (proc, p) in _background_procs.items():
-                stdout, stderr = proc.communicate()
+                try:
+                    stdout, stderr = proc.communicate(timeout=10)
+                except _subprocess.TimeoutExpired:
+                    # Acquirer ignored SIGTERM (or is stuck flushing) — escalate
+                    # rather than hang the whole workflow run indefinitely.
+                    proc.kill()
+                    stdout, stderr = proc.communicate()
                 # Accept clean exit (0) or killed by SIGTERM (-signal.SIGTERM on Unix).
                 if proc.returncode not in (0, -_signal.SIGTERM):
                     raise WorkflowError(
@@ -267,6 +323,10 @@ def resolve_params(
                     proc.communicate(timeout=5)
                 except Exception:
                     proc.kill()
+                    try:
+                        proc.wait(timeout=5)
+                    except Exception:
+                        pass
 
     return resolved
 
@@ -277,6 +337,41 @@ def resolve_params(
 # `turbo workflows config`; the HUD writes them directly as
 # `<wf>.<name>.scope` / `<wf>.<name>.input_device`.
 _HUD_DEFAULTS_SUITE = "com.turbollm.hud"
+
+
+# Key convention for stickies written by `turbo workflows config` (cli.py's
+# `_defaults_key`/`_WORKFLOWS_CONFIG_KEY_PREFIX`). Duplicated here (rather than
+# imported from cli.py) to avoid a workflows -> cli import cycle; cli.py
+# already imports this module.
+_WORKFLOW_CONFIG_KEY_PREFIX = "workflow"
+
+
+def _read_workflow_config_sticky(workflow_name: str, param_name: str) -> str | None:
+    """Read a `turbo workflows config` sticky value for (workflow, param).
+
+    Mirrors cli.py's `_defaults_key` convention (`workflow.<wf>.param.<name>`
+    in suite `com.turbollm.hud`), so a value set via
+    `turbo workflows config <wf> <param>=<value>` is honoured by
+    `turbo workflows run <wf>` too — previously only the HUD and `prune.py`
+    (via a differently-shaped key) consulted these. Dependency-free (shells
+    out to `/usr/bin/defaults`, same as `_read_hud_override`) and non-fatal:
+    returns ``None`` on any failure, including a missing `/usr/bin/defaults`
+    (non-macOS environments), so it degrades to "no sticky" rather than
+    crashing.  A module-level function (not inlined) so tests can monkeypatch
+    it directly instead of shelling out.
+    """
+    key = f"{_WORKFLOW_CONFIG_KEY_PREFIX}.{workflow_name}.param.{param_name}"
+    try:
+        result = _subprocess.run(
+            ["/usr/bin/defaults", "read", _HUD_DEFAULTS_SUITE, key],
+            capture_output=True,
+            text=True,
+        )
+    except (FileNotFoundError, OSError):
+        return None
+    if result.returncode != 0:
+        return None
+    return result.stdout.strip() or None
 
 
 def _read_hud_override(workflow_name: str, param_name: str, suffix: str) -> str | None:
@@ -460,30 +555,36 @@ def _workflow_lock(name: str):
     released automatically on exit (including crash / SIGKILL).
     """
     path = _workflow_lock_path(name)
-    fd = open(path, "w")
+    # Open O_RDWR without O_TRUNC and only truncate *after* the flock is held.
+    # `open(path, "w")` truncates immediately on open — a second `run` racing
+    # a live holder would erase the running instance's PID stamp before even
+    # attempting the (failing) flock, leaving `workflow_status`/`stop_workflow`
+    # unable to find it.
+    fd = _os.open(path, _os.O_CREAT | _os.O_RDWR)
     try:
         try:
-            _fcntl.flock(fd.fileno(), _fcntl.LOCK_EX | _fcntl.LOCK_NB)
+            _fcntl.flock(fd, _fcntl.LOCK_EX | _fcntl.LOCK_NB)
         except BlockingIOError as exc:
-            fd.close()
+            # Don't close fd here — the outer `finally` below always closes it
+            # exactly once, on every exit path including this one.
             raise WorkflowError(
                 f"workflow '{name}' is already running. "
                 "Stop the running instance first "
                 "(HUD ⏹ Stop, Raycast 'Running Workflows' command, "
                 f"or remove {path} after confirming no live process holds it)."
             ) from exc
-        # Stamp our PID so workflow_status() can identify the holder without a
-        # separate registry. We re-open read-only to read this; flock itself is
-        # still the authority for "is it running".
-        fd.write(str(_os.getpid()))
-        fd.flush()
+        # Now that we hold the lock, it's safe to truncate and stamp our PID
+        # so workflow_status() can identify the holder without a separate
+        # registry. flock itself is still the authority for "is it running".
+        _os.ftruncate(fd, 0)
+        _os.write(fd, str(_os.getpid()).encode())
         yield
     finally:
         try:
-            _fcntl.flock(fd.fileno(), _fcntl.LOCK_UN)
+            _fcntl.flock(fd, _fcntl.LOCK_UN)
         except Exception:
             pass
-        fd.close()
+        _os.close(fd)
 
 
 def workflow_status(name: str) -> dict:
@@ -504,8 +605,13 @@ def workflow_status(name: str) -> dict:
         return {"state": "idle", "pid": None}
     try:
         try:
-            _fcntl.flock(fd.fileno(), _fcntl.LOCK_EX | _fcntl.LOCK_NB)
-            # Acquired → no one was holding it. Release immediately.
+            # LOCK_SH (not LOCK_EX): a probe only needs to detect whether the
+            # exclusive lock is held, not to briefly hold it exclusively
+            # itself. Two concurrent LOCK_SH probes don't conflict with each
+            # other (only with LOCK_EX), which narrows the window where a
+            # starting workflow's flock could be spuriously reported idle.
+            _fcntl.flock(fd.fileno(), _fcntl.LOCK_SH | _fcntl.LOCK_NB)
+            # Acquired → no one was holding it exclusively. Release immediately.
             _fcntl.flock(fd.fileno(), _fcntl.LOCK_UN)
             return {"state": "idle", "pid": None}
         except BlockingIOError:
@@ -517,23 +623,25 @@ def workflow_status(name: str) -> dict:
 
 
 def stop_workflow(name: str, sig: int = _signal.SIGTERM) -> int | None:
-    """Signal a running workflow's process group. Returns the signaled PID or None.
+    """Send a signal to a running workflow's launcher process. Returns the
+    signaled PID or None.
 
-    Targets the process group (negative pid via killpg) so the python parent's
-    /bin/sh subprocess — and any acquirers it spawned — go down too. Relies on
-    run_workflow having started the child in a new session (see Popen
-    `start_new_session=True`).
+    Signals the launcher (the `turbo workflows run` process that holds the
+    lock) directly via `os.kill`, not its process group. Group-signaling via
+    `killpg` was hazardous: if turbo wasn't spawned in its own process group
+    (e.g. launched from the HUD or Raycast), the group could include that
+    host process too. It was also unnecessary — `_spawn_and_wait` always
+    starts the actual `/bin/sh` child in a new session
+    (`start_new_session=True`) and installs a SIGTERM/SIGINT forwarder that
+    relays the signal into that child's session once the launcher receives
+    it, so signaling just the launcher still tears down the whole tree.
     """
     info = workflow_status(name)
     if info["state"] != "running" or not info["pid"]:
         return None
     pid = info["pid"]
     try:
-        pgid = _os.getpgid(pid)
-    except ProcessLookupError:
-        return None
-    try:
-        _os.killpg(pgid, sig)
+        _os.kill(pid, sig)
     except ProcessLookupError:
         return None
     return pid
@@ -585,7 +693,11 @@ def run_workflow(
 
             # Pick the command string: inline or via script reference.
             if wf.get("command"):
-                command = expand_template(wf["command"], resolved)
+                # quote=True: this string is handed to `/bin/sh -c` as-is, so
+                # every substituted value must be shell-quoted (a recorded
+                # path with a space, or a `--param x='; rm -rf ~'` override,
+                # would otherwise break or inject into the shell command).
+                command = expand_template(wf["command"], resolved, quote=True)
             else:
                 script_name = wf["script"]
                 scripts = registry.get("scripts", {})
@@ -603,7 +715,7 @@ def run_workflow(
                 k: expand_template(v, resolved) for k, v in wf.get("env", {}).items()
             }
 
-            env = {**_os_environ_copy(), **env_overrides}
+            env = {**_os.environ, **env_overrides}
             if wf.get("command"):
                 argv = ["/bin/sh", "-c", command, name]
             else:
@@ -639,7 +751,3 @@ def _spawn_and_wait(argv: list[str], env: dict[str, str]) -> int:
     finally:
         _signal.signal(_signal.SIGTERM, prev_term)
         _signal.signal(_signal.SIGINT, prev_int)
-
-
-def _os_environ_copy() -> dict[str, str]:
-    return dict(_os.environ)

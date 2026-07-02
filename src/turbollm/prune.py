@@ -13,15 +13,17 @@ or call `execute_prune()` to delete.
 from __future__ import annotations
 
 import dataclasses
-import errno
 import fcntl
 import json
 import os
 import pathlib
 import shutil
+import subprocess
 import tempfile
 import time
 from typing import Iterable
+
+from turbollm.activity import pid_alive as _is_pid_alive
 
 
 # ---------------------------------------------------------------------------
@@ -85,7 +87,6 @@ def _read_hud_param_sticky(workflow_name: str, param_name: str) -> str | None:
     `turbo workflows config` and the Raycast extension. Returns None on any
     failure (non-macOS, key missing, defaults unavailable).
     """
-    import subprocess
     key = f"workflow.{workflow_name}.param.{param_name}"
     try:
         result = subprocess.run(
@@ -207,6 +208,13 @@ def scan_orphan_session_dirs(tmp_root: pathlib.Path) -> list[PruneTarget]:
     deleted by the bundled workflow on success. Survivors are crash debris.
     The age gate avoids killing an in-progress recording whose workflow hasn't
     finished yet.
+
+    Staleness is judged by the *newest* mtime of any file inside the dir, not
+    the dir's own mtime: the acquirer appends to files inside the dir while
+    recording, which doesn't bump the directory entry's mtime. Using the dir
+    mtime alone would let a long (>1h) in-progress recording look stale and
+    get rmtree'd mid-recording — the exact case this age gate exists to
+    prevent. Falls back to the dir's own mtime when it's empty.
     """
     if not tmp_root.is_dir():
         return []
@@ -219,7 +227,8 @@ def scan_orphan_session_dirs(tmp_root: pathlib.Path) -> list[PruneTarget]:
             stat = entry.stat()
         except OSError:
             continue
-        if stat.st_mtime > cutoff:
+        newest = _newest_mtime_in_dir(entry, fallback=stat.st_mtime)
+        if newest > cutoff:
             continue
         size = _dir_size_bytes(entry)
         results.append(PruneTarget(path=entry, size_bytes=size, is_dir=True))
@@ -254,15 +263,48 @@ def gather_prune_targets(
     }
 
 
-def execute_prune(targets: Iterable[PruneTarget]) -> tuple[int, int]:
-    """Delete every target. Returns (deleted_count, bytes_freed).
+class PruneResult(tuple):
+    """(deleted_count, bytes_freed) tuple, plus a `.failures` list.
+
+    Subclassing `tuple` (rather than adding a 3rd positional element) keeps
+    `deleted, freed = execute_prune(...)` working for existing callers while
+    still letting new callers read `.failures` for deletions that errored out
+    (as opposed to targets that simply vanished, which aren't failures).
+    """
+
+    def __new__(cls, deleted: int, freed: int, failures: list[tuple[pathlib.Path, str]]):
+        self = super().__new__(cls, (deleted, freed))
+        self.failures = failures
+        return self
+
+
+def execute_prune(targets: Iterable[PruneTarget]) -> PruneResult:
+    """Delete every target. Returns a `PruneResult` (deleted_count, bytes_freed).
 
     Targets that disappear between scan and delete (races against a live
     workflow) are silently skipped — we only counted them as removable.
+
+    A `.lock` target is re-probed for an unheld flock immediately before
+    unlinking: `scan_stale_locks` only checked at scan time, and a workflow
+    may have re-acquired the lock in the (potentially long, user-confirmation
+    gated) window since. Deleting a held lock out from under its holder is a
+    split-brain — two "owners" of the same logical lock. If it's now held,
+    the deletion is skipped and recorded as a failure rather than silently
+    dropped, so callers can surface it.
+
+    Other deletion failures (permission errors, etc.) are likewise collected
+    into `.failures` as `(path, error_message)` pairs instead of being
+    swallowed — `except OSError: continue` was silently under-reporting
+    deletions.
     """
     deleted = 0
     freed = 0
+    failures: list[tuple[pathlib.Path, str]] = []
     for t in targets:
+        if not t.is_dir and t.path.suffix == ".lock" and t.path.exists():
+            if not _flock_is_unheld(t.path):
+                failures.append((t.path, "lock re-acquired since scan; skipped"))
+                continue
         try:
             if t.is_dir:
                 shutil.rmtree(t.path)
@@ -270,35 +312,23 @@ def execute_prune(targets: Iterable[PruneTarget]) -> tuple[int, int]:
                 t.path.unlink()
         except FileNotFoundError:
             continue
-        except OSError:
+        except OSError as e:
+            failures.append((t.path, str(e)))
             continue
         deleted += 1
         freed += t.size_bytes
-    return deleted, freed
+    return PruneResult(deleted, freed, failures)
 
 
 # ---------------------------------------------------------------------------
 # Internals
 # ---------------------------------------------------------------------------
 
-
-def _is_pid_alive(pid: int) -> bool:
-    """True iff a process with this PID currently exists. Signal 0 is
-    permission-checked but doesn't actually deliver, per POSIX."""
-    if pid <= 0:
-        return False
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        # PID exists but we can't signal it — it IS alive.
-        return True
-    except OSError as e:
-        if e.errno == errno.ESRCH:
-            return False
-        return True
-    return True
+# `_is_pid_alive` used to be a hand-rolled copy that mishandled pid <= 0
+# (`os.kill(0, 0)` signals the caller's own process group and always
+# succeeds, so pid 0 looked "alive"). `activity.pid_alive` has the correct
+# version — import it under the old name so call sites here don't need to
+# change.
 
 
 def _flock_is_unheld(path: pathlib.Path) -> bool:
@@ -328,3 +358,17 @@ def _dir_size_bytes(path: pathlib.Path) -> int:
             except OSError:
                 continue
     return total
+
+
+def _newest_mtime_in_dir(path: pathlib.Path, *, fallback: float) -> float:
+    """Newest mtime of any file under `path`, or `fallback` if it has none."""
+    newest = fallback
+    for root, _dirs, files in os.walk(path):
+        for name in files:
+            try:
+                mtime = (pathlib.Path(root) / name).stat().st_mtime
+            except OSError:
+                continue
+            if mtime > newest:
+                newest = mtime
+    return newest

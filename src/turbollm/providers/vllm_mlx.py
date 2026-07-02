@@ -1,11 +1,10 @@
-import logging
-import os
 import json
 import shutil
 from pathlib import Path
 
 from rich.console import Console
 
+from turbollm.hf_download import configured_path, download_repo_with_progress, translate_hf_errors
 from turbollm.registry import (
     _hf_cache_path,
     _hf_snapshot_path,
@@ -106,56 +105,13 @@ class VllmMlxProvider:
 
         return cmd
 
+    @translate_hf_errors
     def pull(self, model: dict) -> None:
-        from huggingface_hub import hf_hub_download, list_repo_files, snapshot_download
-        from rich.progress import (
-            BarColumn, DownloadColumn, Progress, SpinnerColumn,
-            TextColumn, TimeRemainingColumn, TransferSpeedColumn,
-        )
+        from huggingface_hub import snapshot_download
 
         repo = model["hf_repo"]
-        local_path = self._configured_path(model, "local_path")
-
-        logging.getLogger("httpx").setLevel(logging.WARNING)
-        logging.getLogger("huggingface_hub").setLevel(logging.WARNING)
-        os.environ["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"
-        os.environ["HF_HUB_DISABLE_TELEMETRY"] = "1"
-
-        files = list_repo_files(repo_id=repo)
-        model_files = [f for f in files if not f.startswith(".")]
-        safetensor_files = [f for f in model_files if f.endswith(".safetensors")]
-        other_files = [f for f in model_files if not f.endswith(".safetensors")]
-
-        download_kwargs = {"repo_id": repo}
-        if local_path is not None:
-            local_path.mkdir(parents=True, exist_ok=True)
-            download_kwargs["local_dir"] = str(local_path)
-
-        # Download small files first (configs, tokenizer) quietly
-        for f in other_files:
-            hf_hub_download(filename=f, **download_kwargs)
-
-        # Download safetensors with per-file progress
-        with Progress(
-            SpinnerColumn(),
-            TextColumn("[bold blue]{task.fields[filename]}"),
-            BarColumn(bar_width=30), DownloadColumn(),
-            TransferSpeedColumn(), TimeRemainingColumn(),
-            console=console, transient=True,
-        ) as progress:
-            for f in safetensor_files:
-                fname = f.split("/")[-1]
-                task = progress.add_task("dl", filename=fname, total=None, start=True)
-                local_file = hf_hub_download(filename=f, **download_kwargs)
-                fsize = Path(local_file).stat().st_size
-                progress.update(task, completed=fsize, total=fsize)
-                progress.remove_task(task)
-                console.print(f"  [green]done[/green] {fname} ({fsize / 1e9:.1f}GB)")
-
-        # Ensure snapshot is resolved
-        local = snapshot_download(**download_kwargs)
-        total_size = sum(f.stat().st_size for f in Path(local).rglob("*") if f.is_file()) / 1e9
-        console.print(f"\n  [green]Done![/green] {total_size:.1f}GB total")
+        local_path = configured_path(model, "local_path")
+        download_repo_with_progress(repo, local_path)
 
         # Pull draft model if configured
         draft_repo = model.get("draft_hf_repo")
@@ -171,6 +127,7 @@ class VllmMlxProvider:
     def get_model_id(self, model: dict) -> str:
         return model["hf_repo"]
 
+    @translate_hf_errors
     def pull_draft(self, model: dict) -> None:
         """Download the draft model (used by --specprefill speculative decoding)."""
         draft_repo = model.get("draft_hf_repo")
@@ -184,7 +141,7 @@ class VllmMlxProvider:
         console.print(f"  [green]Done![/green] Draft model cached")
 
     def _model_path(self, model: dict) -> Path | None:
-        local = self._configured_path(model, "local_path")
+        local = configured_path(model, "local_path")
         if local is not None and any(local.glob("*.safetensors")):
             return local
 
@@ -205,9 +162,3 @@ class VllmMlxProvider:
         if snap and any(snap.glob("*.safetensors")):
             return snap
         return None
-
-    def _configured_path(self, model: dict, key: str) -> Path | None:
-        value = model.get(key)
-        if not value:
-            return None
-        return Path(value).expanduser()

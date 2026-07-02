@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from pathlib import Path
 
 import click
@@ -15,8 +16,14 @@ _RAYCAST_FIXED_COMMANDS = {"run-workflow", "running-workflows"}
 
 
 def _to_title_case(slug: str) -> str:
-    """Convert a kebab-case slug to Title Case. E.g. 'transcribe-file' → 'Transcribe File'."""
-    return " ".join(word.capitalize() for word in slug.split("-"))
+    """Convert a kebab-case slug to Title Case. E.g. 'transcribe-file' → 'Transcribe File'.
+
+    Only the first character of each word is upper-cased; the rest of the
+    word is left untouched (rather than ``str.capitalize()``, which lower-
+    cases everything after the first letter and would mangle an acronym
+    already present in the slug, e.g. turning "API" into "Api").
+    """
+    return " ".join(word[:1].upper() + word[1:] for word in slug.split("-"))
 
 
 @click.group(name="raycast")
@@ -101,11 +108,18 @@ def _do_raycast_sync(extension_dir: Path, quiet: bool) -> None:
     # Remove orphan stub/symlink files — those whose workflow slug is no longer
     # in the registry. Identify ours by either symlink target or stub marker.
     for tsx_file in src_dir.glob("*.tsx"):
-        if tsx_file.stem in wf_names or tsx_file.stem in {"run-workflow", "running-workflows"}:
+        if tsx_file.stem in wf_names or tsx_file.stem in _RAYCAST_FIXED_COMMANDS:
             continue
         is_legacy_symlink = tsx_file.is_symlink() and os.readlink(str(tsx_file)) == "run-workflow.tsx"
-        is_stub = tsx_file.is_file() and stub_marker in tsx_file.read_text()
-        if is_legacy_symlink or is_stub:
+        if is_legacy_symlink:
+            tsx_file.unlink()
+            continue
+        try:
+            is_stub = tsx_file.is_file() and stub_marker in tsx_file.read_text()
+        except (OSError, UnicodeDecodeError) as e:
+            print(f"turbo raycast sync: warning: could not read {tsx_file}: {e}", file=sys.stderr)
+            continue
+        if is_stub:
             tsx_file.unlink()
 
     # Write src/_generated_commands.ts — a type-safe command-name → workflow-name map.
@@ -132,7 +146,7 @@ def _do_raycast_sync(extension_dir: Path, quiet: bool) -> None:
 @click.option(
     "--extension-dir",
     default=None,
-    type=click.Path(file_okay=False, path_type=Path),
+    type=click.Path(exists=True, file_okay=False, path_type=Path),
     help="Raycast extension directory (default: the in-tree tools/raycast-turbo).",
 )
 @click.option("--quiet", is_flag=True, help="Suppress output.")

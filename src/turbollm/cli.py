@@ -4,6 +4,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -26,9 +27,10 @@ _load_env()
 from rich.console import Console
 from rich.table import Table
 
+from turbollm.multipart import build_multipart
 from turbollm.picker import pick as picker_pick
 from turbollm.providers import get_provider
-from turbollm.registry import context_default_tokens, get_defaults, load_registry, resolve_model
+from turbollm.registry import effective_context, get_defaults, load_registry, resolve_model
 
 console = Console()
 
@@ -44,18 +46,6 @@ def _get_model_id(m: dict) -> str:
     Delegates to the provider so each backend can override (mlx-vlm reports a
     local filesystem path, others report hf_repo)."""
     return _get_provider_for(m).get_model_id(m)
-
-
-def _picker_stats(m: dict) -> tuple[str, str, str, str]:
-    backend = m.get("backend", get_defaults().get("backend", "vllm-mlx"))
-    model_oc = m.get("opencode", {})
-    srv = m.get("server", {})
-    defaults_oc = get_defaults().get("opencode", {})
-    ctx = model_oc.get("context_length", srv.get("max_tokens", defaults_oc.get("context_length", 32768)))
-    out = model_oc.get("output_length", defaults_oc.get("output_length", 8192))
-    size_gb = m.get("size_gb")
-    size = f"{size_gb:g}GB" if isinstance(size_gb, int | float) else "?"
-    return backend, f"{int(ctx / 1024)}k", f"{int(out / 1024)}k", size
 
 
 # Backends grouped by modality. Chat/text harnesses (pi, claude, codex, …) serve
@@ -122,7 +112,7 @@ def pick_model(requires_backend: list[str] | None = None) -> tuple[str, dict]:
     if result is None:
         console.print("[yellow]Cancelled.[/yellow]")
         raise SystemExit(1)
-    alias, new_model, overrides = result
+    alias, new_model = result
     if incompatible:
         console.print()
         for ialias, im, ibackend in incompatible:
@@ -229,8 +219,6 @@ def ls_cmd(available):
 
 
 def _print_backends_table() -> None:
-    from turbollm.providers import get_provider
-
     backends = list(_ALL_BACKENDS)
     table = Table(show_header=True, title="\nBackends", title_justify="left")
     table.add_column("Backend", style="bold")
@@ -298,24 +286,32 @@ def rm(model, yes):
 
     import shutil
 
-    from turbollm.registry import _hf_cache_path
+    from turbollm.registry import _hf_cache_path, _legacy_path
 
-    cache_dir = _hf_cache_path(m["hf_repo"])
-    size = sum(f.stat().st_size for f in cache_dir.rglob("*") if f.is_file()) / 1e9
+    # A model can live in either (or, transiently, both) layouts: the HF hub
+    # cache (`_hf_cache_path`) or the pre-hub-cache `~/.turbollm/models/...`
+    # layout (`_legacy_path`). Deleting only the former left legacy-dir
+    # installs on disk while claiming success — `ls` would still list them
+    # as downloaded.
+    dirs = [_hf_cache_path(m["hf_repo"]), _legacy_path(m["hf_repo"])]
+    size = sum(
+        f.stat().st_size for d in dirs if d.exists() for f in d.rglob("*") if f.is_file()
+    ) / 1e9
     if not yes:
         click.confirm(f"Remove {m['name']} ({size:.1f}GB)?", abort=True)
 
-    try:
-        shutil.rmtree(cache_dir)
-    except FileNotFoundError:
-        pass
+    for d in dirs:
+        try:
+            shutil.rmtree(d)
+        except FileNotFoundError:
+            pass
     console.print(f"[green]Removed[/green] {model}")
 
 
 @cli.command()
 @click.argument("model", required=False)
 @click.option("--port", "-p", default=None, type=int, help="Port (default: 8899)")
-@click.option("--backend", "-b", default=None, type=click.Choice(["vllm-mlx", "omlx", "gguf", "mlx-vlm", "mlx-audio"]),
+@click.option("--backend", "-b", default=None, type=click.Choice(_ALL_BACKENDS),
               help="Override backend (default: from model config)")
 @click.option("--context-window", "context_window", default=None, type=int,
               help="Override the model's context_default for this server (tokens). "
@@ -344,7 +340,11 @@ def serve(model, port, backend, context_window):
     defaults = get_defaults()
 
     if not provider.is_downloaded(m):
-        console.print(f"[yellow]Model not downloaded.[/yellow] Run: [bold]turbo pull {model}[/bold]")
+        # `model` is the raw CLI arg — None when the model came from the
+        # picker. Fall back to the resolved alias, then the hf_repo, so the
+        # hint is never a literal "turbo pull None".
+        hint = model or alias or m.get("hf_repo", "")
+        console.print(f"[yellow]Model not downloaded.[/yellow] Run: [bold]turbo pull {hint}[/bold]")
         raise SystemExit(1)
 
     if not provider.is_available():
@@ -352,16 +352,32 @@ def serve(model, port, backend, context_window):
         raise SystemExit(1)
 
     port = port or defaults.get("port", 8899)
+
+    if _server_is_running(port):
+        console.print(
+            f"[red]Port {port} is already serving a model.[/red] "
+            "Use --port to pick a different port, or stop that server first."
+        )
+        raise SystemExit(1)
+
     cmd = provider.build_serve_cmd(m, port)
 
     console.print(f"Serving [bold]{m['name']}[/bold] on port {port}")
     console.print(f"  [dim]backend: {provider.name}[/dim]")
     console.print(f"  [dim]{' '.join(cmd)}[/dim]\n")
-    _write_port_stamp(port, alias, max_tokens=context_default_tokens(m))
+    # effective_context (not context_default_tokens): the provider serves
+    # server-block-first precedence (a [server].max_tokens/context override
+    # beats context_default), so the stamp must record what will actually be
+    # served or the --context-window guard on attaching harnesses validates
+    # against the wrong number.
+    _write_port_stamp(port, alias, max_tokens=effective_context(m))
     try:
         subprocess.run(cmd)
     finally:
-        _clear_port_stamp(port)
+        # Only clear the stamp if it's still ours: a losing `turbo serve` on
+        # a port that turned out to be busy (bind failed) must not delete the
+        # winning process's stamp out from under it.
+        _clear_port_stamp_if_owned(port)
 
 
 @cli.command()
@@ -376,7 +392,13 @@ def chat(port):
         raise SystemExit(1)
 
     # Get model info from server
-    resp = json.loads(urllib.request.urlopen(f"http://127.0.0.1:{port}/v1/models").read())
+    try:
+        resp = json.loads(
+            urllib.request.urlopen(f"http://127.0.0.1:{port}/v1/models", timeout=5).read()
+        )
+    except (urllib.error.URLError, OSError, json.JSONDecodeError) as e:
+        console.print(f"[red]Could not reach server on port {port}:[/red] {e}")
+        raise SystemExit(1) from None
     model_id = resp["data"][0]["id"] if resp.get("data") else "default"
     console.print(f"[dim]Connected to {model_id} on port {port}[/dim]\n")
 
@@ -438,8 +460,17 @@ def chat(port):
                             if content:
                                 print(content, end="", flush=True)
                                 assistant_msg.append(content)
+        except KeyboardInterrupt:
+            # Exit just this turn cleanly (no traceback) rather than the whole
+            # REPL. The un-answered user message is popped below so `messages`
+            # stays symmetric (user/assistant alternating) for the next turn.
+            print()
+            console.print("[dim]Interrupted.[/dim]")
+            messages.pop()
+            continue
         except Exception as e:
             console.print(f"\n[red]Error: {e}[/red]")
+            messages.pop()
             continue
 
         print()
@@ -449,28 +480,6 @@ def chat(port):
 # ---------------------------------------------------------------------------
 # Audio: transcribe via mlx-audio backend
 # ---------------------------------------------------------------------------
-
-def _build_multipart(fields: dict, file_field: str, filename: str,
-                     content_type: str, file_bytes: bytes) -> tuple[bytes, str]:
-    """Hand-rolled multipart/form-data so transcribe stays stdlib-only."""
-    import uuid
-    boundary = "----turbollm" + uuid.uuid4().hex
-    parts: list[bytes] = []
-    for name, value in fields.items():
-        if value is None:
-            continue
-        parts.append(f"--{boundary}\r\n".encode())
-        parts.append(f'Content-Disposition: form-data; name="{name}"\r\n\r\n'.encode())
-        parts.append(f"{value}\r\n".encode())
-    parts.append(f"--{boundary}\r\n".encode())
-    parts.append(
-        f'Content-Disposition: form-data; name="{file_field}"; filename="{filename}"\r\n'.encode()
-    )
-    parts.append(f"Content-Type: {content_type}\r\n\r\n".encode())
-    parts.append(file_bytes)
-    parts.append(f"\r\n--{boundary}--\r\n".encode())
-    return b"".join(parts), f"multipart/form-data; boundary={boundary}"
-
 
 _AUDIO_MIME = {
     ".m4a": "audio/mp4",
@@ -546,115 +555,136 @@ def transcribe(audio_file, model, language, response_format, port,
     # input extension isn't a format its audio writer supports (e.g. .m4a).
     # Pre-convert anything non-wav to wav via ffmpeg so the server's
     # extension-based output selection succeeds.
+    #
+    # cleanup_wav is assigned (and the whole conversion+run wrapped in
+    # try/finally) before ffmpeg actually runs, so a failed conversion still
+    # gets its temp file cleaned up instead of leaking it.
     cleanup_wav: Path | None = None
-    if path.suffix.lower() != ".wav":
-        import shutil as _sh
-        if not _sh.which("ffmpeg"):
-            err.print("[red]ffmpeg required to transcribe non-wav files.[/red] brew install ffmpeg")
-            raise SystemExit(1)
-        err.print(f"[dim]converting {path.suffix} → wav via ffmpeg…[/dim]")
-        wav_tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
-        wav_tmp.close()
-        subprocess.run(
-            ["ffmpeg", "-y", "-loglevel", "error", "-i", str(path),
-             "-ac", "1", "-ar", "16000", wav_tmp.name],
-            check=True,
-        )
-        wav_path = Path(wav_tmp.name)
-        cleanup_wav = wav_path
-        send_name = path.with_suffix(".wav").name
-    else:
-        wav_path = path
-        send_name = path.name
-
-    def _decide_split() -> bool:
-        """Pick the path: explicit --split / --no-split overrides auto-detect."""
-        if split_flag is not None:
-            return split_flag
-        try:
-            import shutil as _sh
-            if not _sh.which("ffprobe"):
-                return False
-            from turbollm.transcribe_split import probe_duration_seconds
-            duration = probe_duration_seconds(wav_path)
-        except Exception:
-            return False
-        return duration > split_threshold
-
-    def _do(_m, p):
-        if _decide_split():
-            from turbollm.transcribe_split import SplitOptions, transcribe_split
-            err.print(f"[dim]split mode: pre-chunking on silences for {wav_path.name}[/dim]")
-            data = transcribe_split(
-                wav_path,
-                model_id=model_id,
-                port=p,
-                options=SplitOptions(
-                    target_s=split_target,
-                    max_s=split_max,
-                    silence_db=split_silence_db,
-                    silence_min_s=split_silence_min,
-                ),
-                language=language,
-                progress=lambda s: err.print(f"[dim]{s}[/dim]"),
-            )
-            raw = json.dumps(data, ensure_ascii=False)
-        else:
-            # Always request verbose_json internally so we have both text and
-            # segments available regardless of the user-facing --format flag.
-            file_bytes = wav_path.read_bytes()
-            fields = {"model": model_id, "response_format": "verbose_json"}
-            if language:
-                fields["language"] = language
-            body, ctype = _build_multipart(fields, "file", send_name, "audio/wav", file_bytes)
-            req = urllib.request.Request(
-                f"http://127.0.0.1:{p}/v1/audio/transcriptions",
-                data=body,
-                headers={"Content-Type": ctype},
-            )
-            err.print(f"[dim]POST /v1/audio/transcriptions  model={model_id}  size={len(file_bytes)/1e6:.1f}MB[/dim]")
-            try:
-                with urllib.request.urlopen(req, timeout=600) as resp:
-                    raw = resp.read().decode("utf-8", errors="replace")
-            except urllib.error.HTTPError as e:
-                err.print(f"[red]HTTP {e.code}:[/red] {e.read().decode('utf-8', 'replace')}")
-                raise SystemExit(1) from None
-            try:
-                data = json.loads(raw)
-            except json.JSONDecodeError:
-                data = {"text": raw}
-
-        if response_format == "text":
-            # Default behaviour: emit concatenated text, pipe-friendly.
-            sys.stdout.write(data.get("text", raw).rstrip() + "\n")
-        elif response_format == "segments":
-            # mlx-audio's parakeet backend returns `sentences[]` (with per-sentence
-            # start/end from token alignment); whisper-shaped backends return
-            # `segments[]`. Normalise either shape to {start, end, text}.
-            segments = data.get("segments")
-            if not segments:
-                sentences = data.get("sentences") or []
-                if sentences:
-                    segments = [
-                        {"start": s.get("start", 0.0),
-                         "end": s.get("end"),
-                         "text": (s.get("text") or "").strip()}
-                        for s in sentences
-                    ]
-                else:
-                    keys = sorted(data.keys()) if isinstance(data, dict) else type(data).__name__
-                    sys.stderr.write(
-                        f"warning: mlx-audio returned neither segments nor sentences (response keys: {keys})\n"
-                    )
-                    segments = [{"start": 0, "end": None, "text": data.get("text", "")}]
-            sys.stdout.write(json.dumps(segments, indent=2, ensure_ascii=False) + "\n")
-        else:
-            # Legacy passthroughs: json, srt, vtt, verbose_json — emit raw response.
-            sys.stdout.write(raw)
-        sys.stdout.flush()
-        return 0
-
     try:
+        if path.suffix.lower() != ".wav":
+            import shutil as _sh
+            if not _sh.which("ffmpeg"):
+                err.print("[red]ffmpeg required to transcribe non-wav files.[/red] brew install ffmpeg")
+                raise SystemExit(1)
+            err.print(f"[dim]converting {path.suffix} → wav via ffmpeg…[/dim]")
+            wav_tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+            wav_tmp.close()
+            wav_path = Path(wav_tmp.name)
+            cleanup_wav = wav_path
+            try:
+                subprocess.run(
+                    ["ffmpeg", "-y", "-loglevel", "error", "-i", str(path),
+                     "-ac", "1", "-ar", "16000", str(wav_path)],
+                    check=True,
+                )
+            except subprocess.CalledProcessError as e:
+                err.print(f"[red]ffmpeg failed to convert {path.name}:[/red] {e}")
+                raise SystemExit(1) from None
+            send_name = path.with_suffix(".wav").name
+        else:
+            wav_path = path
+            send_name = path.name
+
+        def _decide_split() -> bool:
+            """Pick the path: explicit --split / --no-split overrides auto-detect."""
+            if split_flag is not None:
+                return split_flag
+            try:
+                import shutil as _sh
+                if not _sh.which("ffprobe"):
+                    return False
+                from turbollm.transcribe_split import probe_duration_seconds
+                duration = probe_duration_seconds(wav_path)
+            except Exception:
+                return False
+            return duration > split_threshold
+
+        def _do(_m, p):
+            if _decide_split():
+                if response_format in ("srt", "vtt"):
+                    # Split mode merges chunk results into a single JSON blob
+                    # (text/segments) — it never produces actual SRT/VTT text,
+                    # so silently falling through to the raw-passthrough branch
+                    # below would emit JSON while claiming to be srt/vtt.
+                    raise click.UsageError(
+                        f"--format {response_format} is not supported with split mode "
+                        "(chunked transcription only produces text/segments/json/"
+                        "verbose_json). Use --no-split, or pick a different --format."
+                    )
+                from turbollm.transcribe_split import SplitOptions, transcribe_split
+                err.print(f"[dim]split mode: pre-chunking on silences for {wav_path.name}[/dim]")
+                data = transcribe_split(
+                    wav_path,
+                    model_id=model_id,
+                    port=p,
+                    options=SplitOptions(
+                        target_s=split_target,
+                        max_s=split_max,
+                        silence_db=split_silence_db,
+                        silence_min_s=split_silence_min,
+                    ),
+                    language=language,
+                    progress=lambda s: err.print(f"[dim]{s}[/dim]"),
+                )
+                raw = json.dumps(data, ensure_ascii=False)
+            else:
+                # Always request verbose_json internally so we have both text and
+                # segments available regardless of the user-facing --format flag.
+                file_bytes = wav_path.read_bytes()
+                fields = {"model": model_id, "response_format": "verbose_json"}
+                if language:
+                    fields["language"] = language
+                body, ctype = build_multipart(fields, "file", send_name, "audio/wav", file_bytes)
+                req = urllib.request.Request(
+                    f"http://127.0.0.1:{p}/v1/audio/transcriptions",
+                    data=body,
+                    headers={"Content-Type": ctype},
+                )
+                err.print(f"[dim]POST /v1/audio/transcriptions  model={model_id}  size={len(file_bytes)/1e6:.1f}MB[/dim]")
+                try:
+                    with urllib.request.urlopen(req, timeout=600) as resp:
+                        raw = resp.read().decode("utf-8", errors="replace")
+                except urllib.error.HTTPError as e:
+                    err.print(f"[red]HTTP {e.code}:[/red] {e.read().decode('utf-8', 'replace')}")
+                    raise SystemExit(1) from None
+                try:
+                    data = json.loads(raw)
+                except json.JSONDecodeError:
+                    data = {"text": raw}
+
+            if response_format == "text":
+                # Default behaviour: emit concatenated text, pipe-friendly.
+                sys.stdout.write(data.get("text", raw).rstrip() + "\n")
+            elif response_format == "segments":
+                # mlx-audio's parakeet backend returns `sentences[]` (with per-sentence
+                # start/end from token alignment); whisper-shaped backends return
+                # `segments[]`. Normalise either shape to {start, end, text}.
+                segments = data.get("segments")
+                if not segments:
+                    sentences = data.get("sentences") or []
+                    if sentences:
+                        segments = [
+                            {"start": s.get("start", 0.0),
+                             "end": s.get("end"),
+                             "text": (s.get("text") or "").strip()}
+                            for s in sentences
+                        ]
+                    else:
+                        keys = sorted(data.keys()) if isinstance(data, dict) else type(data).__name__
+                        sys.stderr.write(
+                            f"warning: mlx-audio returned neither segments nor sentences (response keys: {keys})\n"
+                        )
+                        segments = [{"start": 0, "end": None, "text": data.get("text", "")}]
+                sys.stdout.write(json.dumps(segments, indent=2, ensure_ascii=False) + "\n")
+            else:
+                # Legacy passthroughs: json, verbose_json — emit raw response.
+                # (srt/vtt are refused above when combined with split mode; in
+                # non-split mode the server itself would need to support them —
+                # unchanged pre-existing behaviour.)
+                sys.stdout.write(raw)
+            sys.stdout.flush()
+            return 0
+
         _run_with_server(m, port, _do)
     finally:
         if cleanup_wav is not None and cleanup_wav.exists():
@@ -725,6 +755,24 @@ def _clear_port_stamp(port: int) -> None:
             pass
 
 
+def _clear_port_stamp_if_owned(port: int) -> None:
+    """Clear the port stamp only if it belongs to this process.
+
+    A `turbo serve`/`_run_with_server` invocation that loses a bind race
+    (another server won the port between our own liveness check and the
+    actual bind) must not delete the *winning* process's stamp in its
+    ``finally`` cleanup — that would erase a live server's stamp and quietly
+    reintroduce the "harness validates against the wrong context size" bug.
+    """
+    p = _port_stamp_path(port)
+    try:
+        data = json.loads(p.read_text())
+    except (OSError, json.JSONDecodeError):
+        return
+    if data.get("pid") == os.getpid():
+        _clear_port_stamp(port)
+
+
 def _get_running_model(port: int) -> dict | None:
     """If a server is running, return the matching model dict from registry (or None).
 
@@ -736,8 +784,11 @@ def _get_running_model(port: int) -> dict | None:
     if stamp and stamp.get("alias"):
         try:
             return resolve_model(stamp["alias"])
-        except Exception:
-            pass
+        except Exception as e:
+            Console(stderr=True).print(
+                f"[dim]stale port stamp: alias '{stamp['alias']}' no longer resolves "
+                f"({e}); falling back to server probe[/dim]"
+            )
 
     try:
         resp = json.loads(urllib.request.urlopen(f"http://127.0.0.1:{port}/v1/models", timeout=2).read())
@@ -764,18 +815,19 @@ def _read_log_tail(path: str, max_lines: int = 80) -> str:
 
 
 def _run_with_server(m: dict, port: int, launch_fn):
-    # Route every status/error line through stderr. The function's only data
-    # path is launch_fn's return value (and whatever launch_fn writes to
-    # stdout). Server-startup messages on stdout would otherwise leak into
-    # pipelines like `turbo transcribe file.wav | pi -p '…'`, where the LLM
-    # mistakes them for transcript content.
-    console = Console(stderr=True)
     """Start turbo server (or reuse running one) and run launch_fn(m, port).
 
     Handles server lifecycle: starts if needed, waits for ready,
     stops on exit.  launch_fn should be a blocking call (e.g. subprocess.run).
     Returns whatever launch_fn returns (used for headless exit codes).
     """
+    # Route every status/error line through stderr. The function's only data
+    # path is launch_fn's return value (and whatever launch_fn writes to
+    # stdout). Server-startup messages on stdout would otherwise leak into
+    # pipelines like `turbo transcribe file.wav | pi -p '…'`, where the LLM
+    # mistakes them for transcript content.
+    console = Console(stderr=True)
+
     # If a server is already running, just attach — no provider needed
     if _server_is_running(port):
         console.print(f"[green]Server already running on port {port}.[/green]")
@@ -806,16 +858,26 @@ def _run_with_server(m: dict, port: int, launch_fn):
     log_path = log_file.name
     server = subprocess.Popen(cmd, stdout=log_file, stderr=subprocess.STDOUT)
 
+    # Stamp the port so harnesses/transcribe attaching from another shell (and
+    # the --context-window guard in _dispatch_harness) can see what this
+    # auto-started server actually launched with. Previously only `turbo
+    # serve` wrote a stamp, so servers auto-started here (harness/transcribe)
+    # were invisible to that guard and it silently skipped validation.
+    _write_port_stamp(port, None, max_tokens=effective_context(m))
+
     # Startup timeout in seconds. Per-model override beats global default;
     # falls back to 120s. Larger models (e.g. Qwen3.6 35B) reliably need more
-    # than the default on cold disk caches.
+    # than the default on cold disk caches. Uses a monotonic deadline (not an
+    # iteration count) so the configured seconds roughly match wall-clock
+    # time regardless of how long each _server_is_running probe takes.
     startup_timeout = int(
         m.get("server", {}).get("startup_timeout")
         or get_defaults().get("server_startup_timeout")
         or 120
     )
     try:
-        for _ in range(startup_timeout):
+        deadline = time.monotonic() + startup_timeout
+        while time.monotonic() < deadline:
             if _server_is_running(port):
                 break
             if server.poll() is not None:
@@ -841,12 +903,17 @@ def _run_with_server(m: dict, port: int, launch_fn):
     finally:
         if server.poll() is None:
             server.terminate()
-        server.wait()
+            try:
+                server.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                server.kill()
+                server.wait()
         log_file.close()
         try:
             os.unlink(log_path)
         except OSError:
             pass
+        _clear_port_stamp_if_owned(port)
         console.print("[dim]Server stopped.[/dim]")
 
 
@@ -904,7 +971,6 @@ def _dispatch_harness(
     backend: str | None,
     prompt: str | None,
     *,
-    show_incompat_warning: bool,
     context_window: int | None = None,
     thinking: str | None = None,
 ) -> None:
@@ -914,13 +980,17 @@ def _dispatch_harness(
       1. Explicit ``model`` argument wins.
       2. Else, if a server is already running on ``port``:
          - compatible backend → attach to it
-         - incompatible backend → fall through to picker (optionally warn)
+         - incompatible backend → refuse (see below)
       3. Else, run the picker filtered by the harness's ``requires_backend``.
 
-    The ``show_incompat_warning`` flag exists because the original
-    ``_make_harness_command`` path prints a yellow notice when it falls back
-    from an incompatible running server to the picker, but ``turbo run`` did
-    not. Kept as-is to preserve existing UX.
+    Refusing on an incompatible running server (rather than falling through to
+    the picker) matters because the fallback used to pick a *different*,
+    compatible model and then still hand it to `_run_with_server(m, port, …)`
+    — which only checks "is something listening on `port`", not "is it
+    compatible with `m`" — so it attached to the same incompatible server
+    anyway (e.g. pi pointed at an mlx-audio ASR server). The user needs a
+    clear signal to pick a free port or stop the other server, not a picker
+    that silently doesn't fix anything.
     """
     port = port or get_defaults().get("port", 8899)
     reg = load_registry()
@@ -967,11 +1037,14 @@ def _dispatch_harness(
             running = _apply_overrides(running)
             _run_harness(harness_name, running, port, prompt=prompt)
             return
-        if show_incompat_warning and running:
+        if running:
             console.print(
-                f"[yellow]Server on port {port} ({running.get('name', '?')}) "
-                f"uses incompatible backend [{running_backend}].[/yellow]"
+                f"[red]Port {port} is busy with an incompatible server "
+                f"({running.get('name', '?')} [{running_backend}]).[/red]\n"
+                f"  {harness_name} requires backend: {', '.join(requires_backend)}\n"
+                f"  Use --port to pick a different port, or stop that server first."
             )
+            raise SystemExit(1)
         _, m = pick_model(requires_backend=requires_backend)
     else:
         _, m = pick_model(requires_backend=requires_backend)
@@ -1007,23 +1080,36 @@ def _make_script_command(name: str, config: dict):
     return cmd
 
 
+def _harness_common_options(f):
+    """Shared --port/--backend/--prompt/--context-window/--thinking options for
+    harness-launching commands (`turbo <harness>` and `turbo run -H <harness>`).
+
+    Previously duplicated verbatim between `_make_harness_command` and
+    `run_cmd`; kept as one decorator so the two can't drift.
+    """
+    for option in reversed([
+        click.option("--port", "-p", default=None, type=int, help="Port (default: 8899)"),
+        click.option("--backend", "-b", default=None, type=click.Choice(_CHAT_BACKENDS),
+                     help="Override backend (default: from model config)"),
+        click.option("--prompt", default=None,
+                     help="Run harness headlessly with this prompt and exit (no TTY)."),
+        click.option("--context-window", "context_window", default=None, type=int,
+                     help="Override the model's context_default for this invocation (tokens)."),
+        click.option("--thinking", default=None, type=click.Choice(_VALID_THINKING_LEVELS),
+                     help="Override the reasoning budget for this invocation (pi harness)."),
+    ]):
+        f = option(f)
+    return f
+
+
 def _make_harness_command(harness_name: str):
     """Create a click command for a TOML-defined harness."""
     @click.command(name=harness_name, help=f"Start model server + launch {harness_name}.")
     @click.argument("model", required=False)
-    @click.option("--port", "-p", default=None, type=int, help="Port (default: 8899)")
-    @click.option("--backend", "-b", default=None, type=click.Choice(["vllm-mlx", "omlx", "gguf", "mlx-vlm"]),
-                  help="Override backend (default: from model config)")
-    @click.option("--prompt", default=None,
-                  help="Run harness headlessly with this prompt and exit (no TTY).")
-    @click.option("--context-window", "context_window", default=None, type=int,
-                  help="Override the model's context_default for this invocation (tokens).")
-    @click.option("--thinking", default=None, type=click.Choice(_VALID_THINKING_LEVELS),
-                  help="Override the reasoning budget for this invocation (pi harness).")
+    @_harness_common_options
     def cmd(model, port, backend, prompt, context_window, thinking):
         _dispatch_harness(
             harness_name, model, port, backend, prompt,
-            show_incompat_warning=True,
             context_window=context_window,
             thinking=thinking,
         )
@@ -1138,6 +1224,8 @@ def _defaults_write(suite: str, key: str, value: str) -> None:
         )
     except FileNotFoundError:
         console.print("[dim]Sticky values need macOS (/usr/bin/defaults); skipping.[/dim]")
+    except subprocess.CalledProcessError as e:
+        console.print(f"[red]Failed to write sticky '{key}':[/red] {e}")
 
 
 def _defaults_delete(suite: str, key: str) -> None:
@@ -1246,7 +1334,7 @@ def workflows_status(name, as_json):
 @workflows_grp.command(name="stop")
 @click.argument("name")
 def workflows_stop(name):
-    """Send SIGTERM to a running workflow's process group."""
+    """Send SIGTERM to a running workflow's launcher process."""
     from turbollm import workflows as _wf
 
     pid = _wf.stop_workflow(name)
@@ -1343,20 +1431,11 @@ def hud_status_clear(activity_id):
 @cli.command(name="run")
 @click.argument("model", required=False)
 @click.option("--harness", "-H", required=True, help="Harness to launch (e.g. goose, hermes)")
-@click.option("--port", "-p", default=None, type=int, help="Port (default: 8899)")
-@click.option("--backend", "-b", default=None, type=click.Choice(["vllm-mlx", "omlx", "gguf", "mlx-vlm"]),
-              help="Override backend (default: from model config)")
-@click.option("--prompt", default=None,
-              help="Run harness headlessly with this prompt and exit (no TTY).")
-@click.option("--context-window", "context_window", default=None, type=int,
-              help="Override the model's context_default for this invocation (tokens).")
-@click.option("--thinking", default=None, type=click.Choice(_VALID_THINKING_LEVELS),
-              help="Override the reasoning budget for this invocation (pi harness).")
+@_harness_common_options
 def run_cmd(model, harness, port, backend, prompt, context_window, thinking):
     """Start model server + launch a harness by name."""
     _dispatch_harness(
         harness, model, port, backend, prompt,
-        show_incompat_warning=False,
         context_window=context_window,
         thinking=thinking,
     )

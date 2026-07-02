@@ -1,11 +1,11 @@
-import logging
-import os
 import shutil
 import sys
 from pathlib import Path
 
+import click
 from rich.console import Console
 
+from turbollm.hf_download import configured_path, quiet_hf, translate_hf_errors
 from turbollm.registry import _hf_snapshot_path
 
 console = Console()
@@ -25,8 +25,9 @@ class MlxVlmProvider:
             raise SystemExit(1)
 
         srv = model.get("server", {})
+        shim = self._validated_shim(model)
         listen_port = port
-        upstream_port = self._upstream_port(port) if srv.get("tool_call_shim") else port
+        upstream_port = self._upstream_port(port) if shim else port
         cmd = self._cmd_base() + [
             "--model",
             str(local),
@@ -70,7 +71,7 @@ class MlxVlmProvider:
         if log_level:
             cmd += ["--log-level", str(log_level)]
 
-        if srv.get("tool_call_shim") == "gemma4_bare":
+        if shim == "gemma4_bare":
             return [
                 sys.executable,
                 "-m",
@@ -85,15 +86,14 @@ class MlxVlmProvider:
 
         return cmd
 
+    @translate_hf_errors
     def pull(self, model: dict) -> None:
         from huggingface_hub import snapshot_download
 
-        logging.getLogger("httpx").setLevel(logging.WARNING)
-        logging.getLogger("huggingface_hub").setLevel(logging.WARNING)
-        os.environ["HF_HUB_DISABLE_TELEMETRY"] = "1"
+        quiet_hf()
 
         repo = model["hf_repo"]
-        local_path = self._configured_path(model, "local_path")
+        local_path = configured_path(model, "local_path")
         kwargs = {"repo_id": repo}
         if local_path is not None:
             local_path.mkdir(parents=True, exist_ok=True)
@@ -104,7 +104,7 @@ class MlxVlmProvider:
 
         draft_repo = model.get("draft_hf_repo")
         if draft_repo:
-            draft_path = self._configured_path(model, "draft_local_path")
+            draft_path = configured_path(model, "draft_local_path")
             draft_kwargs = {"repo_id": draft_repo}
             if draft_path is not None:
                 draft_path.mkdir(parents=True, exist_ok=True)
@@ -121,9 +121,18 @@ class MlxVlmProvider:
 
     def get_model_id(self, model: dict) -> str:
         """mlx-vlm reports the served model by its local filesystem path when
-        loaded from a local_path; otherwise the hf_repo (same as other backends)."""
-        if model.get("local_path"):
-            return str(Path(model["local_path"]).expanduser())
+        it was actually loaded from local_path; otherwise the hf_repo (same
+        as other backends).
+
+        Shares `_model_path`'s resolution instead of trusting local_path
+        blindly — local_path with no safetensors falls back to the HF
+        snapshot at serve time, and returning the (unserved) local_path here
+        would configure harnesses with a model id the server doesn't serve.
+        """
+        local_cfg = configured_path(model, "local_path")
+        resolved = self._model_path(model)
+        if local_cfg is not None and resolved == local_cfg:
+            return str(resolved)
         return model["hf_repo"]
 
     def pull_draft(self, model: dict) -> None:
@@ -137,7 +146,26 @@ class MlxVlmProvider:
             return ["mlx_vlm.server"]
         if shutil.which("mlx_vlm"):
             return ["mlx_vlm", "server"]
-        return ["mlx_vlm.server"]
+        raise RuntimeError("mlx_vlm not found on PATH (is_available() should have caught this)")
+
+    _KNOWN_TOOL_CALL_SHIMS = {"gemma4_bare"}
+
+    def _validated_shim(self, model: dict) -> str | None:
+        """Resolve+validate server.tool_call_shim once.
+
+        Any truthy value used to shift the upstream port by ±10000, but only
+        "gemma4_bare" actually spawned the proxy that listens on the
+        original port — an unrecognized value left nothing listening on the
+        base port, so the health check hung against a live-but-invisible
+        server. Fail loudly instead.
+        """
+        shim = model.get("server", {}).get("tool_call_shim")
+        if shim and shim not in self._KNOWN_TOOL_CALL_SHIMS:
+            raise click.UsageError(
+                f"Unknown tool_call_shim {shim!r} for {model.get('name', '?')}; "
+                f"supported: {', '.join(sorted(self._KNOWN_TOOL_CALL_SHIMS))}"
+            )
+        return shim
 
     def _upstream_port(self, listen_port: int) -> int:
         if listen_port <= 55535:
@@ -145,7 +173,7 @@ class MlxVlmProvider:
         return listen_port - 10000
 
     def _model_path(self, model: dict) -> Path | None:
-        local = self._configured_path(model, "local_path")
+        local = configured_path(model, "local_path")
         if local is not None and self._has_safetensors(local):
             return local
 
@@ -156,7 +184,7 @@ class MlxVlmProvider:
         return None
 
     def _draft_model_path(self, model: dict) -> Path | None:
-        local = self._configured_path(model, "draft_local_path")
+        local = configured_path(model, "draft_local_path")
         if local is not None and self._has_safetensors(local):
             return local
 
@@ -167,12 +195,6 @@ class MlxVlmProvider:
         if snap and self._has_safetensors(snap):
             return snap
         return None
-
-    def _configured_path(self, model: dict, key: str) -> Path | None:
-        value = model.get(key)
-        if not value:
-            return None
-        return Path(os.path.expanduser(str(value)))
 
     def _has_safetensors(self, path: Path) -> bool:
         return path.exists() and any(path.rglob("*.safetensors"))

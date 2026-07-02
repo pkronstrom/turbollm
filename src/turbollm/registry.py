@@ -44,8 +44,6 @@ def parse_model_input(raw: str) -> str:
         parts = parsed.path.strip("/").split("/")
         if len(parts) >= 2:
             return f"{parts[0]}/{parts[1]}"
-    if "/" in raw:
-        return raw
     return raw
 
 
@@ -59,7 +57,9 @@ def resolve_model(raw: str) -> dict:
         return models[repo_or_alias]
 
     for m in models.values():
-        if m["hf_repo"] == repo_or_alias:
+        # .get(), not [] — a user-added model missing hf_repo shouldn't
+        # break resolution of every other entry.
+        if m.get("hf_repo") == repo_or_alias:
             return m
 
     if "/" not in repo_or_alias:
@@ -133,6 +133,24 @@ def effective_kv_quant(model: dict) -> str:
     return "off"
 
 
+def effective_context(model: dict) -> int:
+    """The context window the server will actually serve, in tokens.
+
+    Mirrors the providers' runtime precedence: a [server] override wins
+    (`max_tokens` for the MLX backends, `context` for gguf — the picker
+    writes these at runtime), then the registry's `context_default`.
+    This is the single source of truth for the serve command, the port
+    stamp, and what harnesses (pi/opencode) report as their context
+    window — divergence between those was bug-class "harness compacts at
+    the wrong size / server rejects mid-session".
+    """
+    srv = model.get("server", {})
+    v = srv.get("max_tokens") or srv.get("context")
+    if v:
+        return int(v)
+    return context_default_tokens(model)
+
+
 def context_default_tokens(model: dict) -> int:
     """Picker's default landing context, in tokens. Falls back to legacy
     [server].max_tokens / [server].context for old-shape configs."""
@@ -163,7 +181,11 @@ def _hf_snapshot_path(hf_repo: str) -> Path | None:
     snapshots = cache_dir / "snapshots"
     if not snapshots.exists():
         return None
-    dirs = sorted(snapshots.iterdir(), key=lambda d: d.stat().st_mtime, reverse=True)
+    dirs = sorted(
+        (d for d in snapshots.iterdir() if d.is_dir()),
+        key=lambda d: d.stat().st_mtime,
+        reverse=True,
+    )
     return dirs[0] if dirs else None
 
 
