@@ -79,17 +79,16 @@ enum AudioSourcePicker {
         status = AudioObjectGetPropertyData(deviceID, &address, 0, nil, &size, bufferListPtr)
         guard status == noErr else { return false }
 
-        let bufferList = bufferListPtr.bindMemory(to: AudioBufferList.self, capacity: 1).pointee
-        // mNumberBuffers is the first field; check each buffer's channel count.
-        return withUnsafePointer(to: bufferList.mBuffers) { ptr in
-            let count = Int(bufferList.mNumberBuffers)
-            for i in 0..<count {
-                if ptr.advanced(by: i).pointee.mNumberChannels > 0 {
-                    return true
-                }
-            }
-            return false
-        }
+        // AudioBufferList is a variable-length C struct: `mBuffers` is
+        // declared as a 1-element tail array, but the actual allocation
+        // (sized by `size` above) can hold more for multi-stream/aggregate
+        // devices. Loading `.pointee` into a fixed-size Swift value only
+        // copies buffer 0 — indexing buffer i≥1 off that copy reads garbage
+        // past the copied struct instead of the real data. Iterate the
+        // original allocation via the buffer-list-aware pointer wrapper.
+        let bufferListTyped = bufferListPtr.bindMemory(to: AudioBufferList.self, capacity: 1)
+        let buffers = UnsafeMutableAudioBufferListPointer(bufferListTyped)
+        return buffers.contains { $0.mNumberChannels > 0 }
     }
 
     private static func deviceInfo(for deviceID: AudioDeviceID) -> AudioDeviceInfo? {

@@ -37,6 +37,12 @@ enum ScreenshotSubcommand {
             }
         }
 
+        // Ensure the output directory exists up front — screencapture(1) does
+        // not create intermediate directories, so without this a nonexistent
+        // outputDir silently produces no file, which the old code then
+        // misreported as user cancellation.
+        try? FileManager.default.createDirectory(at: outputDir, withIntermediateDirectories: true)
+
         // Generate timestamped output filename.
         let timestamp = timestampString()
         let outputPath = outputDir.appendingPathComponent("\(timestamp).png").path
@@ -84,8 +90,15 @@ enum ScreenshotSubcommand {
 
         process.waitUntilExit()
 
-        // Detect cancellation by file-existence check: screencapture does not write
-        // the output file if the user presses Esc.
+        // A nonzero exit is a real failure (bad args, sandbox denial, etc.),
+        // not a user cancellation — screencapture exits 0 whether the user
+        // completes or cancels the interactive picker.
+        guard process.terminationStatus == 0 else {
+            return .error(message: "screencapture exited with status \(process.terminationStatus)")
+        }
+
+        // Detect cancellation by file-existence check: screencapture exits 0
+        // but does not write the output file if the user presses Esc.
         if FileManager.default.fileExists(atPath: outputPath) {
             return .success(path: outputPath)
         } else {
@@ -96,6 +109,7 @@ enum ScreenshotSubcommand {
     private static func timestampString() -> String {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd-HHmmss"
+        formatter.locale = Locale(identifier: "en_US_POSIX")
         return formatter.string(from: Date())
     }
 }

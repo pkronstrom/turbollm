@@ -49,6 +49,17 @@ struct RecordScreenManifest: Codable {
 /// and deletes the activity file.
 enum RecordScreen {
 
+    /// Set to true when the most recent `run()` call's SCStream setup
+    /// failed. The manifest-on-stdout contract stays intact even on failure
+    /// (an empty manifest is still valid JSON), but `main.swift` checks this
+    /// flag afterward to exit non-zero instead of silently reporting success
+    /// with an empty recording.
+    nonisolated(unsafe) static var lastSetupFailed = false
+
+    /// Retains the SCStream delegate for the stream's lifetime — mirrors
+    /// `RecordAudio.systemAudioStreamDelegate`; see its doc comment for why.
+    nonisolated(unsafe) private static var streamDelegateRef: SCStreamDelegate?
+
     // MARK: - Arg parsing
 
     struct Args {
@@ -92,7 +103,11 @@ enum RecordScreen {
         let scope: RecordScreenScope
         switch scopeStr {
         case "region":
-            let rect = regionStr.flatMap(parseRegionString) ?? .zero
+            // An unparseable/missing --region used to silently fall back to
+            // a 1×1 rect (`.zero`), recording an unusable sliver instead of
+            // failing loudly. Treat it the same as a missing --output-dir:
+            // a hard argument error.
+            guard let s = regionStr, let rect = parseRegionString(s) else { return nil }
             scope = .region(rect)
         case "active-window":
             scope = .activeWindow
@@ -126,6 +141,8 @@ enum RecordScreen {
         maxKeyframes: Int = 200,
         parentId: String? = nil
     ) -> String {
+        lastSetupFailed = false
+
         // Test seam: TURBO_RECORD_SCREEN_FAKE=1 → return synthetic empty manifest immediately.
         if ProcessInfo.processInfo.environment["TURBO_RECORD_SCREEN_FAKE"] == "1" {
             try? FileManager.default.createDirectory(at: outputDir, withIntermediateDirectories: true)
@@ -164,14 +181,9 @@ enum RecordScreen {
     }
 
     /// Computes `start_offset_ms` from `TURBO_T0_NS` if set, otherwise returns 0.
-    static func computeStartOffsetMs() -> Int {
-        let nowNs = clock_gettime_nsec_np(CLOCK_MONOTONIC_RAW)
-        if let t0Str = ProcessInfo.processInfo.environment["TURBO_T0_NS"],
-           let t0Ns = UInt64(t0Str), nowNs >= t0Ns {
-            return Int((nowNs - t0Ns) / 1_000_000)
-        }
-        return 0
-    }
+    /// Mirrors RecordAudio.computeStartOffsetMs() — both derive from the
+    /// shared `computeStartOffsetMsFromT0()` helper (same time origin).
+    static func computeStartOffsetMs() -> Int { computeStartOffsetMsFromT0() }
 
     static func encodeManifest(_ manifest: RecordScreenManifest) -> String {
         let encoder = JSONEncoder()
@@ -216,10 +228,17 @@ enum RecordScreen {
         let startNs = clock_gettime_nsec_np(CLOCK_MONOTONIC_RAW)
         let startOffsetMs = computeStartOffsetMs()
 
-        // State shared between the callback and stop logic.
+        // State shared between the callback (fires on the SCStream sample-handler
+        // queue) and the stop/teardown logic (runs on the main thread). Held in a
+        // dedicated class rather than passed as `&frames`/`&droppedOvercap`
+        // inout-to-pointer conversions: those pointers used to be stashed inside
+        // `ScreenCaptureOutput` and dereferenced later from another queue, which is
+        // both documented undefined behavior (an `UnsafeMutablePointer` derived from
+        // `&local` is only valid for the duration of the call it's passed to) and a
+        // cross-thread exclusivity violation. `FrameCollector` is a real heap object
+        // with its own lock, so it has no such lifetime constraint.
         let decider = KeyframeDecider(threshold: threshold, minIntervalMs: minIntervalMs, maxKeyframes: maxKeyframes)
-        var frames: [ScreenFrameEntry] = []
-        var droppedOvercap = 0
+        let collector = FrameCollector()
 
         // PNG-write queue (serial, off the main thread).
         let pngQueue = DispatchQueue(label: "com.turbo.record-screen.png-writer", qos: .utility)
@@ -234,13 +253,18 @@ enum RecordScreen {
             decider: decider,
             pngQueue: pngQueue,
             pngDrainGroup: pngDrainGroup,
-            framesRef: &frames,
-            droppedOvercapRef: &droppedOvercap,
+            collector: collector,
             activityFileURL: activityFileURL
         )
 
         // Install signal handlers before starting the stream (mirrors RecordAudio.swift:91).
         installStopSignalHandlers()
+
+        // Delegate makes mid-recording SCStream death visible (logs to stderr +
+        // requests a stop) instead of hanging silently; retained for the stream's
+        // lifetime via the static ref (mirrors RecordAudio's systemAudioStreamDelegate).
+        let streamDelegate = AcquirerStreamDelegate(label: "record-screen")
+        streamDelegateRef = streamDelegate
 
         // Build SCStream.
         let semaphore = DispatchSemaphore(value: 0)
@@ -260,10 +284,14 @@ enum RecordScreen {
                         fputs("record-screen: no display found\n", stderr)
                         semaphore.signal(); return
                     }
-                    filter = buildContentFilter(display: display, scope: resolvedScope, content: content)
+                    // TODO(audit "Low" findings): secondary-display regions
+                    // record/flash the wrong content, and window vs region
+                    // scale is inconsistent — both are known multi-display
+                    // issues, deliberately not addressed here.
+                    filter = buildContentFilter(display: display)
                     config = buildStreamConfig(scope: resolvedScope, display: display)
                 }
-                let s = SCStream(filter: filter, configuration: config, delegate: nil)
+                let s = SCStream(filter: filter, configuration: config, delegate: streamDelegate)
                 try s.addStreamOutput(output, type: .screen, sampleHandlerQueue: .global(qos: .userInteractive))
                 try await s.startCapture()
                 stream = s
@@ -276,8 +304,11 @@ enum RecordScreen {
         }
         semaphore.wait()
 
-        // If setup failed, emit an empty manifest immediately instead of hanging in the poll loop.
+        // If setup failed, emit an empty manifest immediately instead of hanging in
+        // the poll loop. `lastSetupFailed` lets main.swift exit non-zero while still
+        // emitting a (valid, empty) manifest on stdout.
         guard setupSucceeded else {
+            lastSetupFailed = true
             return RecordScreenManifest(
                 frames: [],
                 durationMs: 0,
@@ -307,10 +338,13 @@ enum RecordScreen {
         let endNs = clock_gettime_nsec_np(CLOCK_MONOTONIC_RAW)
         let durationMs = Int((endNs - startNs) / 1_000_000)
 
+        // Safe without collector.lock: pngDrainGroup.wait() above already
+        // established a happens-before relationship with every pngQueue task
+        // that touched collector.frames/droppedOvercap.
         return RecordScreenManifest(
-            frames: frames,
+            frames: collector.frames,
             durationMs: durationMs,
-            droppedOvercap: droppedOvercap,
+            droppedOvercap: collector.droppedOvercap,
             startOffsetMs: startOffsetMs
         )
     }
@@ -362,12 +396,15 @@ enum RecordScreen {
 
     // MARK: - Window picker (native SCContentSharingPicker)
 
-    private static var pickerObserver: WindowPickerObserver?
-
     /// Presents the native macOS window picker and blocks (pumping the runloop)
     /// until the user chooses a window or cancels. Returns the chosen filter, or
     /// nil on cancel / 2-min timeout. Must be called on the main thread.
     /// ponytail: native chooser — we own no window-enumeration UI; 120s cap.
+    ///
+    /// `observer` is a plain local: this function is synchronous and blocks
+    /// (pumping the runloop) until `done` is set, and `picker.add(observer)`
+    /// retains it for as long as it's registered — a separate static
+    /// retaining reference was redundant.
     static func pickWindowFilter() -> SCContentFilter? {
         let picker = SCContentSharingPicker.shared
         var config = SCContentSharingPickerConfiguration()
@@ -375,7 +412,6 @@ enum RecordScreen {
         picker.configuration = config
 
         let observer = WindowPickerObserver()
-        pickerObserver = observer  // retain for the picker's lifetime
         var chosen: SCContentFilter? = nil
         var done = false
         observer.onFilter = { chosen = $0; done = true }
@@ -395,7 +431,6 @@ enum RecordScreen {
 
         picker.remove(observer)
         picker.isActive = false
-        pickerObserver = nil
         // Relinquish foreground so the user can interact with the HUD (e.g. press
         // Stop) — the recorder activated itself only to present the picker.
         NSApp.deactivate()
@@ -419,16 +454,13 @@ enum RecordScreen {
             if let rect = RegionSelector.resolveActiveWindowRect() {
                 return .region(rect)
             }
+            fputs("record-screen: could not resolve the active window's rect (missing Accessibility permission, or no focused window) — falling back to full-display\n", stderr)
             return .fullDisplay
         }
         return scope
     }
 
-    private static func buildContentFilter(
-        display: SCDisplay,
-        scope: RecordScreenScope,
-        content: SCShareableContent
-    ) -> SCContentFilter {
+    private static func buildContentFilter(display: SCDisplay) -> SCContentFilter {
         return SCContentFilter(display: display, excludingApplications: [], exceptingWindows: [])
     }
 
@@ -501,6 +533,22 @@ class KeyframeDecider {
     }
 }
 
+// MARK: - Frame collector
+
+/// Holds the mutable state produced by `ScreenCaptureOutput` (frames written
+/// so far, count dropped for exceeding the keyframe cap) behind a real lock,
+/// as a heap object shared between the SCStream callback and the pipeline's
+/// teardown code. Replaces a prior `&frames`/`&droppedOvercap`
+/// inout-to-`UnsafeMutablePointer` conversion that was UB — those pointers
+/// are only valid for the duration of the call they're passed to, but were
+/// stored inside `ScreenCaptureOutput` and dereferenced later, from another
+/// queue, after the pointer's original stack frame had already returned.
+final class FrameCollector {
+    let lock = NSLock()
+    var frames: [ScreenFrameEntry] = []
+    var droppedOvercap = 0
+}
+
 // MARK: - SCStream output handler
 
 private class ScreenCaptureOutput: NSObject, SCStreamOutput {
@@ -509,26 +557,28 @@ private class ScreenCaptureOutput: NSObject, SCStreamOutput {
     private let decider: KeyframeDecider
     private let pngQueue: DispatchQueue
     private let pngDrainGroup: DispatchGroup
-    private var framesRef: UnsafeMutablePointer<[ScreenFrameEntry]>
-    private var droppedOvercapRef: UnsafeMutablePointer<Int>
+    private let collector: FrameCollector
     private let activityFileURL: URL?
     private var seenCount = 0
-    private let lock = NSLock()
+    // CIContext creation is expensive (compiles/caches a render pipeline);
+    // reuse one instance for both hashing and PNG encoding instead of
+    // allocating a fresh context per frame. Documented thread-safe by Apple,
+    // so sharing it across the hash path (sample-handler queue) and the PNG
+    // path (pngQueue) is fine.
+    private let ciContext = CIContext()
 
     init(outputDir: URL, startNs: UInt64,
          decider: KeyframeDecider,
          pngQueue: DispatchQueue,
          pngDrainGroup: DispatchGroup,
-         framesRef: UnsafeMutablePointer<[ScreenFrameEntry]>,
-         droppedOvercapRef: UnsafeMutablePointer<Int>,
+         collector: FrameCollector,
          activityFileURL: URL?) {
         self.outputDir = outputDir
         self.startNs = startNs
         self.decider = decider
         self.pngQueue = pngQueue
         self.pngDrainGroup = pngDrainGroup
-        self.framesRef = framesRef
-        self.droppedOvercapRef = droppedOvercapRef
+        self.collector = collector
         self.activityFileURL = activityFileURL
     }
 
@@ -539,26 +589,26 @@ private class ScreenCaptureOutput: NSObject, SCStreamOutput {
         let nowNs = clock_gettime_nsec_np(CLOCK_MONOTONIC_RAW)
         let tOffsetMs = Int((nowNs - startNs) / 1_000_000)
 
-        lock.lock()
+        collector.lock.lock()
         seenCount += 1
         let mySeenCount = seenCount
-        lock.unlock()
+        collector.lock.unlock()
 
         // Downscale to 16×16 grayscale for hashing.
         guard let hashValue = computeHash(from: pixelBuffer) else { return }
 
         let decision: KeyframeDecision
-        lock.lock()
+        collector.lock.lock()
         decision = decider.decide(hash: hashValue, t_ms: tOffsetMs)
-        lock.unlock()
+        collector.lock.unlock()
 
         switch decision {
         case .dropSimilar, .dropMinInterval:
             return
         case .dropOvercap:
-            lock.lock()
-            droppedOvercapRef.pointee += 1
-            lock.unlock()
+            collector.lock.lock()
+            collector.droppedOvercap += 1
+            collector.lock.unlock()
             return
         case .persist:
             break
@@ -572,17 +622,24 @@ private class ScreenCaptureOutput: NSObject, SCStreamOutput {
             guard let self else { return }
             let fileName = String(format: "%03d-T+%d.png", frameIndex, tOffsetMs)
             let fileURL = self.outputDir.appendingPathComponent(fileName)
-            if let pngData = self.encodePNG(from: pixelBuffer) {
-                try? pngData.write(to: fileURL)
-                let entry = ScreenFrameEntry(path: fileURL.path, tOffsetMs: tOffsetMs)
-                self.lock.lock()
-                self.framesRef.pointee.append(entry)
-                // Update activity file screen_frames.
-                if let activityURL = self.activityFileURL {
-                    self.updateActivityScreenFrames(at: activityURL, newPath: fileURL.path)
-                }
-                self.lock.unlock()
+            guard let pngData = self.encodePNG(from: pixelBuffer) else { return }
+            do {
+                try pngData.write(to: fileURL)
+            } catch {
+                // A failed write must NOT land in the manifest — a dropped
+                // frame is better than a manifest entry pointing at a file
+                // that doesn't exist (or is truncated).
+                fputs("record-screen: failed to write PNG at \(fileURL.path): \(error)\n", stderr)
+                return
             }
+            let entry = ScreenFrameEntry(path: fileURL.path, tOffsetMs: tOffsetMs)
+            self.collector.lock.lock()
+            self.collector.frames.append(entry)
+            // Update activity file screen_frames.
+            if let activityURL = self.activityFileURL {
+                self.updateActivityScreenFrames(at: activityURL, newPath: fileURL.path)
+            }
+            self.collector.lock.unlock()
         }
     }
 
@@ -594,9 +651,8 @@ private class ScreenCaptureOutput: NSObject, SCStreamOutput {
         let scaled = ciImage.transformed(by: scale)
         let gray = scaled.applyingFilter("CIColorControls", parameters: [kCIInputSaturationKey: 0.0])
 
-        let context = CIContext()
         var pixels = [UInt8](repeating: 0, count: 16 * 16)
-        context.render(gray,
+        ciContext.render(gray,
                        toBitmap: &pixels,
                        rowBytes: 16,
                        bounds: CGRect(x: 0, y: 0, width: 16, height: 16),
@@ -609,8 +665,7 @@ private class ScreenCaptureOutput: NSObject, SCStreamOutput {
 
     private func encodePNG(from pixelBuffer: CVPixelBuffer) -> Data? {
         let ciImage = CIImage(cvPixelBuffer: pixelBuffer)
-        let context = CIContext()
-        return context.pngRepresentation(of: ciImage,
+        return ciContext.pngRepresentation(of: ciImage,
                                           format: .RGBA8,
                                           colorSpace: CGColorSpaceCreateDeviceRGB())
     }

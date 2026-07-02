@@ -24,23 +24,16 @@ struct PermissionState {
 }
 
 enum Permissions {
-    // Cache: avoids TCC roundtrip on every invocation (1-second TTL).
-    private static var cachedState: PermissionState?
-    private static var lastPollDate: Date?
-
+    // No in-process cache: every CLI invocation is a fresh, short-lived
+    // process (milliseconds), so a TTL cache here can never be hit across
+    // calls — it only ever serves its own single read. See
+    // `PermissionsStateCommand` for the actual cross-invocation cache
+    // (file-based, since state doesn't survive process exit).
     static func state() -> PermissionState {
-        let now = Date()
-        if let cached = cachedState, let lastPoll = lastPollDate,
-           now.timeIntervalSince(lastPoll) < 1.0 {
-            return cached
-        }
-        let fresh = PermissionState(
+        PermissionState(
             microphone: AVCaptureDevice.authorizationStatus(for: .audio),
             screenRecording: CGPreflightScreenCaptureAccess()
         )
-        cachedState = fresh
-        lastPollDate = now
-        return fresh
     }
 
     static func settingsURL(for kind: PermissionKind) -> URL {

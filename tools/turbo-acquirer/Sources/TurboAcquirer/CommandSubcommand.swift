@@ -33,10 +33,28 @@ enum CommandSubcommand {
             return .failure(stderr: "Failed to launch /bin/sh: \(error)", exitCode: 1)
         }
 
-        process.waitUntilExit()
+        // Drain both pipes concurrently BEFORE waitUntilExit(). A pipe's OS
+        // buffer is ~64KB; if the child writes more than that to stdout or
+        // stderr before we ever read it, the child blocks on write(2) while
+        // we block on waitUntilExit() — a permanent deadlock. Reading on
+        // background queues lets the child keep writing while we still wait
+        // for it to exit.
+        let drainGroup = DispatchGroup()
+        var stdoutData = Data()
+        var stderrData = Data()
+        drainGroup.enter()
+        DispatchQueue.global(qos: .utility).async {
+            stdoutData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
+            drainGroup.leave()
+        }
+        drainGroup.enter()
+        DispatchQueue.global(qos: .utility).async {
+            stderrData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
+            drainGroup.leave()
+        }
+        drainGroup.wait()
 
-        let stdoutData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
-        let stderrData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
 
         let stdoutString = String(data: stdoutData, encoding: .utf8) ?? ""
         let stderrString = String(data: stderrData, encoding: .utf8) ?? ""

@@ -59,7 +59,7 @@ enum PermissionsStateCommand {
             "screenRecording": state.screenRecording
         ]
         guard let data = try? JSONSerialization.data(withJSONObject: entry) else { return }
-        try? data.write(to: cacheURL)
+        try? data.write(to: cacheURL, options: .atomic)
     }
 
     private static func isRecent(_ date: Date) -> Bool {

@@ -15,6 +15,12 @@ enum AudioScope: Equatable {
 enum RecordAudioError: Error {
     case permissionDenied(String)
     case outputPathRequired
+    /// Any other setup failure that isn't a TCC permission problem (a
+    /// malformed AVAudioFormat, a rejected AudioUnitSetProperty call, an
+    /// unknown --device-uid, …). Kept distinct from `permissionDenied` so
+    /// callers/logs don't mislabel an internal error as "go grant this
+    /// permission" when granting it wouldn't fix anything.
+    case internalError(String)
 }
 
 // MARK: - RecordAudio
@@ -38,6 +44,19 @@ enum RecordAudio {
     /// `RecordAudioError.permissionDenied("Screen Recording")` without
     /// consulting the real TCC subsystem. Tests set this and reset to `nil`.
     nonisolated(unsafe) static var screenRecordingPermissionOverride: Bool?
+
+    /// Overrides the microphone TCC check both scopes perform before touching
+    /// `AVAudioEngine`. When set to `false`, `run(...)` throws
+    /// `RecordAudioError.permissionDenied("Microphone")` without consulting
+    /// `AVCaptureDevice.authorizationStatus(for:.audio)`. Tests set this and
+    /// reset to `nil`.
+    nonisolated(unsafe) static var microphonePermissionOverride: Bool?
+
+    /// Retains the SCStream delegate for the system+mic stream's lifetime.
+    /// `SCStream` does not document its `delegate` property as retaining —
+    /// without this, the local `let delegate` in `startSystemPlusMic` would
+    /// be deallocated the moment that function returns.
+    nonisolated(unsafe) private static var systemAudioStreamDelegate: SCStreamDelegate?
 
     // MARK: - Entry point
 
@@ -65,6 +84,19 @@ enum RecordAudio {
             guard granted else {
                 throw RecordAudioError.permissionDenied("Screen Recording")
             }
+        }
+
+        // Both scopes tap the microphone. When mic access is denied via TCC,
+        // `AVAudioInputNode.installTap(...)` doesn't return an error or throw
+        // a catchable Swift error — it raises an uncatchable ObjC exception
+        // that crashes the process. Check authorization up front so a denial
+        // surfaces as the existing `permissionDenied("Microphone")` error
+        // instead. `.notDetermined` is left alone: that's the first-launch
+        // case where the system itself prompts on first access.
+        let micStatus = AVCaptureDevice.authorizationStatus(for: .audio)
+        let micGranted = microphonePermissionOverride ?? (micStatus != .denied && micStatus != .restricted)
+        guard micGranted else {
+            throw RecordAudioError.permissionDenied("Microphone")
         }
 
         // Write activity file; delete it on exit (RAII via defer).
@@ -174,15 +206,9 @@ enum RecordAudio {
     // MARK: - Manifest
 
     /// Computes `start_offset_ms` from `TURBO_T0_NS` if set, otherwise returns 0.
-    /// Mirrors RecordScreen.computeStartOffsetMs() — both derive from the same time origin.
-    static func computeStartOffsetMs() -> Int {
-        let nowNs = clock_gettime_nsec_np(CLOCK_MONOTONIC_RAW)
-        if let t0Str = ProcessInfo.processInfo.environment["TURBO_T0_NS"],
-           let t0Ns = UInt64(t0Str), nowNs >= t0Ns {
-            return Int((nowNs - t0Ns) / 1_000_000)
-        }
-        return 0
-    }
+    /// Mirrors RecordScreen.computeStartOffsetMs() — both derive from the
+    /// shared `computeStartOffsetMsFromT0()` helper (same time origin).
+    static func computeStartOffsetMs() -> Int { computeStartOffsetMsFromT0() }
 
     /// Encodes a manifest JSON string: `{"path":"...","start_offset_ms":N}`.
     static func encodeManifest(path: String, startOffsetMs: Int) -> String {
@@ -251,7 +277,7 @@ enum RecordAudio {
         // Optionally set input device via AudioUnit property.
         if let uid = deviceUID, let deviceID = AudioSourcePicker.deviceID(forUID: uid) {
             var did = deviceID
-            AudioUnitSetProperty(
+            let status = AudioUnitSetProperty(
                 inputNode.audioUnit!,
                 kAudioOutputUnitProperty_CurrentDevice,
                 kAudioUnitScope_Global,
@@ -259,6 +285,11 @@ enum RecordAudio {
                 &did,
                 UInt32(MemoryLayout<AudioDeviceID>.size)
             )
+            guard status == noErr else {
+                throw RecordAudioError.internalError(
+                    "failed to set input device to \"\(uid)\" (AudioUnitSetProperty status \(status))"
+                )
+            }
         }
 
         // Install tap with the input node's native hardware format — AVAudioEngine
@@ -270,9 +301,22 @@ enum RecordAudio {
         // converter into a terminal state for subsequent tap callbacks — recordings
         // produced only ~156 ms of audio regardless of actual duration.)
         let nativeFormat = inputNode.outputFormat(forBus: 0)
+        // A 0 Hz native format means the input node has no usable hardware
+        // format — the same denied/unavailable-input state that can otherwise
+        // crash installTap() with an uncatchable exception. Fail via a
+        // catchable Swift error instead of reaching installTap() at all.
+        guard nativeFormat.sampleRate > 0 else {
+            throw RecordAudioError.permissionDenied("Microphone")
+        }
 
+        let micTapFailures = TapFailureTracker(label: "mic")
         inputNode.installTap(onBus: 0, bufferSize: 4096, format: nativeFormat) { buffer, _ in
-            try? audioFile.write(from: buffer)
+            do {
+                try audioFile.write(from: buffer)
+                micTapFailures.record(success: true)
+            } catch {
+                micTapFailures.record(success: false)
+            }
         }
 
         try engine.start()
@@ -318,7 +362,10 @@ enum RecordAudio {
             channels: scStreamChannelCount,
             interleaved: false
         ) else {
-            throw RecordAudioError.permissionDenied("Screen Recording (could not construct AVAudioFormat)")
+            // Not a permissions problem — the format parameters above are
+            // fixed constants, so this can only fail from an AVFoundation
+            // internal error, not from anything the user (or TCC) controls.
+            throw RecordAudioError.internalError("could not construct AVAudioFormat for system audio capture")
         }
         engine.connect(player, to: mixer, fromBus: 0, toBus: 1, format: scPlayerFormat)
 
@@ -332,8 +379,14 @@ enum RecordAudio {
         engine.mainMixerNode.outputVolume = 0
 
         // Tap mixer output → file. Sits upstream of the muted main mixer.
+        let mixTapFailures = TapFailureTracker(label: "system+mic mix")
         mixer.installTap(onBus: 0, bufferSize: 4096, format: targetFormat) { buffer, _ in
-            try? audioFile.write(from: buffer)
+            do {
+                try audioFile.write(from: buffer)
+                mixTapFailures.record(success: true)
+            } catch {
+                mixTapFailures.record(success: false)
+            }
         }
 
         try engine.start()
@@ -355,7 +408,15 @@ enum RecordAudio {
         config.sampleRate = Int(scStreamSampleRate)
         config.channelCount = Int(scStreamChannelCount)
 
-        let stream = SCStream(filter: filter, configuration: config, delegate: nil)
+        // TODO(audit BUG-24): AVAudioEngine also offers an
+        // `.engineConfigurationChangeNotification` for detecting mid-recording
+        // device changes (unplugged mic, route change). Not wired up yet —
+        // only the SCStream side (system audio) is guarded against silent
+        // death below. Revisit if truncated system+mic recordings from a
+        // route change turn up in practice.
+        let delegate = AcquirerStreamDelegate(label: "record-audio")
+        systemAudioStreamDelegate = delegate  // retain for the stream's lifetime
+        let stream = SCStream(filter: filter, configuration: config, delegate: delegate)
         // Serial sample-handler queue: AVAudioConverter is not thread-safe and
         // SCStream can dispatch samples concurrently from a global queue.
         try stream.addStreamOutput(
@@ -473,5 +534,39 @@ private extension CMSampleBuffer {
         )
         guard status == noErr else { return nil }
         return buffer
+    }
+}
+
+// MARK: - Tap failure tracking
+
+/// Tracks consecutive `AVAudioFile.write` failures for one tap callback.
+/// A single dropped buffer is not worth stopping the recording over (the
+/// original `try?` behavior), but a sustained run of failures — e.g. the
+/// disk filling up — would otherwise silently produce an unusable WAV for
+/// the rest of the recording. After `threshold` consecutive failures,
+/// logs once and requests a stop so the process tears down instead of
+/// spinning to the end of the recording for nothing.
+final class TapFailureTracker {
+    private let label: String
+    private let threshold: Int
+    private var consecutiveFailures = 0
+    private var loggedThresholdHit = false
+
+    init(label: String, threshold: Int = 50) {
+        self.label = label
+        self.threshold = threshold
+    }
+
+    func record(success: Bool) {
+        if success {
+            consecutiveFailures = 0
+            return
+        }
+        consecutiveFailures += 1
+        if consecutiveFailures >= threshold && !loggedThresholdHit {
+            loggedThresholdHit = true
+            fputs("record-audio: \(threshold) consecutive write failures on the \(label) tap (disk full?) — stopping\n", stderr)
+            requestStop()
+        }
     }
 }

@@ -5,6 +5,15 @@ import Foundation
 App.main()
 
 struct App {
+    /// Single source of truth for the subcommand list — both the usage
+    /// string and the dispatch switch below derive from it, so they can't
+    /// drift out of sync (the usage string used to omit `record-screen`).
+    static let subcommands = ["record-audio", "screenshot", "command", "permissions-state", "record-screen"]
+
+    static func usage() -> String {
+        "Usage: turbo-acquirer <subcommand> [options]\nSubcommands: \(subcommands.joined(separator: ", "))"
+    }
+
     static func main() {
         let argv = CommandLine.arguments
         let output = dispatch(argv: argv)
@@ -16,7 +25,7 @@ struct App {
     /// this and prints the result; tests call this directly.
     static func dispatch(argv: [String]) -> String {
         guard argv.count >= 2 else {
-            return "Usage: turbo-acquirer <subcommand> [options]\nSubcommands: record-audio, screenshot, command, permissions-state"
+            return usage()
         }
         let subcommand = argv[1]
         switch subcommand {
@@ -31,7 +40,7 @@ struct App {
         case "record-screen":
             return handleRecordScreen(argv: Array(argv.dropFirst(2)))
         default:
-            return "unknown subcommand: \(subcommand)\nUsage: turbo-acquirer <subcommand> [options]\nSubcommands: record-audio, screenshot, command, permissions-state, record-screen"
+            return "unknown subcommand: \(subcommand)\n\(usage())"
         }
     }
 
@@ -94,11 +103,11 @@ struct App {
 
     static func handleRecordScreen(argv: [String]) -> String {
         guard let args = RecordScreen.parseArgs(argv: argv) else {
-            fputs("error: --output-dir <dir> is required\n", stderr)
+            fputs("error: --output-dir <dir> is required, and --region (when --scope region) must parse as \"x,y,w,h\"\n", stderr)
             exit(1)
         }
         let parentId = ProcessInfo.processInfo.environment["TURBO_WORKFLOW_ID"]
-        return RecordScreen.run(
+        let manifest = RecordScreen.run(
             outputDir: args.outputDir,
             scope: args.scope,
             threshold: args.threshold,
@@ -106,5 +115,15 @@ struct App {
             maxKeyframes: args.maxKeyframes,
             parentId: parentId
         )
+        // SCStream setup failure still emits a valid (empty) manifest on
+        // stdout — preserving the manifest-on-stdout contract — but the
+        // process must exit non-zero so a caller can tell "recorded nothing
+        // because setup failed" apart from "recorded nothing because the
+        // screen genuinely never changed".
+        if RecordScreen.lastSetupFailed {
+            print(manifest)
+            exit(1)
+        }
+        return manifest
     }
 }
