@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { exec } from "child_process";
-import { existsSync } from "fs";
+import { accessSync } from "fs";
 import { getPreferenceValues } from "@raycast/api";
 
 vi.mock("child_process", () => ({
@@ -8,7 +8,8 @@ vi.mock("child_process", () => ({
 }));
 
 vi.mock("fs", () => ({
-  existsSync: vi.fn(),
+  accessSync: vi.fn(),
+  constants: { X_OK: 1 },
 }));
 
 // @raycast/api is aliased to test/__mocks__/raycast-api.ts via vitest.config.ts.
@@ -17,15 +18,18 @@ vi.mock("fs", () => ({
 import { getBinaryPath } from "../src/lib/binary-path";
 
 const mockExec = vi.mocked(exec);
-const mockExists = vi.mocked(existsSync);
+const mockAccess = vi.mocked(accessSync);
 const mockPrefs = vi.mocked(getPreferenceValues);
 
 describe("getBinaryPath", () => {
   beforeEach(() => {
     vi.resetAllMocks();
-    // Default: no preference set, no probes match.
+    // Default: no preference set, no probes match (accessSync throws for
+    // every path, mirroring a nonexistent-or-non-executable file).
     mockPrefs.mockReturnValue({} as ReturnType<typeof getPreferenceValues>);
-    mockExists.mockReturnValue(false);
+    mockAccess.mockImplementation(() => {
+      throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+    });
   });
 
   it("returns turboPath preference when set (no probes, no which call)", async () => {
@@ -33,12 +37,15 @@ describe("getBinaryPath", () => {
 
     const result = await getBinaryPath();
     expect(result).toBe("/opt/custom/turbo");
-    expect(mockExists).not.toHaveBeenCalled();
+    expect(mockAccess).not.toHaveBeenCalled();
     expect(mockExec).not.toHaveBeenCalled();
   });
 
   it("returns ~/.local/bin/turbo when it exists on disk (no which call)", async () => {
-    mockExists.mockImplementation((p) => String(p).endsWith("/.local/bin/turbo"));
+    mockAccess.mockImplementation((p) => {
+      if (String(p).endsWith("/.local/bin/turbo")) return undefined;
+      throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+    });
 
     const result = await getBinaryPath();
     expect(result).toMatch(/\/\.local\/bin\/turbo$/);
@@ -46,11 +53,32 @@ describe("getBinaryPath", () => {
   });
 
   it("returns /opt/homebrew/bin/turbo when it is the only probe that matches", async () => {
-    mockExists.mockImplementation((p) => p === "/opt/homebrew/bin/turbo");
+    mockAccess.mockImplementation((p) => {
+      if (p === "/opt/homebrew/bin/turbo") return undefined;
+      throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+    });
 
     const result = await getBinaryPath();
     expect(result).toBe("/opt/homebrew/bin/turbo");
     expect(mockExec).not.toHaveBeenCalled();
+  });
+
+  it("does not treat an existing-but-non-executable file as a match", async () => {
+    // accessSync(path, X_OK) throws EACCES for a file that exists but lacks
+    // the execute bit — isExecutable() must say false, not true.
+    mockAccess.mockImplementation((p) => {
+      if (p === "/opt/homebrew/bin/turbo") {
+        throw Object.assign(new Error("EACCES"), { code: "EACCES" });
+      }
+      throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+    });
+    mockExec.mockImplementation((_cmd, cb) => {
+      (cb as Function)(null, "/some/exotic/path/turbo\n", "");
+      return {} as ReturnType<typeof exec>;
+    });
+
+    const result = await getBinaryPath();
+    expect(result).toBe("/some/exotic/path/turbo");
   });
 
   it("falls back to `which turbo` when no probe matches", async () => {

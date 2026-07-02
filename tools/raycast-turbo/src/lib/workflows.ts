@@ -1,4 +1,4 @@
-import { exec } from "child_process";
+import { execAsync } from "./exec-async";
 
 export interface WorkflowParam {
   name: string;
@@ -14,22 +14,6 @@ export interface Workflow {
   name: string;
   description?: string;
   params?: WorkflowParam[];
-}
-
-/** Wraps exec with a promise that preserves {stdout, stderr} regardless of
- *  promisify.custom presence (making it mockable in vitest). */
-function execAsync(cmd: string): Promise<{ stdout: string; stderr: string }> {
-  return new Promise((resolve, reject) => {
-    exec(cmd, (err, stdout, stderr) => {
-      if (err) {
-        const wrapped: NodeJS.ErrnoException & { stderr?: string } = err;
-        wrapped.stderr = stderr;
-        reject(wrapped);
-      } else {
-        resolve({ stdout, stderr });
-      }
-    });
-  });
 }
 
 /** Run `<turboPath> workflows list --json` and return the parsed array. */

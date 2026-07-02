@@ -1,22 +1,24 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { readFile, readdir } from "fs/promises";
-import { exec } from "child_process";
+import { readFile, readdir, unlink } from "fs/promises";
 
 vi.mock("fs/promises", () => ({
   readdir: vi.fn(),
   readFile: vi.fn(),
-}));
-
-vi.mock("child_process", () => ({
-  exec: vi.fn(),
+  unlink: vi.fn(),
 }));
 
 // @raycast/api aliased via vitest.config.ts
-import { scanActivities, sendSigterm } from "../src/running-workflows";
+import {
+  activityFilePath,
+  cleanStaleActivity,
+  isProcessAlive,
+  scanActivities,
+  sendSigterm,
+} from "../src/running-workflows";
 
 const mockReaddir = vi.mocked(readdir);
 const mockReadFile = vi.mocked(readFile);
-const mockExec = vi.mocked(exec);
+const mockUnlink = vi.mocked(unlink);
 
 describe("scanActivities", () => {
   beforeEach(() => {
@@ -104,27 +106,80 @@ describe("scanActivities", () => {
 
 describe("sendSigterm", () => {
   beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("sends SIGTERM to the given PID via process.kill", () => {
+    const killSpy = vi.spyOn(process, "kill").mockReturnValue(true);
+
+    sendSigterm(41010);
+
+    expect(killSpy).toHaveBeenCalledOnce();
+    expect(killSpy).toHaveBeenCalledWith(41010, "SIGTERM");
+  });
+
+  it("throws when process.kill fails (e.g. no such process)", () => {
+    vi.spyOn(process, "kill").mockImplementation(() => {
+      throw Object.assign(new Error("kill ESRCH"), { code: "ESRCH" });
+    });
+
+    expect(() => sendSigterm(99999)).toThrow("kill ESRCH");
+  });
+});
+
+describe("isProcessAlive", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("returns true when process.kill(pid, 0) succeeds", () => {
+    vi.spyOn(process, "kill").mockReturnValue(true);
+    expect(isProcessAlive(123)).toBe(true);
+  });
+
+  it("returns false when process.kill throws ESRCH (no such process)", () => {
+    vi.spyOn(process, "kill").mockImplementation(() => {
+      throw Object.assign(new Error("kill ESRCH"), { code: "ESRCH" });
+    });
+    expect(isProcessAlive(99999)).toBe(false);
+  });
+
+  it("returns true when process.kill throws EPERM (process exists, not ours)", () => {
+    vi.spyOn(process, "kill").mockImplementation(() => {
+      throw Object.assign(new Error("kill EPERM"), { code: "EPERM" });
+    });
+    expect(isProcessAlive(1)).toBe(true);
+  });
+});
+
+describe("activityFilePath", () => {
+  it("derives the on-disk path from the activity id", () => {
+    const path = activityFilePath(
+      { id: "abc-123", kind: "acquirer", label: "audio", owner_pid: 1, started_at: "" },
+      "/tmp/state"
+    );
+    expect(path).toBe("/tmp/state/activity-abc-123.json");
+  });
+});
+
+describe("cleanStaleActivity", () => {
+  beforeEach(() => {
     vi.resetAllMocks();
   });
 
-  it("calls /bin/kill -TERM with the given PID", async () => {
-    mockExec.mockImplementation((_cmd, cb) => {
-      (cb as Function)(null, "", "");
-      return {} as ReturnType<typeof exec>;
-    });
+  it("unlinks the activity file for the given activity", async () => {
+    mockUnlink.mockResolvedValue(undefined);
+    const act = { id: "stale-1", kind: "acquirer", label: "audio", owner_pid: 42, started_at: "" };
 
-    await sendSigterm(41010);
-    expect(mockExec).toHaveBeenCalledOnce();
-    const cmd = (mockExec.mock.calls[0] as [string, Function])[0];
-    expect(cmd).toBe("/bin/kill -TERM 41010");
+    await cleanStaleActivity(act, "/tmp/state");
+
+    expect(mockUnlink).toHaveBeenCalledWith("/tmp/state/activity-stale-1.json");
   });
 
-  it("rejects when kill fails", async () => {
-    mockExec.mockImplementation((_cmd, cb) => {
-      (cb as Function)(new Error("kill: 99999: No such process"), "", "");
-      return {} as ReturnType<typeof exec>;
-    });
+  it("propagates unlink failures", async () => {
+    mockUnlink.mockRejectedValue(new Error("EACCES"));
+    const act = { id: "stale-2", kind: "acquirer", label: "audio", owner_pid: 42, started_at: "" };
 
-    await expect(sendSigterm(99999)).rejects.toThrow("No such process");
+    await expect(cleanStaleActivity(act, "/tmp/state")).rejects.toThrow("EACCES");
   });
 });

@@ -107,23 +107,35 @@ export const STATUS_POLL_INTERVAL_MS = 1500;
  */
 export function useRunningPid(turboPath: string, workflowName: string): number | null {
   const [pid, setPid] = useState<number | null>(null);
-  const aliveRef = useRef(true);
+  // Shared across effect re-runs (on purpose): guards against stacking a new
+  // `turbo workflows status` spawn every STATUS_POLL_INTERVAL_MS on top of a
+  // still-running one (a slow/hung `turbo` binary used to pile up spawns
+  // indefinitely — one per tick, forever).
+  const inFlightRef = useRef(false);
 
   useEffect(() => {
-    aliveRef.current = true;
+    // Scoped to THIS effect instance (not a shared ref): a response from a
+    // spawn started before `workflowName`/`turboPath` changed must not
+    // resurrect a stale PID for the new params after this effect re-runs.
+    let cancelled = false;
     if (!turboPath) return;
 
     const tick = () => {
+      if (inFlightRef.current) return;
+      inFlightRef.current = true;
+
       const proc = spawn(turboPath, ["workflows", "status", workflowName, "--json"], {
         env: { ...process.env, PATH: enrichedPath(process.env.PATH, homedir()) },
       });
       let out = "";
       proc.stdout.on("data", (c: Buffer) => (out += c.toString()));
       proc.on("close", () => {
-        if (!aliveRef.current) return;
+        inFlightRef.current = false;
+        if (cancelled) return;
         setPid(parseStatusOutput(out));
       });
       proc.on("error", () => {
+        inFlightRef.current = false;
         // turbo binary missing or unspawnable — keep last value, retry next tick.
       });
     };
@@ -131,7 +143,7 @@ export function useRunningPid(turboPath: string, workflowName: string): number |
     tick();
     const id = setInterval(tick, STATUS_POLL_INTERVAL_MS);
     return () => {
-      aliveRef.current = false;
+      cancelled = true;
       clearInterval(id);
     };
   }, [turboPath, workflowName]);
@@ -148,7 +160,13 @@ interface WorkflowFormProps {
 
 export function WorkflowForm({ workflow, turboPath }: WorkflowFormProps) {
   const { pop } = useNavigation();
-  const [defaults, setDefaults] = useState<Record<string, string>>({});
+  // `null` until stickies have loaded — distinct from `{}` (loaded, nothing
+  // stuck). Raycast's Form fields are uncontrolled: `defaultValue` only
+  // takes effect at mount, so rendering fields before stickies resolve
+  // (with `defaultValue=""`) means a later `setDefaults(loaded)` can never
+  // retroactively populate them. Gating the fields' render on
+  // `defaults !== null` is what makes stickies actually apply.
+  const [defaults, setDefaults] = useState<Record<string, string> | null>(null);
   const runningPid = useRunningPid(turboPath, workflow.name);
   const isRunning = runningPid !== null;
 
@@ -235,6 +253,7 @@ export function WorkflowForm({ workflow, turboPath }: WorkflowFormProps) {
 
   return (
     <Form
+      isLoading={defaults === null}
       actions={
         <ActionPanel>
           {isRunning ? (
@@ -251,7 +270,8 @@ export function WorkflowForm({ workflow, turboPath }: WorkflowFormProps) {
         </ActionPanel>
       }
     >
-      {(workflow.params ?? []).map((param) => renderField(param, defaults))}
+      {defaults !== null &&
+        (workflow.params ?? []).map((param) => renderField(param, defaults))}
     </Form>
   );
 }

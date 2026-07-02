@@ -1,28 +1,23 @@
-import { exec } from "child_process";
-import { existsSync } from "fs";
+import { accessSync, constants } from "fs";
 import { homedir } from "os";
 import { join } from "path";
 import { getPreferenceValues } from "@raycast/api";
+import { execAsync } from "./exec-async";
 
 interface Preferences {
   turboPath?: string;
 }
 
-function execAsync(cmd: string): Promise<{ stdout: string; stderr: string }> {
-  return new Promise((resolve, reject) => {
-    exec(cmd, (err, stdout, stderr) => {
-      if (err) {
-        reject(err);
-      } else {
-        resolve({ stdout, stderr });
-      }
-    });
-  });
-}
-
+/**
+ * True if `path` exists AND is executable by the current user.
+ * `existsSync` alone would say "yes" for a non-executable file (e.g. a
+ * stray non-executable `turbo` left behind by a failed install), so probing
+ * with `X_OK` is what the function name actually promises.
+ */
 function isExecutable(path: string): boolean {
   try {
-    return existsSync(path);
+    accessSync(path, constants.X_OK);
+    return true;
   } catch {
     return false;
   }
