@@ -7,7 +7,7 @@ tests/test_harness_backend_filter.py). Added here anyway so the picker fixes
 (thinking-toggle honesty, omlx context selector, ESC handling) have coverage
 — flagged for the reviewer as a scope note, not silently smuggled in.
 """
-import io
+import os
 
 from turbollm import picker
 
@@ -156,20 +156,50 @@ def test_pick_does_not_write_thinking_keys_for_mlx_vlm(monkeypatch):
     assert "enable_thinking" not in new_model["server"]
 
 
-# --- _read_key: bare ESC must not block ------------------------------------
+# --- _read_key: reads over a real fd (unbuffered) --------------------------
+# These use a real os.pipe fd + real select rather than mocking either. That is
+# deliberate: the down-arrow-cancels-picker regression only reproduced because
+# a buffered sys.stdin.read() slurped the escape sequence out from under
+# select() — a mock of select or a StringIO stdin hides exactly that bug.
 
-def test_read_key_bare_esc_returns_immediately_without_blocking(monkeypatch):
-    monkeypatch.setattr(picker.sys, "stdin", io.StringIO("\x1b"))
-    monkeypatch.setattr(picker.select, "select", lambda *a, **k: ([], [], []))
-    assert picker._read_key(0) == "esc"
+def _feed(data: bytes) -> int:
+    """Write `data` to a pipe and return the readable fd (bytes already queued,
+    as a real keypress delivers a full escape sequence at once)."""
+    r, w = os.pipe()
+    os.write(w, data)
+    os.close(w)
+    return r
 
 
-def test_read_key_csi_arrow_still_decodes(monkeypatch):
-    monkeypatch.setattr(picker.sys, "stdin", io.StringIO("\x1b[A"))
-    monkeypatch.setattr(picker.select, "select", lambda *a, **k: ([1], [], []))
-    assert picker._read_key(0) == "up"
+def test_read_key_down_arrow_decodes():  # the reported regression
+    fd = _feed(b"\x1b[B")
+    try:
+        assert picker._read_key(fd) == "down"
+    finally:
+        os.close(fd)
 
 
-def test_read_key_plain_char_passthrough(monkeypatch):
-    monkeypatch.setattr(picker.sys, "stdin", io.StringIO("q"))
-    assert picker._read_key(0) == "q"
+def test_read_key_all_arrows_decode():
+    for seq, expected in ((b"\x1b[A", "up"), (b"\x1b[B", "down"),
+                          (b"\x1b[C", "right"), (b"\x1b[D", "left")):
+        fd = _feed(seq)
+        try:
+            assert picker._read_key(fd) == expected
+        finally:
+            os.close(fd)
+
+
+def test_read_key_bare_esc_returns_immediately_without_blocking():
+    fd = _feed(b"\x1b")  # nothing follows: select must time out, not hang
+    try:
+        assert picker._read_key(fd) == "esc"
+    finally:
+        os.close(fd)
+
+
+def test_read_key_plain_char_passthrough():
+    fd = _feed(b"q")
+    try:
+        assert picker._read_key(fd) == "q"
+    finally:
+        os.close(fd)

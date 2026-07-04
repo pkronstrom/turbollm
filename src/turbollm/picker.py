@@ -19,6 +19,7 @@ in `pick()`).
 
 from __future__ import annotations
 
+import os
 import select
 import sys
 import termios
@@ -161,24 +162,31 @@ def _render(entries: list[PickerEntry], sel: int, name_width: int) -> str:
 
 
 def _read_key(fd: int) -> str:
-    """Read a single key (or escape sequence) from raw-mode stdin."""
-    ch = sys.stdin.read(1)
-    if ch != "\x1b":
-        return ch
+    """Read a single key (or escape sequence) from raw-mode stdin.
+
+    Reads via unbuffered ``os.read`` rather than ``sys.stdin.read``: the latter
+    is a buffered TextIOWrapper that slurps the whole ``\\x1b[B`` sequence into
+    Python's buffer on the first read, leaving ``select`` — which inspects the
+    raw fd — blind to the bytes still pending. That mismatch made every arrow
+    key read as a bare ESC and cancel the picker. os.read keeps both on the
+    same layer so the select peek sees what's actually there.
+    """
+    ch = os.read(fd, 1)
+    if ch != b"\x1b":
+        return ch.decode("latin-1")
     # Possible CSI sequence — but a bare ESC (the documented cancel key)
     # produces the same first byte with nothing following. Peek with a short
     # timeout instead of blocking-reading the next byte, so bare ESC returns
     # immediately instead of hanging until another key arrives.
-    ready, _, _ = select.select([sys.stdin], [], [], 0.05)
+    ready, _, _ = select.select([fd], [], [], 0.05)
     if not ready:
         return "esc"
-    ch2 = sys.stdin.read(1)
-    if ch2 != "[":
+    if os.read(fd, 1) != b"[":
         return "esc"
-    ch3 = sys.stdin.read(1)
+    ch3 = os.read(fd, 1)
     return {
-        "A": "up", "B": "down", "C": "right", "D": "left",
-    }.get(ch3, f"esc[{ch3}")
+        b"A": "up", b"B": "down", b"C": "right", b"D": "left",
+    }.get(ch3, "esc")
 
 
 def _interactive_pick(entries: list[PickerEntry]) -> PickerEntry | None:
