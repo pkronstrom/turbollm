@@ -112,6 +112,7 @@ its native Q8 MTP head, and the Q8 vision projector through `llama-server`:
 turbo pull qwen38-27b-q8-mtp
 turbo pi qwen38-27b-q8-mtp
 turbo pi qwen38-27b-q8-mtp --thinking xhigh
+turbo omp qwen38-27b-q8-mtp
 ```
 
 Pi defaults to `medium`; Qwen3.8 supports exactly `low`, `medium`, and
@@ -120,6 +121,9 @@ across turns. MTP drafts are verified by the Q8 target, so disabling MTP after
 a failed performance/stability check retains the same target-model quality.
 Keep the prior dense Qwen3.6 files until the Qwen3.8 Pi/tool/cache burn-in has
 passed; `turbo rm` removes target, draft, and projector artifacts together.
+`turbo omp` also participates in the normal Turbo model picker. It writes only
+the selected Turbo provider into OMP's native `models.yml`, preserving other
+configured providers, then launches the model at its configured effort.
 
 ### Adding a harness
 

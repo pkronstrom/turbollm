@@ -339,6 +339,7 @@ source = { editable = "." }
 dependencies = [
     { name = "click" },
     { name = "huggingface-hub" },
+    { name = "pyyaml" },
     { name = "rich" },
 ]
 
@@ -351,6 +352,7 @@ dev = [
 requires-dist = [
     { name = "click", specifier = ">=8.0" },
     { name = "huggingface-hub", specifier = ">=0.20" },
+    { name = "pyyaml", specifier = ">=6.0" },
     { name = "rich", specifier = ">=13.0" },
 ]
 provides-extras = ["mac"]

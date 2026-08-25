@@ -35,6 +35,7 @@ Repository verification before runtime changes: 344 tests passed in 14.90 second
 | Claude Code | PATH-preferred Homebrew cask 2.1.243; native self-installer also placed 2.1.245 at `~/.local/bin/claude` |
 | OpenCode | 1.18.20 |
 | Codex CLI | 0.149.1 (already current in Homebrew) |
+| Oh My Pi | 18.0.4 from `can1357/tap/omp`; native Turbo provider configuration validates and appears in `omp models` |
 | Hermes Agent | 0.20.5 (2026.8.19), upstream `4c1f53be`; repaired with the official installer, preserving `.env` and `config.yaml` |
 | `goose` | Python package 0.3.0; intentionally untouched because it is not Block's Goose CLI |
 
@@ -44,7 +45,17 @@ Hermes upstream no longer supports wheel or `uv tool install` distribution. Turb
 
 ## Artifact identity
 
-Pending download and verification.
+All three artifacts came from `ggml-org/Qwen3.8-27B-GGUF` at revision
+`0669b98607d47046c7c2b3f801011d54a08cfccf` and are stored under
+`~/.models/ggml-org/Qwen3.8-27B-GGUF`.
+
+| Artifact | Size | SHA-256 |
+|---|---:|---|
+| `Qwen3.8-27B-Q8_0.gguf` | 28.6 GB | `f5c702d8820d36fb55985bb238fc83ee3a313e920f4b752a437c3a6a9e14e4c8` |
+| `mtp-Qwen3.8-27B-Q8_0.gguf` | 3.16 GB | `cbf60a0c48b431bb61f1d49b8948dc88ac29c398d6dbdbbb2e6e89ef77eacc9a` |
+| `mmproj-Qwen3.8-27B-Q8_0.gguf` | 629 MB | `2e968a6af97ce35d8971890b257b9b7edabf20ad91450501fa53162a19ee33eb` |
+
+Each local Hugging Face metadata record names the same revision and SHA-256.
 
 ## Runtime validation
 

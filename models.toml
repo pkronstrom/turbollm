@@ -129,6 +129,12 @@ install = "npm install -g @earendil-works/pi-coding-agent"
 #   extensions = ["~/path/to/pi-autocompact/src/index.ts"]
 extensions = []
 
+[harnesses.omp]
+binary = "omp"
+install = "brew install can1357/tap/omp"
+# Uses OMP's native ~/.omp/agent/models.yml provider configuration. The custom
+# harness selects the chosen Turbo model with its configured reasoning effort.
+
 # --- Models ------------------------------------------------------------------
 # Model entries declare capability + sensible defaults; the arrow-key picker
 # (and provider code) read context_default / context_max / sampling /
