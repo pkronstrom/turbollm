@@ -47,6 +47,17 @@ min_p = 0.0
 presence_penalty = 0.0
 repeat_penalty = 1.0
 
+[sampling.qwen38-thinking]
+# Official Qwen3.8 thinking-mode recipe. Pi sends the same values per request
+# via samplingParams, so the server and harness cannot drift.
+# Source: https://huggingface.co/Qwen/Qwen3.8-27B
+temperature = 1.0
+top_p = 0.95
+top_k = 20
+min_p = 0.0
+presence_penalty = 0.0
+repeat_penalty = 1.0
+
 [sampling.gemma-4]
 # Google's published recipe for Gemma 4.
 # Source: https://huggingface.co/google/gemma-4-31B-it
@@ -106,7 +117,7 @@ cmd = ["qwen", "--model", "{model_id}"]
 
 [harnesses.pi]
 binary = "pi"
-install = "npm install -g @mariozechner/pi-coding-agent"
+install = "npm install -g @earendil-works/pi-coding-agent"
 # Uses custom launcher (models.json provider config pointing at turbo server)
 # Per-invocation pi extensions, loaded via `pi -e <path>`. Active only when pi
 # is launched through turbo (interactive sessions started with `pi` directly
@@ -168,39 +179,60 @@ default_chat_template_kwargs = { preserve_thinking = true }
 # chunked_prefill_tokens = 2048  # chunked prefill corrupts cross-chunk attention
 # specprefill = true             # draft KV mismatch with target (vllm#36872)
 
-[models.qwen36-27b-6bit]
-name = "Qwen3.6 27B 6bit + MTP (mlx-vlm)"
-backend = "mlx-vlm"
-hf_repo = "unsloth/Qwen3.6-27B-UD-MLX-6bit"
-# MTP speculative-decoding drafter (tiny head). Server-path MTP works for Qwen
-# (validated 2026-06-09): ~13.4 -> 21.0 tok/s (+57%), ~2x prior vllm-mlx (10.7),
-# 89.7% draft acceptance, tool-calling + pi verified. mlx-vlm auto-parses tools,
-# so no tool_call_parser/reasoning_parser flags needed (those are vllm-mlx-only).
-draft_hf_repo = "mlx-community/Qwen3.6-27B-MTP-5bit"
+[models.qwen38-27b-q8-mtp]
+name = "Qwen3.8 27B Q8 + native MTP"
+backend = "gguf"
+hf_repo = "ggml-org/Qwen3.8-27B-GGUF"
+hf_file = "Qwen3.8-27B-Q8_0.gguf"
+local_path = "~/.models/ggml-org/Qwen3.8-27B-GGUF"
+draft_hf_repo = "ggml-org/Qwen3.8-27B-GGUF"
+draft_hf_file = "mtp-Qwen3.8-27B-Q8_0.gguf"
+draft_local_path = "~/.models/ggml-org/Qwen3.8-27B-GGUF"
+mmproj_hf_repo = "ggml-org/Qwen3.8-27B-GGUF"
+mmproj_hf_file = "mmproj-Qwen3.8-27B-Q8_0.gguf"
+mmproj_local_path = "~/.models/ggml-org/Qwen3.8-27B-GGUF"
+strict_artifacts = true
 size_gb = 30
-min_memory_gb = 36
+min_memory_gb = 48
 tool_use = true
 can_reason = true
-tags = ["coding", "dense", "qwen", "mtp"]
+input = ["text", "image"]
+tags = ["coding", "dense", "qwen", "vision", "mtp", "q8"]
 
-# 128GB M4 Max sizing: 192K is safe at 6bit + mixed attention (~38 GB KV);
-# weights are ~30 GB so total stays under ~75 GB peak.
-context_default = 65536
-context_max = 196608
-
-sampling = "qwen3-thinking-coding"
+# Native Qwen3.8 context on the 128GB M4 Max. One llama.cpp slot owns the
+# full window; Pi compacts explicitly instead of relying on context shifting.
+context_default = 262144
+context_max = 262144
+sampling = "qwen38-thinking"
 kv_quant = "off"
 
-[models.qwen36-27b-6bit.server]
-draft_kind = "mtp"
-timeout = 600
+[models.qwen38-27b-q8-mtp.server]
+ngl = "all"
+draft_ngl = "all"
+batch = 512
+ubatch = 512
+parallel = 1
+flash_attention = "on"
+no_context_shift = true
+cache_prompt = true
+reasoning_preserve = true
+jinja = true
+spec_type = "draft-mtp"
+spec_draft_n_max = 3
+draft_cache_type_k = "f16"
+draft_cache_type_v = "f16"
+required_flags = ["--spec-type", "--spec-draft-n-max", "--spec-draft-model", "--reasoning-preserve", "--mmproj"]
 
-[models.qwen36-27b-6bit.pi]
-# Default budget for pi sessions — qwen3.6 27B's reasoning can dominate
-# wall-clock on local hardware. Override per invocation with
-# `turbo pi --thinking <off|minimal|low|medium|high|xhigh>`.
-thinking = "low"
-thinking_format = "qwen-chat-template"
+[models.qwen38-27b-q8-mtp.pi]
+# Qwen's benchmark recipe uses a 32K generation ceiling. The model supports
+# only low, medium, and xhigh reasoning; medium balances agent quality/speed.
+max_tokens = 32768
+thinking = "medium"
+thinking_levels = ["low", "medium", "xhigh"]
+
+[models.qwen38-27b-q8-mtp.pi.compat]
+thinkingFormat = "chat-template"
+chatTemplateKwargs = { enable_thinking = { "$var" = "thinking.enabled" }, preserve_thinking = true, reasoning_effort = { "$var" = "thinking.effort" } }
 
 [models.gemma4-31b-it-mlx-4bit]
 name = "Gemma 4 31B IT QAT MLX 4bit"

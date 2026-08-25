@@ -100,3 +100,20 @@ def test_resolve_model_skips_entries_missing_hf_repo(monkeypatch):
     resolved = registry.resolve_model("org/good-repo")
 
     assert resolved is reg["models"]["good"]
+
+
+def test_bundled_qwen38_q8_mtp_contract():
+    data = registry._load_toml(registry.BUNDLED_TOML)
+    model = data["models"]["qwen38-27b-q8-mtp"]
+
+    assert "qwen36-27b-6bit" not in data["models"]
+    assert model["backend"] == "gguf"
+    assert model["hf_repo"] == "ggml-org/Qwen3.8-27B-GGUF"
+    assert model["hf_file"] == "Qwen3.8-27B-Q8_0.gguf"
+    assert model["draft_hf_file"] == "mtp-Qwen3.8-27B-Q8_0.gguf"
+    assert model["mmproj_hf_file"] == "mmproj-Qwen3.8-27B-Q8_0.gguf"
+    assert model["context_default"] == 262144
+    assert model["kv_quant"] == "off"
+    assert model["pi"]["thinking"] == "medium"
+    assert model["pi"]["thinking_levels"] == ["low", "medium", "xhigh"]
+    assert data["sampling"]["qwen38-thinking"]["temperature"] == 1.0

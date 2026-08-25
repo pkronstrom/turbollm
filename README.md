@@ -53,17 +53,16 @@ backend isn't installed, turbo prints the install hint and exits.
 turbo ls -a
 
 # Pull a model (alias, owner/repo, or HuggingFace URL)
-turbo pull qwen36-35b-mlx-4bit
-turbo pull https://huggingface.co/mlx-community/Qwen3.6-35B-A3B-4bit
+turbo pull qwen38-27b-q8-mtp
 
 # List downloaded models
 turbo ls
 
 # Serve a model (auto-detects backend)
-turbo serve qwen36-35b-mlx-4bit
+turbo serve qwen38-27b-q8-mtp
 
 # Remove a model
-turbo rm qwen36-35b-mlx-4bit
+turbo rm qwen38-27b-q8-mtp
 ```
 
 ## Harnesses (agent CLIs)
@@ -97,12 +96,30 @@ Install commands for the harnesses above (same hints `turbo ls -a` prints):
 ```bash
 npm install -g @anthropic-ai/claude-code      # claude
 brew install opencode                         # opencode
-npm install -g @mariozechner/pi-coding-agent  # pi
+npm install -g @earendil-works/pi-coding-agent # pi
 brew install --cask codex                     # codex
 brew install aichat                           # aichat
 brew install qwen-code                        # qwen-code
 # goose, hermes — see `turbo ls -a` Install column for the latest URL
 ```
+
+### Recommended Qwen3.8 + Pi setup
+
+The quality-first local coding profile uses the official Qwen3.8 27B Q8 GGUF,
+its native Q8 MTP head, and the Q8 vision projector through `llama-server`:
+
+```bash
+turbo pull qwen38-27b-q8-mtp
+turbo pi qwen38-27b-q8-mtp
+turbo pi qwen38-27b-q8-mtp --thinking xhigh
+```
+
+Pi defaults to `medium`; Qwen3.8 supports exactly `low`, `medium`, and
+`xhigh`. Turbo sends Qwen's official thinking sampler and preserves thinking
+across turns. MTP drafts are verified by the Q8 target, so disabling MTP after
+a failed performance/stability check retains the same target-model quality.
+Keep the prior dense Qwen3.6 files until the Qwen3.8 Pi/tool/cache burn-in has
+passed; `turbo rm` removes target, draft, and projector artifacts together.
 
 ### Adding a harness
 
