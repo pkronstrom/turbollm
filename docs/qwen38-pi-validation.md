@@ -59,8 +59,67 @@ Each local Hugging Face metadata record names the same revision and SHA-256.
 
 ## Runtime validation
 
-Pending AR control, MTP performance/stability, Pi, and quality gates.
+All measurements below were taken locally on the machine named above. The AR
+control and MTP runs used the same Q8 target, projector, 262,144-token server
+context, one parallel slot, and production sampler. Only the MTP draft was
+removed for the control.
+
+| Check | Result |
+|---|---|
+| Functional API smoke | Exact-format text, separated reasoning, nested tools, parallel tools, and vision passed with and without MTP |
+| Deterministic 512-token AR control | 15.32 tok/s; 33.82 s wall time |
+| Deterministic 512-token native MTP | 29.51 tok/s; 17.79 s wall time; 383/383 proposed draft tokens accepted |
+| MTP uplift | 92.7% higher decode throughput; 47.4% lower wall time |
+| Medium-reasoning sample | 28.13 tok/s; 114/120 draft tokens accepted |
+| Long-context prefill | 17,643 tokens at 178.98 tok/s; repeat reused about 17,125 cached tokens and completed prefill in 3.61 s |
+| 70K-context prefill | 70,437 prompt tokens, including 17,131 cached; 53,306 new tokens at 110.85 tok/s |
+| State isolation | 20/20 alternating long/short prompt cycles passed |
+| Tool burn-in | 100/100 passed after replacing an ambiguous literal `\\n` test prompt; scalar, nested, and parallel calls were clean |
+
+The first burn-in wording produced six misses because the prompt contained the
+two literal characters `\\n`. Deterministic replay showed the model spending
+its response budget deciding whether that meant a backslash or a newline, not
+MTP corruption. The same six seeds passed with an unambiguous two-line
+instruction. No malformed calls, state leaks, server crashes, or draft-induced
+answer changes were observed.
+
+### Quality and settings
+
+| Configuration | Semantic result | Observation |
+|---|---:|---|
+| Qwen3.8 Q8, native sampler, medium reasoning, MTP | 10/10 | Concise correct final answers; nested and parallel tools passed |
+| Qwen3.8 Q8, greedy and thinking disabled | 7/10 | Missed arithmetic, ordering, and a logic item |
+| Retired Qwen3.6 27B MLX 6-bit, thinking enabled | 9/10 | Correct ordering was rejected only by a whitespace-sensitive checker; one Python answer exhausted 2,048 reasoning tokens and emitted no final answer |
+
+The raw automated score was 8/10 for both thinking-enabled runs. Manual
+semantic review corrected a whitespace-only checker failure for both models and
+a wording-only checker failure for Qwen3.8. Qwen3.6's missing Python final was a
+real failure. The Qwen3.8 ten-case run took about 70 seconds; Qwen3.6 took more
+than eight minutes and frequently over-reasoned. These are small regression
+probes, not general benchmark claims, but they are decisive for this machine's
+interactive harness use.
+
+The production profile therefore keeps Qwen's native sampling (`temperature =
+1.0`, `top_p = 0.95`, `top_k = 20`, `min_p = 0`, `presence_penalty = 0`,
+`repeat_penalty = 1`) and defaults Pi/OMP to medium reasoning. The draft model
+does not need a separate reasoning quality: it proposes tokens and the Q8 target
+verifies them. MTP remains explicitly disableable for diagnosis.
+
+### Harness validation
+
+- Pi 0.84.3 returned the exact smoke response through Turbo after the stale
+  0.69.0 NVM-global package was replaced.
+- OMP 18.0.4 lists the native `turbo` provider with text/image input, 262,144
+  context, 32,768 output, reasoning, and low/medium/xhigh effort levels.
+- OMP returned exact responses through both an already-running server and a
+  cold start initiated by `turbo-autoserve.ts`.
+- The auto-serve extension is lazy: it starts `turbo serve` on the first request
+  for a Turbo model. It never kills or replaces an active server; a model
+  mismatch directs the user to the Turbo panel.
 
 ## Retirement
 
-Qwen3.6 27B target and MTP artifacts remain in place until the runtime gates pass.
+The runtime and quality gates passed. The exact Qwen3.6 27B target and MTP cache
+roots were permanently removed on 2026-08-25, reclaiming about 28.3 GB. They are
+recoverable by downloading them again from Hugging Face. The separate Qwen3.6
+35B-A3B profile was not removed.

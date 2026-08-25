@@ -125,6 +125,18 @@ passed; `turbo rm` removes target, draft, and projector artifacts together.
 the selected Turbo provider into OMP's native `models.yml`, preserving other
 configured providers, then launches the model at its configured effort.
 
+To make OMP lazily start a selected Turbo model on its first request, install
+the bundled extension globally for OMP:
+
+```bash
+mkdir -p ~/.omp/agent/extensions
+cp integrations/omp/turbo-autoserve.ts ~/.omp/agent/extensions/
+```
+
+The extension never replaces or kills a server. If port 8899 already serves a
+different model, it asks you to switch it in the Turbo panel; otherwise it
+starts `turbo serve` in the background and waits until the endpoint is ready.
+
 ### Adding a harness
 
 Add to `models.toml`:
