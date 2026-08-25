@@ -90,7 +90,7 @@ def test_draft_gguf_file_prefers_configured_draft_local_path(tmp_path):
     with patch.object(provider, "_find_binary", return_value="/tmp/llama-server"):
         cmd = provider.build_serve_cmd(model, 8899)
 
-    assert cmd[cmd.index("--model-draft") + 1] == str(draft_file)
+    assert cmd[cmd.index("--spec-draft-model") + 1] == str(draft_file)
 
 
 def test_missing_draft_warns_instead_of_silently_omitting(tmp_path, capsys):
@@ -110,7 +110,7 @@ def test_missing_draft_warns_instead_of_silently_omitting(tmp_path, capsys):
          patch("turbollm.providers.gguf._hf_snapshot_path", return_value=None):
         cmd = provider.build_serve_cmd(model, 8899)
 
-    assert "--model-draft" not in cmd
+    assert "--spec-draft-model" not in cmd
     out = capsys.readouterr().out
     assert "org/draft-repo" in out
 
@@ -145,4 +145,86 @@ def test_strict_qwen38_refuses_missing_projector(tmp_path):
 
     with patch.object(provider, "_find_binary", return_value="/tmp/llama-server"), \
          pytest.raises(click.ClickException, match="mmproj-Qwen3.8-27B-Q8_0.gguf"):
+        provider.build_serve_cmd(model, 8899)
+
+
+def test_qwen38_builds_quality_native_mtp_command(tmp_path):
+    model = _qwen38_model(tmp_path)
+    _touch_qwen38_artifacts(tmp_path, model)
+    model["sampling"] = "qwen38-thinking"
+    model["kv_quant"] = "off"
+    model["context_default"] = 262144
+    model["server"] = {
+        "ngl": "all",
+        "draft_ngl": "all",
+        "batch": 512,
+        "ubatch": 512,
+        "parallel": 1,
+        "flash_attention": "on",
+        "no_context_shift": True,
+        "cache_prompt": True,
+        "reasoning_preserve": True,
+        "jinja": True,
+        "spec_type": "draft-mtp",
+        "spec_draft_n_max": 3,
+        "draft_cache_type_k": "f16",
+        "draft_cache_type_v": "f16",
+    }
+    sampling = {
+        "temperature": 1.0,
+        "top_p": 0.95,
+        "top_k": 20,
+        "min_p": 0.0,
+        "presence_penalty": 0.0,
+        "repeat_penalty": 1.0,
+    }
+
+    provider = GgufProvider()
+    with patch.object(provider, "_find_binary", return_value="/tmp/llama-server"), \
+         patch("turbollm.providers.gguf.effective_sampling", return_value=sampling):
+        cmd = provider.build_serve_cmd(model, 8899)
+
+    expected_pairs = {
+        "-c": "262144",
+        "--parallel": "1",
+        "-ngl": "all",
+        "--spec-draft-ngl": "all",
+        "--cache-type-k": "f16",
+        "--cache-type-v": "f16",
+        "--spec-draft-type-k": "f16",
+        "--spec-draft-type-v": "f16",
+        "--spec-type": "draft-mtp",
+        "--spec-draft-n-max": "3",
+    }
+    for flag, value in expected_pairs.items():
+        assert cmd[cmd.index(flag) + 1] == value
+    for flag in (
+        "--cache-prompt",
+        "--no-context-shift",
+        "--reasoning-preserve",
+        "--jinja",
+    ):
+        assert flag in cmd
+    assert cmd[cmd.index("-fa") + 1] == "on"
+    assert cmd[cmd.index("--spec-draft-model") + 1].endswith(
+        "mtp-Qwen3.8-27B-Q8_0.gguf"
+    )
+
+
+def test_required_llama_flags_fail_before_launch(tmp_path):
+    model = _qwen38_model(tmp_path)
+    _touch_qwen38_artifacts(tmp_path, model)
+    model["server"] = {
+        "required_flags": ["--spec-type", "--reasoning-preserve"],
+    }
+    completed = type(
+        "Result",
+        (),
+        {"stdout": "--spec-type", "stderr": "", "returncode": 0},
+    )()
+
+    provider = GgufProvider()
+    with patch.object(provider, "_find_binary", return_value="/tmp/llama-server"), \
+         patch("subprocess.run", return_value=completed), \
+         pytest.raises(click.ClickException, match="--reasoning-preserve"):
         provider.build_serve_cmd(model, 8899)

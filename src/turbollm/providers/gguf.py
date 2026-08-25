@@ -1,4 +1,5 @@
 import shutil
+import subprocess
 from pathlib import Path
 
 import click
@@ -31,6 +32,7 @@ class GgufProvider:
 
         gguf_path = self._gguf_file(model)
         srv = model.get("server", {})
+        self._require_server_flags(binary, list(srv.get("required_flags") or []))
 
         cmd = [binary, "-m", str(gguf_path), "--port", str(port),
                "-a", model["hf_repo"]]
@@ -60,10 +62,7 @@ class GgufProvider:
         kv_type_map = {"off": "f16", "q8": "q8_0", "q4": "q4_0"}
         cache_k = srv.get("cache_type_k") or kv_type_map.get(kv_quant, "f16")
         cache_v = srv.get("cache_type_v") or kv_type_map.get(kv_quant, "f16")
-        if cache_k != "f16":
-            cmd += ["--cache-type-k", cache_k]
-        if cache_v != "f16":
-            cmd += ["--cache-type-v", cache_v]
+        cmd += ["--cache-type-k", cache_k, "--cache-type-v", cache_v]
 
         # Sampler defaults from the resolved preset. llama-server consumes
         # the full set, so pass everything through.
@@ -81,15 +80,24 @@ class GgufProvider:
                 cmd += [flag, str(sampling[key])]
 
         bool_flags = {
-            "flash_attention": "-fa",
             "swa_full": "--swa-full",
             "no_context_shift": "--no-context-shift",
+            "cache_prompt": "--cache-prompt",
+            "reasoning_preserve": "--reasoning-preserve",
             "jinja": "--jinja",
             "mlock": "--mlock",
         }
         for key, flag in bool_flags.items():
             if srv.get(key):
                 cmd.append(flag)
+
+        if "flash_attention" in srv:
+            flash_attention = srv["flash_attention"]
+            if isinstance(flash_attention, str):
+                flash_value = flash_attention
+            else:
+                flash_value = "on" if flash_attention else "off"
+            cmd += ["-fa", flash_value]
 
         if srv.get("enable_thinking") is False:
             cmd += ["--chat-template-kwargs", '{"enable_thinking": false}']
@@ -100,11 +108,17 @@ class GgufProvider:
         spec_draft_n_max = srv.get("spec_draft_n_max")
         if spec_draft_n_max is not None:
             cmd += ["--spec-draft-n-max", str(spec_draft_n_max)]
+        if srv.get("draft_ngl") is not None:
+            cmd += ["--spec-draft-ngl", str(srv["draft_ngl"])]
+        if srv.get("draft_cache_type_k"):
+            cmd += ["--spec-draft-type-k", str(srv["draft_cache_type_k"])]
+        if srv.get("draft_cache_type_v"):
+            cmd += ["--spec-draft-type-v", str(srv["draft_cache_type_v"])]
 
         # Speculative decoding with draft model
         draft_file = self._draft_gguf_file(model)
         if draft_file:
-            cmd += ["--model-draft", str(draft_file)]
+            cmd += ["--spec-draft-model", str(draft_file)]
         elif model.get("draft_hf_file"):
             self._handle_missing_artifact(
                 model,
@@ -237,6 +251,23 @@ class GgufProvider:
             if result:
                 return result
         return None
+
+    def _require_server_flags(self, binary: str, required: list[str]) -> None:
+        if not required:
+            return
+        result = subprocess.run(
+            [binary, "--help"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        help_text = result.stdout + result.stderr
+        missing = [flag for flag in required if flag not in help_text]
+        if missing:
+            raise click.ClickException(
+                "llama-server is too old for this model; missing flags: "
+                + ", ".join(missing)
+            )
 
     def _gguf_file(self, model: dict) -> Path:
         hf_file = model.get("hf_file")
