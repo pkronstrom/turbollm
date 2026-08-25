@@ -4,6 +4,9 @@ import click
 import pytest
 
 from turbollm.harnesses import GenericHarness
+from turbollm.harnesses.claude_code import ClaudeCodeHarness
+from turbollm.harnesses.hermes import HermesHarness
+from turbollm.harnesses.opencode import OpenCodeHarness
 
 
 def test_launch_formats_model_id_and_port_into_cmd_and_env():
@@ -50,3 +53,13 @@ def test_launch_raises_clear_error_on_unknown_placeholder_in_env_template():
     with patch("subprocess.run"):
         with pytest.raises(click.UsageError, match="env.SOME_VAR"):
             harness.launch("org/model", 8899, {})
+
+@pytest.mark.parametrize(
+    "harness_class",
+    [ClaudeCodeHarness, OpenCodeHarness, HermesHarness],
+)
+def test_custom_harnesses_reject_headless_mode(harness_class):
+    harness = harness_class({"binary": "unused"})
+
+    with pytest.raises(NotImplementedError, match="does not support headless mode"):
+        harness.headless("org/model", 8899, {}, "hello")

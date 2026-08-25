@@ -21,6 +21,9 @@ class OpenCodeHarness:
     def is_available(self) -> bool:
         return shutil.which(self._binary) is not None
 
+    def headless(self, model_id: str, port: int, model: dict, prompt: str) -> int:
+        raise NotImplementedError(f"{self.name} harness does not support headless mode")
+
     def launch(self, model_id: str, port: int, model: dict) -> None:
         defaults_oc = get_defaults().get("opencode", {})
         model_oc = model.get("opencode", {})
