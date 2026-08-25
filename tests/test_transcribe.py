@@ -1,10 +1,11 @@
 """Tests for `turbo transcribe` -- T-11 (cluster F-AP).
 
 Covers:
-- verbose_json always sent to mlx-audio (server always gets response_format=verbose_json)
+- text format requests verbose_json from mlx-audio for transcript metadata
 - --format text emits concatenated text (default behaviour unchanged)
 - --format segments emits segments JSON array
 - --format segments with text-only response synthesises one segment + warns on stderr
+- --format srt/vtt request and emit their raw subtitle representations
 """
 import json
 import subprocess
@@ -13,6 +14,7 @@ import io
 import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch
+import pytest
 
 from click.testing import CliRunner
 
@@ -245,12 +247,12 @@ def test_format_segments_maps_parakeet_sentences_to_segments(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# T-11: verbose_json always sent internally
+# T-11: text needs verbose_json internally
 # ---------------------------------------------------------------------------
 
 
-def test_verbose_json_is_always_sent_to_server(tmp_path):
-    """The request to mlx-audio must always use response_format=verbose_json."""
+def test_text_format_requests_verbose_json(tmp_path):
+    """Text output requests parsed transcript metadata from mlx-audio."""
     wav = tmp_path / "test.wav"
     wav.write_bytes(b"RIFF\x00\x00\x00\x00WAVEfmt ")
 
@@ -280,6 +282,48 @@ def test_verbose_json_is_always_sent_to_server(tmp_path):
     body_text = captured_bodies[0]
     assert "verbose_json" in body_text
 
+
+
+@pytest.mark.parametrize(
+    ("response_format", "subtitle_payload"),
+    [
+        ("srt", "1\n00:00:00,000 --> 00:00:01,000\nHello.\n"),
+        ("vtt", "WEBVTT\n\n00:00.000 --> 00:01.000\nHello.\n"),
+    ],
+)
+def test_subtitle_format_requests_and_emits_raw_payload(
+    tmp_path, response_format, subtitle_payload
+):
+    """Non-split subtitles retain the provider's matching raw representation."""
+    wav = tmp_path / "test.wav"
+    wav.write_bytes(b"RIFF\x00\x00\x00\x00WAVEfmt ")
+
+    urlopen_mock = _make_urlopen_mock(subtitle_payload)
+    captured_bodies = []
+
+    def capturing_urlopen(req, **kwargs):
+        if hasattr(req, "data") and req.data:
+            captured_bodies.append(req.data.decode("latin-1", errors="replace"))
+        return urlopen_mock
+
+    runner = CliRunner()
+    with (
+        patch.object(turbo_cli, "_get_running_model", return_value=None),
+        patch.object(turbo_cli, "resolve_model", return_value=FAKE_MODEL),
+        patch.object(turbo_cli, "_get_provider_for", return_value=_FakeProvider()),
+        patch.object(turbo_cli, "_server_is_running", return_value=True),
+        patch.object(turbo_cli.urllib.request, "urlopen", side_effect=capturing_urlopen),
+    ):
+        result = runner.invoke(
+            turbo_cli.cli,
+            ["transcribe", str(wav), "--format", response_format, "--no-split"],
+        )
+
+    assert result.exit_code == 0, result.output
+    assert captured_bodies, "urlopen was not called"
+    assert f'name="response_format"\r\n\r\n{response_format}\r\n' in captured_bodies[0]
+    assert "verbose_json" not in captured_bodies[0]
+    assert subtitle_payload in result.output
 
 # ---------------------------------------------------------------------------
 # Split mode ignoring -f srt/vtt: must refuse instead of silently emitting

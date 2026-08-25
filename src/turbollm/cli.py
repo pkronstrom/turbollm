@@ -644,10 +644,11 @@ def transcribe(audio_file, model, language, response_format, port,
                 )
                 raw = json.dumps(data, ensure_ascii=False)
             else:
-                # Always request verbose_json internally so we have both text and
-                # segments available regardless of the user-facing --format flag.
+                # Text and structured formats need transcript metadata; subtitle
+                # formats must retain the provider's raw subtitle representation.
+                server_format = response_format if response_format in ("srt", "vtt") else "verbose_json"
                 file_bytes = wav_path.read_bytes()
-                fields = {"model": model_id, "response_format": "verbose_json"}
+                fields = {"model": model_id, "response_format": server_format}
                 if language:
                     fields["language"] = language
                 body, ctype = build_multipart(fields, "file", send_name, "audio/wav", file_bytes)
@@ -663,12 +664,15 @@ def transcribe(audio_file, model, language, response_format, port,
                 except urllib.error.HTTPError as e:
                     err.print(f"[red]HTTP {e.code}:[/red] {e.read().decode('utf-8', 'replace')}")
                     raise SystemExit(1) from None
-                try:
-                    data = json.loads(raw)
-                except json.JSONDecodeError:
-                    data = {"text": raw}
+                if response_format not in ("srt", "vtt"):
+                    try:
+                        data = json.loads(raw)
+                    except json.JSONDecodeError:
+                        data = {"text": raw}
 
-            if response_format == "text":
+            if response_format in ("srt", "vtt"):
+                sys.stdout.write(raw)
+            elif response_format == "text":
                 # Default behaviour: emit concatenated text, pipe-friendly.
                 sys.stdout.write(data.get("text", raw).rstrip() + "\n")
             elif response_format == "segments":
@@ -694,9 +698,6 @@ def transcribe(audio_file, model, language, response_format, port,
                 sys.stdout.write(json.dumps(segments, indent=2, ensure_ascii=False) + "\n")
             else:
                 # Legacy passthroughs: json, verbose_json — emit raw response.
-                # (srt/vtt are refused above when combined with split mode; in
-                # non-split mode the server itself would need to support them —
-                # unchanged pre-existing behaviour.)
                 sys.stdout.write(raw)
             sys.stdout.flush()
             return 0
