@@ -285,34 +285,43 @@ def _print_harnesses_table(reg: dict) -> None:
 def rm(model, yes):
     """Remove a downloaded model."""
     m = resolve_model(model)
-    provider = _get_provider_for(m)
+    from turbollm.model_storage import (
+        delete_removal_targets,
+        gather_removal_targets,
+    )
 
-    if not provider.is_downloaded(m):
-        console.print(f"[yellow]Not downloaded:[/yellow] {model}")
+    registry = load_registry()
+    models = registry.get("models", {})
+    current_alias = next(
+        (alias for alias, configured in models.items() if configured == m),
+        None,
+    )
+    other_models = [
+        configured
+        for alias, configured in models.items()
+        if alias != current_alias
+    ]
+    targets = gather_removal_targets(m, other_models)
+    if not targets:
+        console.print(
+            f"[yellow]No safely removable artifacts found:[/yellow] {model}"
+        )
         return
 
-    import shutil
-
-    from turbollm.registry import _hf_cache_path, _legacy_path
-
-    # A model can live in either (or, transiently, both) layouts: the HF hub
-    # cache (`_hf_cache_path`) or the pre-hub-cache `~/.turbollm/models/...`
-    # layout (`_legacy_path`). Deleting only the former left legacy-dir
-    # installs on disk while claiming success — `ls` would still list them
-    # as downloaded.
-    dirs = [_hf_cache_path(m["hf_repo"]), _legacy_path(m["hf_repo"])]
-    size = sum(
-        f.stat().st_size for d in dirs if d.exists() for f in d.rglob("*") if f.is_file()
-    ) / 1e9
+    total = sum(target.size_bytes for target in targets)
+    console.print(f"\n  [bold]{m['name']}[/bold]")
+    for target in targets:
+        console.print(f"  {target.label:>9}: {target.path}")
     if not yes:
-        click.confirm(f"Remove {m['name']} ({size:.1f}GB)?", abort=True)
+        click.confirm(
+            f"Remove {len(targets)} artifact(s) ({total / 1e9:.1f}GB)?",
+            abort=True,
+        )
 
-    for d in dirs:
-        try:
-            shutil.rmtree(d)
-        except FileNotFoundError:
-            pass
-    console.print(f"[green]Removed[/green] {model}")
+    deleted, freed = delete_removal_targets(targets)
+    console.print(
+        f"[green]Removed[/green] {deleted} artifact(s), {freed / 1e9:.1f}GB"
+    )
 
 
 @cli.command()

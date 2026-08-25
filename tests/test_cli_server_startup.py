@@ -228,13 +228,23 @@ def test_serve_pull_hint_uses_alias_not_none_when_from_picker(monkeypatch, tmp_p
 # ---------------------------------------------------------------------------
 
 
-def test_rm_deletes_both_hf_cache_and_legacy_dir(monkeypatch, tmp_path):
+def test_rm_deletes_primary_legacy_and_draft_artifacts(monkeypatch, tmp_path):
     from click.testing import CliRunner
     from turbollm import registry as turbo_registry
 
-    model = {"name": "Good Model", "hf_repo": "some-org/some-model", "backend": "vllm-mlx"}
+    model = {
+        "name": "Good Model",
+        "hf_repo": "some-org/some-model",
+        "draft_hf_repo": "some-org/some-draft",
+        "backend": "vllm-mlx",
+    }
     monkeypatch.setattr(turbo_cli, "resolve_model", lambda _m: model)
     monkeypatch.setattr(turbo_cli, "_get_provider_for", lambda _m: _Provider())
+    monkeypatch.setattr(
+        turbo_cli,
+        "load_registry",
+        lambda: {"models": {"good-model": model}},
+    )
 
     hf_cache_root = tmp_path / "hf_cache"
     legacy_root = tmp_path / "legacy"
@@ -243,16 +253,21 @@ def test_rm_deletes_both_hf_cache_and_legacy_dir(monkeypatch, tmp_path):
 
     hf_dir = turbo_registry._hf_cache_path(model["hf_repo"])
     legacy_dir = turbo_registry._legacy_path(model["hf_repo"])
+    draft_dir = turbo_registry._hf_cache_path(model["draft_hf_repo"])
     hf_dir.mkdir(parents=True)
     (hf_dir / "weights.bin").write_bytes(b"x" * 10)
     legacy_dir.mkdir(parents=True)
     (legacy_dir / "weights.bin").write_bytes(b"y" * 10)
+    draft_dir.mkdir(parents=True)
+    (draft_dir / "draft.bin").write_bytes(b"z" * 10)
 
     runner = CliRunner()
     result = runner.invoke(turbo_cli.cli, ["rm", "some-org/some-model", "--yes"])
     assert result.exit_code == 0, result.output
     assert not hf_dir.exists()
     assert not legacy_dir.exists()
+    assert not draft_dir.exists()
+    assert "draft" in result.output
 
 
 # ---------------------------------------------------------------------------
