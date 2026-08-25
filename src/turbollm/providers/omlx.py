@@ -117,7 +117,7 @@ class OmlxProvider:
 
         try:
             return link.resolve() == model_path.resolve()
-        except RuntimeError:
+        except (OSError, RuntimeError):
             return False
 
     def get_model_id(self, model: dict) -> str:

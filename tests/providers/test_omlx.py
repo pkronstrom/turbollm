@@ -220,6 +220,35 @@ class TestIsDownloaded:
              patch.object(provider, "_symlink_path", return_value=link):
             assert provider.is_downloaded(fake_model) is False
 
+    def test_false_when_symlink_targets_different_directory(
+        self, provider, fake_model, tmp_path
+    ):
+        snapshot = tmp_path / "snapshot"
+        snapshot.mkdir()
+        (snapshot / "model.safetensors").touch()
+        other_directory = tmp_path / "other"
+        other_directory.mkdir()
+        link = tmp_path / "link"
+        link.symlink_to(other_directory)
+
+        with patch("turbollm.providers.omlx._hf_snapshot_path", return_value=snapshot), \
+             patch.object(provider, "_symlink_path", return_value=link):
+            assert provider.is_downloaded(fake_model) is False
+
+    def test_false_when_symlink_resolution_is_unreadable(
+        self, provider, fake_model, tmp_path
+    ):
+        snapshot = tmp_path / "snapshot"
+        snapshot.mkdir()
+        (snapshot / "model.safetensors").touch()
+        link = tmp_path / "link"
+        link.symlink_to(snapshot)
+
+        with patch("turbollm.providers.omlx._hf_snapshot_path", return_value=snapshot), \
+             patch.object(provider, "_symlink_path", return_value=link), \
+             patch.object(Path, "resolve", side_effect=PermissionError):
+            assert provider.is_downloaded(fake_model) is False
+
 class TestPull:
     def test_honors_configured_local_path(self, provider, fake_model, tmp_path):
         # omlx.pull previously called snapshot_download() with no local_dir,
