@@ -61,5 +61,7 @@ def test_launch_raises_clear_error_on_unknown_placeholder_in_env_template():
 def test_custom_harnesses_reject_headless_mode(harness_class):
     harness = harness_class({"binary": "unused"})
 
-    with pytest.raises(NotImplementedError, match="does not support headless mode"):
+    with pytest.raises(NotImplementedError) as exc:
         harness.headless("org/model", 8899, {}, "hello")
+
+    assert str(exc.value) == f"{harness.name} harness does not support headless mode"
