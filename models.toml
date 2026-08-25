@@ -83,7 +83,7 @@ install = "brew install opencode"
 
 [harnesses.hermes]
 binary = "hermes"
-install = "uv tool install git+https://github.com/NousResearch/hermes-agent.git"
+install = "curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash"
 # Uses custom launcher (temp HERMES_HOME with config.yaml pointing at turbo server)
 
 [harnesses.goose]

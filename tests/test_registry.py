@@ -117,3 +117,11 @@ def test_bundled_qwen38_q8_mtp_contract():
     assert model["pi"]["thinking"] == "medium"
     assert model["pi"]["thinking_levels"] == ["low", "medium", "xhigh"]
     assert data["sampling"]["qwen38-thinking"]["temperature"] == 1.0
+
+
+def test_bundled_hermes_install_uses_supported_upstream_installer():
+    data = registry._load_toml(registry.BUNDLED_TOML)
+
+    assert data["harnesses"]["hermes"]["install"] == (
+        "curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash"
+    )

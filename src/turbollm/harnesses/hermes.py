@@ -15,7 +15,7 @@ class HermesHarness:
         self._binary = config.get("binary", "hermes")
         self.install_hint = config.get(
             "install",
-            "uv tool install git+https://github.com/NousResearch/hermes-agent.git",
+            "curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash",
         )
 
     def is_available(self) -> bool:
