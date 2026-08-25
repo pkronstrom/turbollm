@@ -8,7 +8,12 @@ import sys
 from pathlib import Path
 
 from turbollm.harnesses import register
-from turbollm.registry import effective_context, get_defaults
+from turbollm.registry import (
+    effective_context,
+    effective_sampling,
+    get_defaults,
+    pi_thinking_level_map,
+)
 
 
 @register("pi")
@@ -16,7 +21,7 @@ class PiHarness:
     def __init__(self, config: dict):
         self.name = "pi"
         self._binary = config.get("binary", "pi")
-        self.install_hint = config.get("install", "npm install -g @mariozechner/pi-coding-agent")
+        self.install_hint = config.get("install", "npm install -g @earendil-works/pi-coding-agent")
         # Extra `-e <path>` extensions loaded only when pi is launched via turbo
         # (i.e. not active in global interactive pi sessions). Useful for
         # pi-autocompact and similar guards that we want on for delegated runs
@@ -67,11 +72,16 @@ class PiHarness:
             "id": model_id,
             "name": model_name,
             "reasoning": reasoning,
-            "input": ["text"],
+            "input": list(model.get("input") or ["text"]),
             "contextWindow": context_window,
             "maxTokens": max_tokens,
             "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
         }
+        sampling = effective_sampling(model)
+        if sampling:
+            model_entry["samplingParams"] = sampling
+        if reasoning and pi_cfg.get("thinking_levels") is not None:
+            model_entry["thinkingLevelMap"] = pi_thinking_level_map(model)
         if is_qwen and model.get("can_reason", False):
             # Local Qwen 3.6 servers expect thinking toggles via chat_template_kwargs.
             model_entry["compat"] = {"thinkingFormat": "qwen-chat-template"}

@@ -30,7 +30,14 @@ from rich.table import Table
 from turbollm.multipart import build_multipart
 from turbollm.picker import pick as picker_pick
 from turbollm.providers import get_provider
-from turbollm.registry import effective_context, get_defaults, load_registry, resolve_model
+from turbollm.registry import (
+    PI_THINKING_LEVELS,
+    effective_context,
+    get_defaults,
+    load_registry,
+    resolve_model,
+    supported_thinking_levels,
+)
 
 console = Console()
 
@@ -961,7 +968,7 @@ def _is_backend_compatible(harness_config: dict, backend: str) -> bool:
     return backend in _harness_requires_backend(harness_config)
 
 
-_VALID_THINKING_LEVELS = ("off", "minimal", "low", "medium", "high", "xhigh")
+_VALID_THINKING_LEVELS = PI_THINKING_LEVELS
 
 
 def _dispatch_harness(
@@ -1008,6 +1015,12 @@ def _dispatch_harness(
         if thinking is not None:
             # Merge into pi config so PiHarness picks it up and appends `:level`
             # to the model arg. Harnesses that don't read pi config ignore it.
+            supported = supported_thinking_levels(d)
+            if thinking not in supported:
+                raise click.UsageError(
+                    f"{d.get('name', d.get('hf_repo', 'model'))} supports Pi "
+                    f"thinking levels: {', '.join(supported)}"
+                )
             pi_cfg = {**d.get("pi", {}), "thinking": thinking}
             d = {**d, "pi": pi_cfg}
         return d

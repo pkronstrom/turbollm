@@ -10,6 +10,8 @@ USER_TOML = CONFIG_DIR / "models.toml"
 HF_CACHE = Path.home() / ".cache" / "huggingface" / "hub"
 LEGACY_DIR = CONFIG_DIR / "models"
 
+PI_THINKING_LEVELS = ("off", "minimal", "low", "medium", "high", "xhigh", "max")
+
 
 def _load_toml(path: Path) -> dict:
     try:
@@ -79,6 +81,23 @@ def resolve_model(raw: str) -> dict:
 
 def get_defaults() -> dict:
     return load_registry().get("defaults", {})
+
+
+def supported_thinking_levels(model: dict) -> tuple[str, ...]:
+    """Pi reasoning levels this model actually supports, in Pi's UI order."""
+    configured = model.get("pi", {}).get("thinking_levels")
+    if configured is None:
+        return PI_THINKING_LEVELS
+    return tuple(level for level in PI_THINKING_LEVELS if level in configured)
+
+
+def pi_thinking_level_map(model: dict) -> dict[str, str | None]:
+    """Pi model-schema mapping, using null for levels that must stay hidden."""
+    supported = set(supported_thinking_levels(model))
+    return {
+        level: level if level in supported else None
+        for level in PI_THINKING_LEVELS
+    }
 
 
 # --- Unified config helpers (sampling presets, KV quant, context) --------------

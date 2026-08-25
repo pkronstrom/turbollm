@@ -139,3 +139,66 @@ def test_pi_harness_uses_pi_context_and_max_token_overrides(tmp_path, monkeypatc
     assert entry["contextWindow"] == 65536
     assert entry["maxTokens"] == 8192
     run.assert_called_once_with(["pi", "--model", f"turbo/{model['hf_repo']}:low"])
+
+
+def test_pi_qwen38_schema_preserves_quality_settings(tmp_path, monkeypatch):
+    monkeypatch.setenv("PI_CODING_AGENT_DIR", str(tmp_path))
+    harness = PiHarness({"binary": "pi"})
+    model = {
+        "name": "Qwen3.8 27B Q8 + MTP",
+        "hf_repo": "ggml-org/Qwen3.8-27B-GGUF",
+        "can_reason": True,
+        "input": ["text", "image"],
+        "context_default": 262144,
+        "sampling": "qwen38-thinking",
+        "pi": {
+            "max_tokens": 32768,
+            "thinking": "medium",
+            "thinking_levels": ["low", "medium", "xhigh"],
+            "compat": {
+                "thinkingFormat": "chat-template",
+                "chatTemplateKwargs": {
+                    "enable_thinking": {"$var": "thinking.enabled"},
+                    "preserve_thinking": True,
+                    "reasoning_effort": {"$var": "thinking.effort"},
+                },
+            },
+        },
+    }
+    sampling = {
+        "temperature": 1.0,
+        "top_p": 0.95,
+        "top_k": 20,
+        "min_p": 0.0,
+        "presence_penalty": 0.0,
+        "repeat_penalty": 1.0,
+    }
+
+    with patch(
+        "turbollm.harnesses.pi.effective_sampling",
+        return_value=sampling,
+        create=True,
+    ), patch("subprocess.run") as run:
+        harness.launch(model["hf_repo"], 8899, model)
+
+    entry = json.loads(
+        (tmp_path / "models.json").read_text()
+    )["providers"]["turbo"]["models"][0]
+    assert entry["input"] == ["text", "image"]
+    assert entry["contextWindow"] == 262144
+    assert entry["maxTokens"] == 32768
+    assert entry["samplingParams"] == sampling
+    assert entry["thinkingLevelMap"] == {
+        "off": None,
+        "minimal": None,
+        "low": "low",
+        "medium": "medium",
+        "high": None,
+        "xhigh": "xhigh",
+        "max": None,
+    }
+    assert entry["compat"]["thinkingFormat"] == "chat-template"
+    assert entry["compat"]["chatTemplateKwargs"]["preserve_thinking"] is True
+    run.assert_called_once_with(
+        ["pi", "--model", f"turbo/{model['hf_repo']}:medium"]
+    )

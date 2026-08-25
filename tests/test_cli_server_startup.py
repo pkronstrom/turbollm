@@ -285,6 +285,39 @@ def test_dispatch_harness_refuses_incompatible_running_server(monkeypatch):
     assert run_calls == []
 
 
+def test_pi_rejects_reasoning_level_unsupported_by_model(monkeypatch):
+    from click.testing import CliRunner
+
+    model = {
+        "name": "Qwen3.8 27B Q8 + MTP",
+        "hf_repo": "ggml-org/Qwen3.8-27B-GGUF",
+        "backend": "gguf",
+        "can_reason": True,
+        "pi": {
+            "thinking": "medium",
+            "thinking_levels": ["low", "medium", "xhigh"],
+        },
+    }
+    registry = {
+        "defaults": {"port": 8899},
+        "harnesses": {"pi": {"binary": "pi"}},
+        "models": {"qwen38-27b-q8-mtp": model},
+    }
+    monkeypatch.setattr(turbo_cli, "load_registry", lambda: registry)
+    monkeypatch.setattr(turbo_cli, "resolve_model", lambda _raw: model)
+
+    result = CliRunner().invoke(
+        turbo_cli.cli,
+        ["pi", "qwen38-27b-q8-mtp", "--thinking", "high"],
+    )
+
+    assert result.exit_code == 2
+    assert (
+        "Qwen3.8 27B Q8 + MTP supports Pi thinking levels: low, medium, xhigh"
+        in result.output
+    )
+
+
 # ---------------------------------------------------------------------------
 # `turbo chat`: /v1/models probe timeout/error handling, KeyboardInterrupt
 # mid-stream, and symmetric history after a failed turn (item 12)
