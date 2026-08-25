@@ -1,7 +1,30 @@
 from pathlib import Path
 from unittest.mock import patch
 
+import click
+import pytest
+
 from turbollm.providers.gguf import GgufProvider
+
+
+def _qwen38_model(tmp_path):
+    return {
+        "hf_repo": "ggml-org/Qwen3.8-27B-GGUF",
+        "hf_file": "Qwen3.8-27B-Q8_0.gguf",
+        "local_path": str(tmp_path),
+        "draft_hf_repo": "ggml-org/Qwen3.8-27B-GGUF",
+        "draft_hf_file": "mtp-Qwen3.8-27B-Q8_0.gguf",
+        "draft_local_path": str(tmp_path),
+        "mmproj_hf_repo": "ggml-org/Qwen3.8-27B-GGUF",
+        "mmproj_hf_file": "mmproj-Qwen3.8-27B-Q8_0.gguf",
+        "mmproj_local_path": str(tmp_path),
+        "strict_artifacts": True,
+    }
+
+
+def _touch_qwen38_artifacts(tmp_path, model):
+    for key in ("hf_file", "draft_hf_file", "mmproj_hf_file"):
+        (tmp_path / model[key]).touch()
 
 
 def test_builds_mtp_spec_flags_for_grafted_gguf(tmp_path):
@@ -90,3 +113,36 @@ def test_missing_draft_warns_instead_of_silently_omitting(tmp_path, capsys):
     assert "--model-draft" not in cmd
     out = capsys.readouterr().out
     assert "org/draft-repo" in out
+
+
+def test_qwen38_is_downloaded_requires_target_draft_and_projector(tmp_path):
+    model = _qwen38_model(tmp_path)
+    _touch_qwen38_artifacts(tmp_path, model)
+    provider = GgufProvider()
+
+    assert provider.is_downloaded(model) is True
+
+    (tmp_path / model["mmproj_hf_file"]).unlink()
+    assert provider.is_downloaded(model) is False
+
+
+def test_qwen38_command_uses_exact_projector(tmp_path):
+    model = _qwen38_model(tmp_path)
+    _touch_qwen38_artifacts(tmp_path, model)
+    provider = GgufProvider()
+
+    with patch.object(provider, "_find_binary", return_value="/tmp/llama-server"):
+        cmd = provider.build_serve_cmd(model, 8899)
+
+    assert cmd[cmd.index("--mmproj") + 1] == str(tmp_path / model["mmproj_hf_file"])
+
+
+def test_strict_qwen38_refuses_missing_projector(tmp_path):
+    model = _qwen38_model(tmp_path)
+    (tmp_path / model["hf_file"]).touch()
+    (tmp_path / model["draft_hf_file"]).touch()
+    provider = GgufProvider()
+
+    with patch.object(provider, "_find_binary", return_value="/tmp/llama-server"), \
+         pytest.raises(click.ClickException, match="mmproj-Qwen3.8-27B-Q8_0.gguf"):
+        provider.build_serve_cmd(model, 8899)

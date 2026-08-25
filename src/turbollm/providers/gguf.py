@@ -1,6 +1,7 @@
 import shutil
 from pathlib import Path
 
+import click
 from rich.console import Console
 
 from turbollm.hf_download import configured_path, quiet_hf, translate_hf_errors
@@ -104,48 +105,56 @@ class GgufProvider:
         draft_file = self._draft_gguf_file(model)
         if draft_file:
             cmd += ["--model-draft", str(draft_file)]
-        elif model.get("draft_hf_repo") and model.get("draft_hf_file"):
-            # Configured but not found on disk (parity with vllm_mlx's
-            # specprefill warning) — don't silently serve without it.
-            console.print(f"  [yellow]Draft model {model['draft_hf_repo']} not found — speculative decoding disabled.[/yellow]")
-            console.print(f"  [yellow]Run: turbo pull {model.get('hf_repo')}[/yellow]")
+        elif model.get("draft_hf_file"):
+            self._handle_missing_artifact(
+                model,
+                label="draft",
+                repo_key="draft_hf_repo",
+                file_key="draft_hf_file",
+            )
+
+        mmproj_file = self._mmproj_gguf_file(model)
+        if mmproj_file:
+            cmd += ["--mmproj", str(mmproj_file)]
+        elif model.get("mmproj_hf_file"):
+            self._handle_missing_artifact(
+                model,
+                label="projector",
+                repo_key="mmproj_hf_repo",
+                file_key="mmproj_hf_file",
+            )
 
         return cmd
 
     @translate_hf_errors
     def pull(self, model: dict) -> None:
-        from huggingface_hub import hf_hub_download
-
-        repo = model["hf_repo"]
-        hf_file = model.get("hf_file")
-        if not hf_file:
+        if not model.get("hf_file"):
             console.print("[red]GGUF models need hf_file in models.toml[/red]")
             raise SystemExit(1)
 
         quiet_hf()
 
-        console.print(f"  Downloading {hf_file}...")
-        local_path = configured_path(model, "local_path")
-        kwargs = {"repo_id": repo, "filename": hf_file}
-        if local_path is not None:
-            local_path.mkdir(parents=True, exist_ok=True)
-            kwargs["local_dir"] = str(local_path)
-        local_file = hf_hub_download(**kwargs)
-        fsize = Path(local_file).stat().st_size / 1e9
-        console.print(f"  [green]done[/green] {hf_file} ({fsize:.1f}GB)")
-
-        # Pull draft model if configured
-        draft_repo = model.get("draft_hf_repo")
-        draft_file = model.get("draft_hf_file")
-        if draft_repo and draft_file:
-            console.print(f"  Downloading draft model {draft_file}...")
-            draft_path = configured_path(model, "draft_local_path")
-            draft_kwargs = {"repo_id": draft_repo, "filename": draft_file}
-            if draft_path is not None:
-                draft_path.mkdir(parents=True, exist_ok=True)
-                draft_kwargs["local_dir"] = str(draft_path)
-            hf_hub_download(**draft_kwargs)
-            console.print(f"  [green]done[/green] {draft_file}")
+        self._download_artifact(
+            model,
+            repo_key="hf_repo",
+            file_key="hf_file",
+            path_key="local_path",
+            label="target",
+        )
+        self._download_artifact(
+            model,
+            repo_key="draft_hf_repo",
+            file_key="draft_hf_file",
+            path_key="draft_local_path",
+            label="draft",
+        )
+        self._download_artifact(
+            model,
+            repo_key="mmproj_hf_repo",
+            file_key="mmproj_hf_file",
+            path_key="mmproj_local_path",
+            label="projector",
+        )
 
         console.print()
 
@@ -155,14 +164,20 @@ class GgufProvider:
             return False
         local = configured_path(model, "local_path")
         if local is not None:
-            return (local / hf_file).exists()
-        snap = _hf_snapshot_path(model["hf_repo"])
-        if snap and (snap / hf_file).exists():
-            return True
-        cache = _hf_cache_path(model["hf_repo"])
-        if cache.exists():
-            return any(cache.rglob(hf_file))
-        return False
+            target_exists = (local / hf_file).exists()
+        else:
+            snap = _hf_snapshot_path(model["hf_repo"])
+            target_exists = bool(snap and (snap / hf_file).exists())
+            if not target_exists:
+                cache = _hf_cache_path(model["hf_repo"])
+                target_exists = cache.exists() and any(cache.rglob(hf_file))
+        if not target_exists:
+            return False
+        if model.get("draft_hf_file") and self._draft_gguf_file(model) is None:
+            return False
+        if model.get("mmproj_hf_file") and self._mmproj_gguf_file(model) is None:
+            return False
+        return True
 
     def get_model_id(self, model: dict) -> str:
         return model["hf_repo"]
@@ -172,6 +187,49 @@ class GgufProvider:
         Pulled inline by `pull()` for this backend; nothing to do here.
         Keep the method to satisfy the Provider Protocol."""
         return
+
+    def _download_artifact(
+        self,
+        model: dict,
+        *,
+        repo_key: str,
+        file_key: str,
+        path_key: str,
+        label: str,
+    ) -> None:
+        from huggingface_hub import hf_hub_download
+
+        repo = model.get(repo_key)
+        filename = model.get(file_key)
+        if not repo or not filename:
+            return
+        destination = configured_path(model, path_key)
+        kwargs = {"repo_id": repo, "filename": filename}
+        if destination is not None:
+            destination.mkdir(parents=True, exist_ok=True)
+            kwargs["local_dir"] = str(destination)
+        console.print(f"  Downloading {label} {filename}...")
+        resolved = Path(hf_hub_download(**kwargs))
+        console.print(
+            f"  [green]done[/green] {filename} "
+            f"({resolved.stat().st_size / 1e9:.1f}GB)"
+        )
+
+    def _handle_missing_artifact(
+        self,
+        model: dict,
+        *,
+        label: str,
+        repo_key: str,
+        file_key: str,
+    ) -> None:
+        repo = model.get(repo_key, "?")
+        filename = model.get(file_key, "?")
+        message = f"Configured {label} artifact not found: {repo}/{filename}"
+        if model.get("strict_artifacts"):
+            raise click.ClickException(message)
+        console.print(f"  [yellow]{message} — capability disabled.[/yellow]")
+        console.print(f"  [yellow]Run: turbo pull {model.get('hf_repo')}[/yellow]")
 
     def _find_binary(self) -> str | None:
         for name in ["llama-server", "llama.cpp-server"]:
@@ -209,19 +267,40 @@ class GgufProvider:
         console.print(f"[red]GGUF file not found for {model.get('name', '?')}[/red]")
         raise SystemExit(1)
 
-    def _draft_gguf_file(self, model: dict) -> Path | None:
-        draft_repo = model.get("draft_hf_repo")
-        draft_file = model.get("draft_hf_file")
-        if not draft_repo or not draft_file:
+    def _sidecar_file(
+        self,
+        model: dict,
+        *,
+        repo_key: str,
+        file_key: str,
+        path_key: str,
+    ) -> Path | None:
+        repo = model.get(repo_key)
+        filename = model.get(file_key)
+        if not repo or not filename:
             return None
-        # pull() honors draft_local_path — check it first so a draft model
-        # downloaded there is actually found at serve time.
-        configured = configured_path(model, "draft_local_path")
-        if configured:
-            p = configured / draft_file
+        configured = configured_path(model, path_key)
+        if configured is not None:
+            p = configured / filename
             if p.exists():
                 return p
-        snap = _hf_snapshot_path(draft_repo)
-        if snap and (snap / draft_file).exists():
-            return snap / draft_file
+        snap = _hf_snapshot_path(repo)
+        if snap and (snap / filename).exists():
+            return snap / filename
         return None
+
+    def _draft_gguf_file(self, model: dict) -> Path | None:
+        return self._sidecar_file(
+            model,
+            repo_key="draft_hf_repo",
+            file_key="draft_hf_file",
+            path_key="draft_local_path",
+        )
+
+    def _mmproj_gguf_file(self, model: dict) -> Path | None:
+        return self._sidecar_file(
+            model,
+            repo_key="mmproj_hf_repo",
+            file_key="mmproj_hf_file",
+            path_key="mmproj_local_path",
+        )
