@@ -177,6 +177,20 @@ class TestIsDownloaded:
              patch.object(provider, "_symlink_path", return_value=link):
             assert provider.is_downloaded(fake_model) is True
 
+    def test_true_when_configured_local_path_and_symlink_exist(
+        self, provider, fake_model, tmp_path
+    ):
+        local_dir = tmp_path / "custom-model"
+        local_dir.mkdir()
+        (local_dir / "model.safetensors").touch()
+        fake_model = {**fake_model, "local_path": str(local_dir)}
+        link = tmp_path / "link"
+        link.symlink_to(local_dir)
+
+        with patch("turbollm.providers.omlx._hf_snapshot_path", return_value=None), \
+             patch.object(provider, "_symlink_path", return_value=link):
+            assert provider.is_downloaded(fake_model) is True
+
     def test_false_when_no_snapshot(self, provider, fake_model, tmp_path):
         link = tmp_path / "link"
 

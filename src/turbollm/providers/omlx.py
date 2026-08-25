@@ -95,12 +95,24 @@ class OmlxProvider:
         self._ensure_symlink(model, snapshot_path)
         console.print(f"  [dim]Symlinked → {self._symlink_path(model)}[/dim]")
 
+    def _model_path(self, model: dict) -> Path | None:
+        local_path = configured_path(model, "local_path")
+        if local_path and any(local_path.glob("*.safetensors")):
+            return local_path
+
+        snapshot_path = _hf_snapshot_path(model["hf_repo"])
+        if snapshot_path and any(snapshot_path.glob("*.safetensors")):
+            return snapshot_path
+
+        return None
+
     def is_downloaded(self, model: dict) -> bool:
-        snap = _hf_snapshot_path(model["hf_repo"])
-        if not snap or not any(snap.glob("*.safetensors")):
+        model_path = self._model_path(model)
+        if model_path is None:
             return False
+
         link = self._symlink_path(model)
-        return link.is_symlink()
+        return link.is_symlink() and link.resolve() == model_path.resolve()
 
     def get_model_id(self, model: dict) -> str:
         return model["hf_repo"]
