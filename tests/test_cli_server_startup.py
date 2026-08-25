@@ -121,7 +121,7 @@ def test_run_with_server_writes_and_clears_port_stamp(tmp_path):
     assert rc == 0
     assert seen_stamp.get("max_tokens") == 65536
     # Stamp is cleared once we own it and the run completes.
-    assert not turbo_cli._port_stamp_path(8899).exists()
+    assert not (state_dir / "port-8899.json").exists()
 
 
 def test_run_with_server_teardown_escalates_to_kill_on_timeout(tmp_path):
