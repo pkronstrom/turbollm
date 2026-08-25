@@ -112,7 +112,13 @@ class OmlxProvider:
             return False
 
         link = self._symlink_path(model)
-        return link.is_symlink() and link.resolve() == model_path.resolve()
+        if not link.is_symlink():
+            return False
+
+        try:
+            return link.resolve() == model_path.resolve()
+        except RuntimeError:
+            return False
 
     def get_model_id(self, model: dict) -> str:
         return model["hf_repo"]
