@@ -42,6 +42,13 @@ class TestIsAvailable:
         with patch("shutil.which", return_value=None):
             assert provider.is_available() is False
 
+    def test_available_when_only_homebrew_opt_binary_found(self, provider):
+        with patch(
+            "shutil.which",
+            side_effect=[None, "/opt/homebrew/opt/omlx/bin/omlx"],
+        ):
+            assert provider.is_available() is True
+
 
 class TestEnsureSymlink:
     def test_creates_symlink(self, provider, fake_model, tmp_path):
@@ -124,15 +131,31 @@ class TestRemoveSymlink:
 class TestBuildServeCmd:
     def test_minimal_cmd(self, provider):
         model = {"hf_repo": "mlx-community/test-model", "server": {}}
-        with patch("turbollm.providers.omlx.get_defaults", return_value={}):
+        with (
+            patch("turbollm.providers.omlx.get_defaults", return_value={}),
+            patch("shutil.which", return_value="/opt/homebrew/bin/omlx"),
+        ):
             cmd = provider.build_serve_cmd(model, 8899)
 
-        assert cmd[:2] == ["omlx", "serve"]
+        assert cmd[:2] == ["/opt/homebrew/bin/omlx", "serve"]
         assert "--port" in cmd
         assert "8899" in cmd
         assert "--host" in cmd
         assert "127.0.0.1" in cmd
         assert "--model-dir" in cmd
+
+    def test_uses_homebrew_opt_binary_when_path_binary_missing(self, provider):
+        model = {"hf_repo": "mlx-community/test-model", "server": {}}
+        with (
+            patch("turbollm.providers.omlx.get_defaults", return_value={}),
+            patch(
+                "shutil.which",
+                side_effect=[None, "/opt/homebrew/opt/omlx/bin/omlx"],
+            ),
+        ):
+            cmd = provider.build_serve_cmd(model, 8899)
+
+        assert cmd[:2] == ["/opt/homebrew/opt/omlx/bin/omlx", "serve"]
 
     def test_ssd_cache_flags(self, provider):
         model = {"hf_repo": "mlx-community/test-model", "server": {}}

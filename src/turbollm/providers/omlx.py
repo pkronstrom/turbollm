@@ -11,14 +11,19 @@ from turbollm.registry import _hf_snapshot_path, get_defaults
 console = Console()
 
 OMLX_MODELS_DIR = Path.home() / ".omlx" / "models"
+_HOMEBREW_OMLX_BIN_DIR = "/opt/homebrew/opt/omlx/bin"
+
 
 
 class OmlxProvider:
     name = "omlx"
     install_hint = "brew tap jundot/omlx && brew install omlx"
 
+    def _executable(self) -> str | None:
+        return shutil.which("omlx") or shutil.which("omlx", path=_HOMEBREW_OMLX_BIN_DIR)
+
     def is_available(self) -> bool:
-        return shutil.which("omlx") is not None
+        return self._executable() is not None
 
     def _symlink_path(self, model: dict) -> Path:
         """Path where oMLX expects to find this model: ~/.omlx/models/<org>/<model>"""
@@ -60,7 +65,7 @@ class OmlxProvider:
         model_dir = srv.get("model_dir") or omlx_defaults.get("model_dir") or str(OMLX_MODELS_DIR)
         model_dir = os.path.expanduser(model_dir)
 
-        cmd = ["omlx", "serve",
+        cmd = [self._executable() or "omlx", "serve",
                "--model-dir", model_dir,
                "--port", str(port),
                "--host", "127.0.0.1"]
