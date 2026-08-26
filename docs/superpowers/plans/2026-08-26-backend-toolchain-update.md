@@ -85,7 +85,7 @@ No repository source is expected to change in this task. Do not create an empty 
 
 Run:
 ```bash
-turbo ls -a
+uv run turbo ls -a
 ```
 
 Expected: `mlx-audio`, `mlx-vlm`, `vllm-mlx`, `omlx`, and `gguf` are reported installed/available; no provider reports its install hint.
