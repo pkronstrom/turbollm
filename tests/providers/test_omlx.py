@@ -1,10 +1,15 @@
+import json
 from pathlib import Path
 from unittest.mock import patch
 
 import click
 import pytest
 
-from turbollm.providers.omlx import OMLX_MODELS_DIR, OmlxProvider
+from turbollm.providers.omlx import (
+    OMLX_MODEL_SETTINGS_PATH,
+    OMLX_MODELS_DIR,
+    OmlxProvider,
+)
 
 
 @pytest.fixture
@@ -186,6 +191,40 @@ class TestBuildServeCmd:
         assert "--max-concurrent-requests" in cmd
         idx = cmd.index("--max-concurrent-requests")
         assert cmd[idx + 1] == "4"
+
+    def test_model_id_matches_omlx_discovery_name(self, provider):
+        assert provider.get_model_id(
+            {"hf_repo": "Jundot/Qwen3.8-27B-oQ6e-mtp"}
+        ) == "Qwen3.8-27B-oQ6e-mtp"
+
+    def test_writes_native_mtp_settings(self, provider, tmp_path, monkeypatch):
+        settings_path = tmp_path / "model_settings.json"
+        settings_path.write_text(json.dumps({"models": {"other": {"mtp_enabled": False}}}))
+        monkeypatch.setattr("turbollm.providers.omlx.OMLX_MODEL_SETTINGS_PATH", settings_path)
+        model = {
+            "hf_repo": "Jundot/Qwen3.8-27B-oQ6e-mtp",
+            "server": {
+                "mtp_enabled": True,
+                "turboquant_kv_enabled": False,
+                "dflash_enabled": False,
+                "vlm_mtp_enabled": False,
+            },
+        }
+
+        with patch("turbollm.providers.omlx.get_defaults", return_value={}):
+            provider.build_serve_cmd(model, 8899)
+
+        assert json.loads(settings_path.read_text()) == {
+            "models": {
+                "other": {"mtp_enabled": False},
+                "Qwen3.8-27B-oQ6e-mtp": {
+                    "mtp_enabled": True,
+                    "turboquant_kv_enabled": False,
+                    "dflash_enabled": False,
+                    "vlm_mtp_enabled": False,
+                },
+            }
+        }
 
 
 class TestIsDownloaded:

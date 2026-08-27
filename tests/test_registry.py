@@ -134,3 +134,16 @@ def test_bundled_lean_omp_harness_contract():
         "install": "brew install can1357/tap/omp",
         "offer_running_server_choice": True,
     }
+
+
+def test_bundled_qwen38_oq6e_mtp_contract():
+    data = registry._load_toml(registry.BUNDLED_TOML)
+    model = data["models"]["qwen38-27b-oq6e-mtp"]
+
+    assert model["backend"] == "omlx"
+    assert model["hf_repo"] == "Jundot/Qwen3.8-27B-oQ6e-mtp"
+    assert model["local_path"] == "~/.models/Jundot/Qwen3.8-27B-oQ6e-mtp"
+    assert model["size_gb"] == 24
+    assert model["can_reason"] is True
+    assert model["server"]["mtp_enabled"] is True
+    assert model["server"]["turboquant_kv_enabled"] is False

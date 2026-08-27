@@ -246,6 +246,38 @@ thinking_levels = ["low", "medium", "xhigh"]
 thinkingFormat = "chat-template"
 chatTemplateKwargs = { enable_thinking = { "$var" = "thinking.enabled" }, preserve_thinking = true, reasoning_effort = { "$var" = "thinking.effort" } }
 
+[models.qwen38-27b-oq6e-mtp]
+name = "Qwen3.8 27B oQ6e + native MTP"
+backend = "omlx"
+hf_repo = "Jundot/Qwen3.8-27B-oQ6e-mtp"
+local_path = "~/.models/Jundot/Qwen3.8-27B-oQ6e-mtp"
+size_gb = 24
+min_memory_gb = 48
+tool_use = true
+can_reason = true
+input = ["text", "image"]
+tags = ["coding", "dense", "qwen", "vision", "mtp", "oq6e", "omlx"]
+context_default = 262144
+context_max = 262144
+sampling = "qwen38-thinking"
+kv_quant = "off"
+
+[models.qwen38-27b-oq6e-mtp.server]
+max_concurrent_requests = 1
+mtp_enabled = true
+turboquant_kv_enabled = false
+dflash_enabled = false
+vlm_mtp_enabled = false
+
+[models.qwen38-27b-oq6e-mtp.pi]
+max_tokens = 32768
+thinking = "medium"
+thinking_levels = ["low", "medium", "xhigh"]
+
+[models.qwen38-27b-oq6e-mtp.pi.compat]
+thinkingFormat = "chat-template"
+chatTemplateKwargs = { enable_thinking = { "$var" = "thinking.enabled" }, preserve_thinking = true, reasoning_effort = { "$var" = "thinking.effort" } }
+
 [models.gemma4-31b-it-mlx-4bit]
 name = "Gemma 4 31B IT QAT MLX 4bit"
 backend = "vllm-mlx"

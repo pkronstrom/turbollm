@@ -133,6 +133,10 @@ With no model argument, `turbo omp-lean` offers to attach to an already-running 
 
 The lean route is experimental. Measure its prompt-token footprint before relying on it as a low-overhead route; use `turbo omp` when the full OMP tool surface is needed.
 
+### Qwen3.8 oMLX Q6 MTP experiment
+
+`turbo pull qwen38-27b-oq6e-mtp` installs the separate `Jundot/Qwen3.8-27B-oQ6e-mtp` 6-bit MLX checkpoint under `~/.models`. Turbo configures oMLX native MTP for that model while retaining the Q8 GGUF entry as the quality baseline.
+
 To make OMP lazily start a selected Turbo model on its first request, install
 the bundled extension globally for OMP:
 

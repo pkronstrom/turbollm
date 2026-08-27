@@ -1,3 +1,4 @@
+import json
 import os
 import shutil
 from pathlib import Path
@@ -11,6 +12,53 @@ from turbollm.registry import _hf_snapshot_path, get_defaults
 console = Console()
 
 OMLX_MODELS_DIR = Path.home() / ".omlx" / "models"
+OMLX_MODEL_SETTINGS_PATH = Path.home() / ".omlx" / "model_settings.json"
+
+
+_NATIVE_MTP_SETTING_KEYS = (
+    "mtp_enabled",
+    "turboquant_kv_enabled",
+    "dflash_enabled",
+    "vlm_mtp_enabled",
+)
+
+
+def _write_native_mtp_settings(model: dict) -> None:
+    configured = {
+        key: model.get("server", {})[key]
+        for key in _NATIVE_MTP_SETTING_KEYS
+        if key in model.get("server", {})
+    }
+    if not configured:
+        return
+
+    try:
+        existing = json.loads(OMLX_MODEL_SETTINGS_PATH.read_text()) if OMLX_MODEL_SETTINGS_PATH.exists() else {}
+    except (json.JSONDecodeError, OSError) as error:
+        raise click.ClickException(
+            f"Cannot update oMLX model settings at {OMLX_MODEL_SETTINGS_PATH}: {error}"
+        ) from error
+    if not isinstance(existing, dict):
+        raise click.ClickException(
+            f"Cannot update oMLX model settings at {OMLX_MODEL_SETTINGS_PATH}: root must be a mapping"
+        )
+
+    models = existing.setdefault("models", {})
+    if not isinstance(models, dict):
+        raise click.ClickException(
+            f"Cannot update oMLX model settings at {OMLX_MODEL_SETTINGS_PATH}: models must be a mapping"
+        )
+    model_name = model["hf_repo"].split("/", 1)[1]
+    current = models.get(model_name, {})
+    if not isinstance(current, dict):
+        raise click.ClickException(
+            f"Cannot update oMLX model settings for {model_name}: settings must be a mapping"
+        )
+    models[model_name] = {**current, **configured}
+
+    OMLX_MODEL_SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    OMLX_MODEL_SETTINGS_PATH.write_text(json.dumps(existing, indent=2) + "\n")
+
 _HOMEBREW_OMLX_BIN_DIR = "/opt/homebrew/opt/omlx/bin"
 
 
@@ -61,6 +109,7 @@ class OmlxProvider:
         defaults = get_defaults()
         omlx_defaults = defaults.get("omlx", {})
         srv = model.get("server", {})
+        _write_native_mtp_settings(model)
 
         model_dir = srv.get("model_dir") or omlx_defaults.get("model_dir") or str(OMLX_MODELS_DIR)
         model_dir = os.path.expanduser(model_dir)
@@ -126,7 +175,7 @@ class OmlxProvider:
             return False
 
     def get_model_id(self, model: dict) -> str:
-        return model["hf_repo"]
+        return model["hf_repo"].split("/", 1)[-1]
 
     def pull_draft(self, model: dict) -> None:
         """omlx doesn't support speculative decoding yet — no draft model."""
