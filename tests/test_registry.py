@@ -132,4 +132,5 @@ def test_bundled_lean_omp_harness_contract():
     assert data["harnesses"]["omp-lean"] == {
         "binary": "omp",
         "install": "brew install can1357/tap/omp",
+        "offer_running_server_choice": True,
     }

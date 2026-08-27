@@ -1,5 +1,6 @@
 import json
 import os
+import socket
 import subprocess
 import sys
 import tempfile
@@ -53,6 +54,18 @@ def _get_model_id(m: dict) -> str:
     Delegates to the provider so each backend can override (mlx-vlm reports a
     local filesystem path, others report hf_repo)."""
     return _get_provider_for(m).get_model_id(m)
+
+
+def _next_free_port(start: int) -> int:
+    """Return the first loopback TCP port at or above ``start`` that can bind."""
+    for port in range(start, 65536):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+            try:
+                probe.bind(("127.0.0.1", port))
+            except OSError:
+                continue
+        return port
+    raise click.UsageError(f"No free TCP port available at or above {start}.")
 
 
 # Backends grouped by modality. Chat/text harnesses (pi, claude, codex, …) serve
@@ -1009,6 +1022,7 @@ def _dispatch_harness(
     clear signal to pick a free port or stop the other server, not a picker
     that silently doesn't fix anything.
     """
+    explicit_port = port is not None
     port = port or get_defaults().get("port", 8899)
     reg = load_registry()
     harness_config = reg.get("harnesses", {}).get(harness_name, {})
@@ -1057,6 +1071,26 @@ def _dispatch_harness(
                         f"    [bold]turbo serve {hint_alias} --context-window {context_window}[/bold]"
                     )
                     raise SystemExit(1)
+            if (
+                not explicit_port
+                and prompt is None
+                and harness_config.get("offer_running_server_choice") is True
+            ):
+                choice = click.prompt(
+                    f"Port {port} is serving {running.get('name', 'a Turbo model')}",
+                    type=click.Choice(["use-running-server", "launch-new-server"]),
+                    default="use-running-server",
+                    show_choices=True,
+                )
+                if choice == "launch-new-server":
+                    new_port = _next_free_port(port + 1)
+                    _, selected = pick_model(requires_backend=requires_backend)
+                    _run_harness(
+                        harness_name,
+                        _apply_overrides(selected),
+                        new_port,
+                    )
+                    return
             running = _apply_overrides(running)
             _run_harness(harness_name, running, port, prompt=prompt)
             return

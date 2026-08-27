@@ -37,6 +37,8 @@ def test_lean_harness_writes_provider_only_to_its_isolated_agent_dir(tmp_path, m
 
     assert (lean_dir / "models.yml").exists()
     assert not (normal_dir / "models.yml").exists()
+    assert yaml.safe_load((lean_dir / "config.yml").read_text()) == {"setupVersion": 2}
+    assert not (normal_dir / "config.yml").exists()
     entry = yaml.safe_load((lean_dir / "models.yml").read_text())["providers"]["turbo"]["models"][0]
     assert entry["compat"] == {
         "supportsDeveloperRole": False,

@@ -129,6 +129,8 @@ configured providers, then launches the model at its configured effort.
 
 `turbo omp-lean qwen38-27b-q8-mtp` starts an isolated OMP profile for local Qwen coding. It exposes file tools, Bash, LSP, ask, todo, and only the `vault-mcp` / `vault-skills` catalogue. It never changes the normal `turbo omp` profile, sessions, extensions, or configuration.
 
+With no model argument, `turbo omp-lean` offers to attach to an already-running compatible Turbo server or start a new server on the next free local port and open the model picker. It never stops the running server.
+
 The lean route is experimental. Measure its prompt-token footprint before relying on it as a low-overhead route; use `turbo omp` when the full OMP tool surface is needed.
 
 To make OMP lazily start a selected Turbo model on its first request, install

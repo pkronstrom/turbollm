@@ -138,6 +138,7 @@ install = "brew install can1357/tap/omp"
 [harnesses.omp-lean]
 binary = "omp"
 install = "brew install can1357/tap/omp"
+offer_running_server_choice = true
 # Uses an isolated OMP state directory with the local-Qwen tool and skill profile.
 
 # --- Models ------------------------------------------------------------------
