@@ -125,6 +125,12 @@ passed; `turbo rm` removes target, draft, and projector artifacts together.
 the selected Turbo provider into OMP's native `models.yml`, preserving other
 configured providers, then launches the model at its configured effort.
 
+### Lean local OMP profile
+
+`turbo omp-lean qwen38-27b-q8-mtp` starts an isolated OMP profile for local Qwen coding. It exposes file tools, Bash, LSP, ask, todo, and only the `vault-mcp` / `vault-skills` catalogue. It never changes the normal `turbo omp` profile, sessions, extensions, or configuration.
+
+The lean route is experimental. Measure its prompt-token footprint before relying on it as a low-overhead route; use `turbo omp` when the full OMP tool surface is needed.
+
 To make OMP lazily start a selected Turbo model on its first request, install
 the bundled extension globally for OMP:
 

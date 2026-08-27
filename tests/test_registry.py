@@ -125,3 +125,11 @@ def test_bundled_hermes_install_uses_supported_upstream_installer():
     assert data["harnesses"]["hermes"]["install"] == (
         "curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash"
     )
+
+def test_bundled_lean_omp_harness_contract():
+    data = registry._load_toml(registry.BUNDLED_TOML)
+
+    assert data["harnesses"]["omp-lean"] == {
+        "binary": "omp",
+        "install": "brew install can1357/tap/omp",
+    }
