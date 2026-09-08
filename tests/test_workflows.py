@@ -1094,6 +1094,7 @@ def test_primary_failure_terminates_background_acquirer(monkeypatch, tmp_path):
     bin_dir.mkdir()
 
     sigterm_file = tmp_path / "sigterm_received.txt"
+    ready_file = tmp_path / "background_ready.txt"
 
     # Fake acquirer:
     #   record-audio  → exits non-zero so resolve_params raises WorkflowError
@@ -1104,10 +1105,18 @@ def test_primary_failure_terminates_background_acquirer(monkeypatch, tmp_path):
         f"""\
 case "$1" in
   record-audio)
+    # Wait for the background's handler, not just its process creation.
+    # Otherwise SIGTERM can correctly kill it before the marker trap exists.
+    attempts=0
+    while [ ! -f "{ready_file}" ] && [ "$attempts" -lt 500 ]; do
+      sleep 0.01
+      attempts=$((attempts + 1))
+    done
     exit 2
     ;;
   record-screen)
     trap 'touch "{sigterm_file}"; exit 0' TERM INT
+    touch "{ready_file}"
     while true; do sleep 0.05; done
     ;;
   *) exit 1 ;;
@@ -1131,10 +1140,7 @@ esac
     with pytest.raises(workflows.WorkflowError):
         workflows.run_workflow("primary-fail-test", wf, overrides={}, registry={})
 
-    # Give the background process a moment to handle SIGTERM.
-    import time
-    time.sleep(0.2)
-
+    assert ready_file.exists(), "Background fixture did not become ready"
     assert sigterm_file.exists(), (
         "Background acquirer was not terminated after primary failure; "
         "leaked child process detected"
