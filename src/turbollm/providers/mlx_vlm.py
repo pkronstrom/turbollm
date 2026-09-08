@@ -13,7 +13,7 @@ console = Console()
 
 class MlxVlmProvider:
     name = "mlx-vlm"
-    install_hint = "uv tool install mlx-vlm"
+    install_hint = "uv tool install --with jinja2 mlx-vlm"
 
     def is_available(self) -> bool:
         return shutil.which("mlx_vlm.server") is not None or shutil.which("mlx_vlm") is not None
@@ -120,20 +120,15 @@ class MlxVlmProvider:
         return True
 
     def get_model_id(self, model: dict) -> str:
-        """mlx-vlm reports the served model by its local filesystem path when
-        it was actually loaded from local_path; otherwise the hf_repo (same
-        as other backends).
+        """Return the exact identifier handed to ``mlx_vlm.server``.
 
-        Shares `_model_path`'s resolution instead of trusting local_path
-        blindly — local_path with no safetensors falls back to the HF
-        snapshot at serve time, and returning the (unserved) local_path here
-        would configure harnesses with a model id the server doesn't serve.
+        The server loads either a configured local directory or a Hugging Face
+        cache snapshot and exposes that filesystem path as the served model ID.
+        Sending the repository ID instead asks mlx-vlm to load a second copy
+        of the model from Hugging Face for the request.
         """
-        local_cfg = configured_path(model, "local_path")
         resolved = self._model_path(model)
-        if local_cfg is not None and resolved == local_cfg:
-            return str(resolved)
-        return model["hf_repo"]
+        return str(resolved) if resolved is not None else model["hf_repo"]
 
     def pull_draft(self, model: dict) -> None:
         """Draft model (used by --draft-model for MTP speculative decoding)

@@ -162,10 +162,20 @@ def test_model_id_uses_local_path_when_server_actually_resolved_there():
         assert _get_model_id(model) == str(resolved)
 
 
+def test_model_id_uses_hf_cache_snapshot_when_server_resolved_there():
+    model = {
+        "backend": "mlx-vlm",
+        "hf_repo": "mlx-community/diffusiongemma-26B-A4B-it-6bit",
+    }
+    resolved = Path("/cache/models--diffusiongemma/snapshots/current")
+
+    with patch.object(MlxVlmProvider, "_model_path", return_value=resolved):
+        assert _get_model_id(model) == str(resolved)
+
+
 def test_model_id_falls_back_to_hf_repo_when_local_path_unresolved():
-    # local_path is configured but has no safetensors (e.g. empty/missing
-    # dir) — _model_path falls back to the HF snapshot, so get_model_id must
-    # report hf_repo, not the local_path the server never actually loaded.
+    # Neither the configured local directory nor an HF snapshot resolves;
+    # retain the repository identifier instead of advertising a missing path.
     model = {
         "backend": "mlx-vlm",
         "hf_repo": "mlx-community/gemma-4-26b-a4b-it-6bit",
