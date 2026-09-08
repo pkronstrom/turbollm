@@ -88,3 +88,18 @@ def test_lean_harness_headless_keeps_the_lean_flags_and_prompt(tmp_path):
         "hello",
     ]
     assert run.call_args.kwargs["env"]["PI_CODING_AGENT_DIR"] == str(lean_dir)
+
+
+def test_lean_harness_preserves_existing_config_verbatim(tmp_path):
+    lean_dir = tmp_path / "lean"
+    lean_dir.mkdir()
+    config = lean_dir / "config.yml"
+    original = "# Personal preferences\nsetupVersion: 3\ntheme: dark\n"
+    config.write_text(original)
+    harness = OmpLeanHarness({"binary": "omp", "agent_dir": str(lean_dir)})
+    model = qwen38_model()
+
+    with patch("subprocess.run"):
+        harness.launch(model["hf_repo"], 8899, model)
+
+    assert config.read_text() == original

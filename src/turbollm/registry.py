@@ -4,8 +4,10 @@ from urllib.parse import urlparse
 
 import click
 
+from turbollm.resources import asset_path
+
 CONFIG_DIR = Path.home() / ".turbollm"
-BUNDLED_TOML = Path(__file__).parent.parent.parent / "models.toml"
+BUNDLED_TOML = asset_path("models.toml", "models.toml")
 USER_TOML = CONFIG_DIR / "models.toml"
 HF_CACHE = Path.home() / ".cache" / "huggingface" / "hub"
 LEGACY_DIR = CONFIG_DIR / "models"

@@ -6,12 +6,13 @@ from pathlib import Path
 
 from turbollm.harnesses import register
 from turbollm.harnesses.omp import OmpHarness
+from turbollm.resources import asset_path
 
 
 LEAN_TOOL_FLAGS = ["--tools=read,bash,edit,write,grep,glob,lsp,ask,todo"]
 HEADLESS_TOOL_FLAGS = ["--tools=read,bash,edit,write,grep,glob,lsp,todo"]
-LEAN_PROMPT_PATH = (
-    Path(__file__).resolve().parents[3] / "integrations" / "omp" / "qwen-lean-system-prompt.md"
+LEAN_PROMPT_PATH = asset_path(
+    "qwen-lean-system-prompt.md", "integrations/omp/qwen-lean-system-prompt.md"
 )
 
 
@@ -31,6 +32,13 @@ class OmpLeanHarness(OmpHarness):
 
     def _agent_dir(self) -> Path:
         return self._lean_agent_dir
+
+    def _write_provider_config(self, model_id: str, port: int, model: dict) -> str:
+        self._lean_agent_dir.mkdir(parents=True, exist_ok=True)
+        config_path = self._lean_agent_dir / "config.yml"
+        if not config_path.exists():
+            config_path.write_text("setupVersion: 2\n")
+        return super()._write_provider_config(model_id, port, model)
 
     def _environment(self) -> dict[str, str]:
         env = os.environ.copy()
