@@ -65,8 +65,8 @@ are part of the measured difference. Hashes of the normal OMP `config.yml` and
 `models.yml` matched before and after the probes.
 
 Acceptance: retain lean OMP as an experimental optional route. Its smaller
-prompt is demonstrated, but the full interactive coding/LSP acceptance gate is
-still open.
+prompt and the file/LSP tool loop are demonstrated; broader interactive coding
+acceptance is still open.
 
 Lean OMP also completed a real tool loop: it invoked `read` on a synthetic
 fixture and returned the exact unknown marker `TURBO_READ_7c42_OK` in 46.73 s.
@@ -76,6 +76,36 @@ tool-call probe. The temporary validation server was stopped after the checks.
 Harnesses run from temporary working and agent directories. This exercises
 Turbo's provider generation and launch arguments without writing normal Pi/OMP
 profiles. It does not benchmark the user's complete extension configuration.
+
+### Follow-up: LSP and native companions
+
+Lean OMP completed a 99.89 s TypeScript probe in a temporary project with a
+project-local `typescript-language-server` on PATH. It used `lsp definition`
+to resolve `app.ts`'s `add` call to `math.ts`, then `lsp rename` to change the
+definition, import, and call to `sumNumbers`. No edit/write or shell replacement
+was used. `tsc` passed and `node dist/app.js` printed `5`; these results were
+independently checked after the agent exited. No language server was installed
+globally.
+
+Both Swift suites passed (acquirer and HUD). Real CLI hardware probes also
+passed; see `../tools/turbo-acquirer/SMOKE.md` for the recorded measurements.
+The earlier statement that this checklist was missing was incorrect: it already
+existed, but lacked current run results.
+
+Raycast's clean install initially failed because the lockfile's API version was
+below `package.json`'s requirement. After synchronization, type-checking exposed
+React 18 versus Raycast's React 19 types, an unsupported FilePicker `extensions`
+prop, a child-process error type mismatch, and an unchecked test lookup.
+The fixes align dependency versions, display file-type hints using `info`, use
+`ExecException`, and safely check the lookup. The build now includes type-checking
+and explicitly writes to local `dist/`; previously it attempted to replace the
+installed extension. `npm ci`, type-checking, 70 unit tests, and the local build
+all passed.
+
+Native window/region-picker and Raycast Stop UI checks could not be completed:
+the Computer Use tool waited for ChatGPT Accessibility and Screen Recording
+permissions. This is separate from the acquirer's own permissions, which were
+authorized and exercised successfully. No new permission grants were made.
 
 ## Repository reconciliation
 
@@ -95,12 +125,12 @@ The old Q8 migration plan is superseded by the retained Q6 profile.
 
 ## Remaining acceptance work
 
-- Manual microphone/TCC, region/window capture, and Raycast Stop checks have
-  no current recorded result. The foundation changes remain awaiting manual
-  acceptance; they are not falsely archived as fully verified. Create
-  `tools/turbo-acquirer/SMOKE.md` when performing those checks.
-- The full interactive lean OMP LSP definition/rename workflow and a meaningful
-  coding workload still need acceptance evidence.
+- Native window/region-picker, HUD Stop, and Raycast Stop UI checks remain open,
+  along with the complete capture-to-Obsidian workflow and permission-denied/
+  migration UI scenarios. CLI microphone, system+mic, full-display, and fixed
+  region probes passed. The foundation changes remain awaiting UI acceptance.
+- Lean OMP's LSP definition/rename/compile probe passed. A broader interactive
+  coding workload still needs acceptance evidence.
 - Old vllm-mlx batching restrictions and the mlx-audio local patch in
   `KNOWN_ISSUES.md` remain historical observations pending targeted rechecks.
 - Q6 vision, long-context burn-in, and controlled MTP-on/off comparisons are

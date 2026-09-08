@@ -1,5 +1,31 @@
 # Turbo-Acquirer Manual Smoke Tests
 
+## Execution record — 2026-09-08
+
+Both Swift test suites passed. The current debug acquirer was then exercised
+against real hardware, outside the filesystem sandbox. Its permissions probe
+reported `microphone: authorized` and `screenRecording: true`.
+
+| CLI probe | Observed result |
+|---|---|
+| mic-only, SIGTERM after 6 s | Exit 0; 380,928-byte valid WAVE, mono 16 kHz Float32, 5.888 s |
+| system+mic, SIGTERM after 6 s | Exit 0; 364,544-byte valid WAVE, mono 16 kHz Float32, 5.632 s |
+| full-display, SIGTERM after 6 s | Exit 0; one 1728×1117 PNG; manifest duration 4,486 ms |
+| fixed region `200,200,640,480` | Exit 0; one 640×480 PNG; manifest duration 4,469 ms |
+
+PNG signatures, dimensions, and frame timestamps within the manifest duration
+were checked. Audio metadata was validated with `afinfo`; this does not establish
+audible content quality or separation of the system and microphone sources.
+Temporary recordings were removed after inspection. Screen duration excludes
+startup and the capture-area overlay.
+
+Still open: native window selection, interactive region dragging, HUD and
+Raycast Stop, full capture-to-Obsidian output, and permission-denied/migration
+UI scenarios. Computer Use was blocked waiting for ChatGPT's Accessibility and
+Screen Recording permissions; no permission settings were changed.
+
+---
+
 Steps that require real audio hardware, real SCStream, or an active TCC
 grant cannot be driven by `pytest`. Run through this checklist after
 `turbo sidecar` completes (which builds both binaries and writes symlinks
