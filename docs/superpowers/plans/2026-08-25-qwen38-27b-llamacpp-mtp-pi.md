@@ -1,5 +1,11 @@
 # Qwen3.8 27B llama.cpp MTP + Pi Implementation Plan
 
+**Historical / superseded (2026-09-08):** The Q8 implementation was validated
+and subsequently retired on 2026-08-31. Its record is in
+`docs/qwen38-pi-validation.md`. The retained route is Q6 oMLX; do not rerun this
+plan's downloads or cutover. Generic GGUF artifact and Pi support remain useful
+and retained. Current work is recorded in `docs/stabilization-2026-09-08.md`.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Replace Turbo's dense Qwen3.6 27B MLX entry with an official Qwen3.8 27B Q8 GGUF target, native Q8 MTP head, vision projector, and correctly configured Pi integration, then refresh the local runtimes and retire the old artifacts after burn-in.

@@ -1,5 +1,10 @@
 # Isolated Lean OMP Profile for Qwen3.8 Implementation Plan
 
+**Status (2026-09-08):** The harness and registry integration are implemented
+(`ad0a095`, `cbe59a2`). The Q8 commands below are historical; use the retained
+`qwen38-27b-oq6e-mtp` profile. Current acceptance results and remaining manual
+checks are tracked in `docs/stabilization-2026-09-08.md`.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add `turbo omp-lean` as an opt-in Qwen3.8 OMP launcher with isolated state, a small direct tool surface plus LSP, and only the vault skills advertised.

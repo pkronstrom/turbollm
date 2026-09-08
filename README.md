@@ -131,7 +131,7 @@ configured providers, then launches the model at its configured effort.
 
 With no model argument, `turbo omp-lean` offers to attach to an already-running compatible Turbo server or start a new server on the next free local port and open the model picker. It never stops the running server.
 
-The lean route is experimental. Measure its prompt-token footprint before relying on it as a low-overhead route; use `turbo omp` when the full OMP tool surface is needed.
+The lean route is experimental. A [local smoke comparison](docs/stabilization-2026-09-08.md) measured 8,587 input tokens versus 23,917 for full OMP; interactive coding and LSP acceptance remain open. Use `turbo omp` when the full OMP tool surface is needed.
 
 ### Qwen3.8 oMLX Q6 MTP
 

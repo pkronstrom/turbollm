@@ -4,6 +4,15 @@
 **Scope**: Whole repo — Python core (`src/turbollm/`, ~5.3k lines), Swift sidecar (`tools/turbo-acquirer/`, ~2k lines), Raycast extension (`tools/raycast-turbo/`). Audited by four parallel review agents (CLI/workflows, providers/harnesses, transcribe/prune/activity/plugins, tools), cross-verified against call sites. Test suite: 226/226 passing.
 **Health Score**: Needs Work — architecture and hygiene are genuinely good; the issues are concentrated in a handful of lifecycle/precedence bugs, one of which (context-window truth) is systemic.
 
+## Status update — 2026-09-08
+
+This is a historical audit. Follow-up commits `c96315d`, `e916432`, and
+`ec96d99` implemented Python, acquirer, and Raycast fixes. For example,
+`registry.effective_context` now exists and workflow locking opens without
+truncation before acquiring the lock. Do not treat the original findings below
+as a current unresolved backlog. The separate wheel-packaging defect is addressed
+in the September stabilization work; see `../stabilization-2026-09-08.md`.
+
 ## Executive Summary
 
 The codebase is well-architected for its size: pluggable providers/harnesses via Protocols with lazy imports, a lean plugin system, kernel-flock workflow locking, atomic activity-file writes, and consistently documented *why*-comments. Tests all pass.

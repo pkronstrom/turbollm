@@ -2,6 +2,14 @@
 
 Issues that affect turbollm model serving. Re-check these periodically as upstream projects update.
 
+## Status of this document (2026-09-08)
+
+The dated backend observations below are historical, not a current compatibility
+matrix. The retained Qwen3.8 profile now uses oMLX Q6 native MTP; see
+[`docs/stabilization-2026-09-08.md`](docs/stabilization-2026-09-08.md) for current
+checks and outstanding validation. April's vllm-mlx restrictions and May's
+mlx-audio local patch have not been revalidated against every installed backend.
+
 ## TurboHUD — Phase 1 architecture notes
 
 ### TCC re-grant required after Phase 1 upgrade
