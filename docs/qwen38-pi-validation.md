@@ -1,4 +1,4 @@
-# Qwen3.8 27B Q8 + MTP / Pi validation
+# Qwen3.8 27B Q8 + MTP / Pi historical validation
 
 Date: 2026-08-25  
 Machine: Apple M4 Max, 128 GB unified memory  
@@ -123,3 +123,7 @@ The runtime and quality gates passed. The exact Qwen3.6 27B target and MTP cache
 roots were permanently removed on 2026-08-25, reclaiming about 28.3 GB. They are
 recoverable by downloading them again from Hugging Face. The separate Qwen3.6
 35B-A3B profile was not removed.
+
+The Q8 GGUF target, MTP draft, and vision projector were removed on 2026-08-31
+after the native-MTP oMLX Q6 profile became the retained Qwen3.8 route. This
+record remains as the measured validation of the removed implementation.

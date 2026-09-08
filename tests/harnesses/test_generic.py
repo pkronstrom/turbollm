@@ -10,10 +10,10 @@ from turbollm.harnesses.opencode import OpenCodeHarness
 
 
 def test_launch_formats_model_id_and_port_into_cmd_and_env():
-    harness = GenericHarness("goose", {
-        "binary": "goose",
-        "cmd": ["goose"],
-        "env": {"GOOSE_MODEL": "{model_id}", "OPENAI_HOST": "http://127.0.0.1:{port}"},
+    harness = GenericHarness("example-agent", {
+        "binary": "example-agent",
+        "cmd": ["example-agent"],
+        "env": {"AGENT_MODEL": "{model_id}", "OPENAI_HOST": "http://127.0.0.1:{port}"},
     })
 
     captured = {}
@@ -25,8 +25,8 @@ def test_launch_formats_model_id_and_port_into_cmd_and_env():
     with patch("subprocess.run", side_effect=fake_run):
         harness.launch("org/model", 8899, {})
 
-    assert captured["cmd"] == ["goose"]
-    assert captured["env"]["GOOSE_MODEL"] == "org/model"
+    assert captured["cmd"] == ["example-agent"]
+    assert captured["env"]["AGENT_MODEL"] == "org/model"
     assert captured["env"]["OPENAI_HOST"] == "http://127.0.0.1:8899"
 
 

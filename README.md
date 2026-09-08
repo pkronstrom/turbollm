@@ -2,7 +2,7 @@
 
 > ⚠️ **Early-stage project.** This is actively under development and rough around the edges — APIs, defaults, and command surface may shift between releases. Tested on the author's machine; mileage may vary. Issues and PRs welcome.
 
-Ollama-like CLI for local LLM serving on Apple Silicon. Supports multiple backends (vllm-mlx, llama-server) and multiple agent harnesses (opencode, hermes, goose, codex, aichat, qwen-code) with a unified interface.
+Ollama-like CLI for local LLM serving on Apple Silicon. Supports multiple backends (vllm-mlx, llama-server) and multiple agent harnesses (opencode, hermes, pi, omp, codex, aichat, qwen-code) with a unified interface.
 
 ## Install
 
@@ -24,6 +24,9 @@ Turbo bootstraps user config into `~/.turbollm/` on first run:
 - `~/.turbollm/.env` is loaded for user-specific environment variables
 - bundled `models.toml` is only used to seed `~/.turbollm/models.toml` if it does not exist yet
 
+Goose support has been retired. Existing user registries are preserved on
+upgrade; remove their `[harnesses.goose]` section to retire the command there too.
+
 ### Backends
 
 Backends are the actual model servers. Install at least one; turbo only uses
@@ -38,7 +41,7 @@ brew install llama.cpp
 
 # Optional extras:
 brew tap jundot/omlx && brew install omlx   # omlx — alternative MLX server
-uv tool install mlx-vlm                     # mlx-vlm — vision-language MLX models
+uv tool install --with jinja2 mlx-vlm       # mlx-vlm — vision-language MLX models
 uv tool install mlx-audio                   # mlx-audio — Parakeet/ASR (used by `turbo transcribe`)
 ```
 
@@ -53,16 +56,16 @@ backend isn't installed, turbo prints the install hint and exits.
 turbo ls -a
 
 # Pull a model (alias, owner/repo, or HuggingFace URL)
-turbo pull qwen38-27b-q8-mtp
+turbo pull qwen38-27b-oq6e-mtp
 
 # List downloaded models
 turbo ls
 
 # Serve a model (auto-detects backend)
-turbo serve qwen38-27b-q8-mtp
+turbo serve qwen38-27b-oq6e-mtp
 
 # Remove a model
-turbo rm qwen38-27b-q8-mtp
+turbo rm qwen38-27b-oq6e-mtp
 ```
 
 ## Harnesses (agent CLIs)
@@ -82,13 +85,12 @@ turbo claude [model]       # Claude Code (Anthropic Messages API)
 turbo opencode [model]     # OpenCode IDE
 turbo pi [model]           # pi-coding-agent (default for headless reasoning)
 turbo hermes [model]       # Hermes Agent
-turbo goose [model]        # Goose
 turbo codex [model]        # OpenAI Codex CLI
 turbo aichat [model]       # AIChat
 turbo qwen-code [model]    # Qwen Code
 
 # Or use the generic run command
-turbo run [model] -H goose
+turbo run [model] -H pi
 ```
 
 Install commands for the harnesses above (same hints `turbo ls -a` prints):
@@ -100,42 +102,41 @@ npm install -g @earendil-works/pi-coding-agent # pi
 brew install --cask codex                     # codex
 brew install aichat                           # aichat
 brew install qwen-code                        # qwen-code
-# goose, hermes — see `turbo ls -a` Install column for the latest URL
+# hermes — see `turbo ls -a` Install column for the installer URL
 ```
 
 ### Recommended Qwen3.8 + Pi setup
 
-The quality-first local coding profile uses the official Qwen3.8 27B Q8 GGUF,
-its native Q8 MTP head, and the Q8 vision projector through `llama-server`:
+The local coding profile uses the 6-bit MLX Qwen3.8 checkpoint and oMLX's
+native MTP:
 
 ```bash
-turbo pull qwen38-27b-q8-mtp
-turbo pi qwen38-27b-q8-mtp
-turbo pi qwen38-27b-q8-mtp --thinking xhigh
-turbo omp qwen38-27b-q8-mtp
+turbo pull qwen38-27b-oq6e-mtp
+turbo pi qwen38-27b-oq6e-mtp
+turbo pi qwen38-27b-oq6e-mtp --thinking xhigh
+turbo omp qwen38-27b-oq6e-mtp
 ```
 
 Pi defaults to `medium`; Qwen3.8 supports exactly `low`, `medium`, and
 `xhigh`. Turbo sends Qwen's official thinking sampler and preserves thinking
-across turns. MTP drafts are verified by the Q8 target, so disabling MTP after
-a failed performance/stability check retains the same target-model quality.
-Keep the prior dense Qwen3.6 files until the Qwen3.8 Pi/tool/cache burn-in has
-passed; `turbo rm` removes target, draft, and projector artifacts together.
+across turns. Native MTP remains configured in oMLX, which verifies every
+draft token before it is committed.
 `turbo omp` also participates in the normal Turbo model picker. It writes only
 the selected Turbo provider into OMP's native `models.yml`, preserving other
 configured providers, then launches the model at its configured effort.
 
 ### Lean local OMP profile
 
-`turbo omp-lean qwen38-27b-q8-mtp` starts an isolated OMP profile for local Qwen coding. It exposes file tools, Bash, LSP, ask, todo, and only the `vault-mcp` / `vault-skills` catalogue. It never changes the normal `turbo omp` profile, sessions, extensions, or configuration.
+`turbo omp-lean qwen38-27b-oq6e-mtp` starts an isolated OMP profile for local Qwen coding. It exposes file tools, Bash, LSP, ask, todo, and only the `vault-mcp` / `vault-skills` catalogue. It never changes the normal `turbo omp` profile, sessions, extensions, or configuration.
 
 With no model argument, `turbo omp-lean` offers to attach to an already-running compatible Turbo server or start a new server on the next free local port and open the model picker. It never stops the running server.
 
 The lean route is experimental. Measure its prompt-token footprint before relying on it as a low-overhead route; use `turbo omp` when the full OMP tool surface is needed.
 
-### Qwen3.8 oMLX Q6 MTP experiment
+### Qwen3.8 oMLX Q6 MTP
 
-`turbo pull qwen38-27b-oq6e-mtp` installs the separate `Jundot/Qwen3.8-27B-oQ6e-mtp` 6-bit MLX checkpoint under `~/.models`. Turbo configures oMLX native MTP for that model while retaining the Q8 GGUF entry as the quality baseline.
+`turbo pull qwen38-27b-oq6e-mtp` installs the `Jundot/Qwen3.8-27B-oQ6e-mtp` 6-bit MLX checkpoint under `~/.models`. Turbo configures oMLX native MTP for this model; use oMLX 0.6.4 or newer.
+
 
 To make OMP lazily start a selected Turbo model on its first request, install
 the bundled extension globally for OMP:

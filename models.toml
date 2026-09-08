@@ -86,13 +86,6 @@ binary = "hermes"
 install = "curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash"
 # Uses custom launcher (temp HERMES_HOME with config.yaml pointing at turbo server)
 
-[harnesses.goose]
-binary = "goose"
-install = "curl -fsSL https://github.com/aaif-goose/goose/releases/download/stable/download_cli.sh | bash"
-cmd = ["goose"]
-# goose reads OPENAI_HOST (not OPENAI_BASE_URL) for the OpenAI provider endpoint
-env = { GOOSE_PROVIDER = "openai", GOOSE_MODEL = "{model_id}", OPENAI_HOST = "http://127.0.0.1:{port}" }
-
 [harnesses.codex]
 binary = "codex"
 install = "brew install --cask codex"
@@ -191,60 +184,6 @@ default_chat_template_kwargs = { preserve_thinking = true }
 # chunked_prefill_tokens = 2048  # chunked prefill corrupts cross-chunk attention
 # specprefill = true             # draft KV mismatch with target (vllm#36872)
 
-[models.qwen38-27b-q8-mtp]
-name = "Qwen3.8 27B Q8 + native MTP"
-backend = "gguf"
-hf_repo = "ggml-org/Qwen3.8-27B-GGUF"
-hf_file = "Qwen3.8-27B-Q8_0.gguf"
-local_path = "~/.models/ggml-org/Qwen3.8-27B-GGUF"
-draft_hf_repo = "ggml-org/Qwen3.8-27B-GGUF"
-draft_hf_file = "mtp-Qwen3.8-27B-Q8_0.gguf"
-draft_local_path = "~/.models/ggml-org/Qwen3.8-27B-GGUF"
-mmproj_hf_repo = "ggml-org/Qwen3.8-27B-GGUF"
-mmproj_hf_file = "mmproj-Qwen3.8-27B-Q8_0.gguf"
-mmproj_local_path = "~/.models/ggml-org/Qwen3.8-27B-GGUF"
-strict_artifacts = true
-size_gb = 30
-min_memory_gb = 48
-tool_use = true
-can_reason = true
-input = ["text", "image"]
-tags = ["coding", "dense", "qwen", "vision", "mtp", "q8"]
-
-# Native Qwen3.8 context on the 128GB M4 Max. One llama.cpp slot owns the
-# full window; Pi compacts explicitly instead of relying on context shifting.
-context_default = 262144
-context_max = 262144
-sampling = "qwen38-thinking"
-kv_quant = "off"
-
-[models.qwen38-27b-q8-mtp.server]
-ngl = "all"
-draft_ngl = "all"
-batch = 512
-ubatch = 512
-parallel = 1
-flash_attention = "on"
-no_context_shift = true
-cache_prompt = true
-reasoning_preserve = true
-jinja = true
-spec_type = "draft-mtp"
-spec_draft_n_max = 3
-draft_cache_type_k = "f16"
-draft_cache_type_v = "f16"
-required_flags = ["--spec-type", "--spec-draft-n-max", "--spec-draft-model", "--reasoning-preserve", "--mmproj"]
-
-[models.qwen38-27b-q8-mtp.pi]
-# Qwen's benchmark recipe uses a 32K generation ceiling. The model supports
-# only low, medium, and xhigh reasoning; medium balances agent quality/speed.
-max_tokens = 32768
-thinking = "medium"
-thinking_levels = ["low", "medium", "xhigh"]
-
-[models.qwen38-27b-q8-mtp.pi.compat]
-thinkingFormat = "chat-template"
-chatTemplateKwargs = { enable_thinking = { "$var" = "thinking.enabled" }, preserve_thinking = true, reasoning_effort = { "$var" = "thinking.effort" } }
 
 [models.qwen38-27b-oq6e-mtp]
 name = "Qwen3.8 27B oQ6e + native MTP"
@@ -358,42 +297,6 @@ thinkingFormat = "qwen-chat-template"
 requiresToolResultName = true
 requiresAssistantAfterToolResult = true
 
-[models.diffusiongemma-26b-a4b-it-mlx-6bit]
-name = "DiffusionGemma 26B-A4B IT MLX 6bit"
-backend = "mlx-vlm"
-# Block-diffusion LLM: denoises a 256-token canvas for up to 48 steps.
-# Requires mlx-vlm 0.6.3+; vllm-mlx has no diffusion_gemma backend.
-hf_repo = "mlx-community/diffusiongemma-26B-A4B-it-6bit"
-size_gb = 22
-# Smoke-tested 2026-06-11 (mlx-vlm 0.6.3, server path): peak ~24 GB at short ctx,
-# coherent block-diffusion output. min set to 32 for KV headroom at longer ctx.
-min_memory_gb = 32
-# DiffusionGemma emits bare Gemma calls like `call:ls{path:.}`; the mlx-vlm
-# shim below rewrites those completions into structured OpenAI tool_calls for pi.
-tool_use = true
-can_reason = false
-tags = ["diffusion", "moe", "vision", "gemma", "6bit", "experimental"]
-
-# config.json text_config.max_position_embeddings = 262144. Keep the default
-# lower for first-use safety; the picker can raise it after smoke testing.
-context_default = 32768
-context_max = 262144
-
-kv_quant = "off"
-
-[models.diffusiongemma-26b-a4b-it-mlx-6bit.server]
-timeout = 600
-trust_remote_code = true
-tool_call_shim = "gemma4_bare"
-
-[models.diffusiongemma-26b-a4b-it-mlx-6bit.pi]
-reasoning = false
-thinking = "off"
-max_tokens = 1024
-
-[models.diffusiongemma-26b-a4b-it-mlx-6bit.pi.compat]
-requiresToolResultName = true
-requiresAssistantAfterToolResult = true
 
 # NOTE (2026-06-09): Gemma 4 MTP on mlx-vlm 0.6.2 does NOT speed up the server
 # (continuous-batching) path — drafter loads but batched decode sees ~0 gain

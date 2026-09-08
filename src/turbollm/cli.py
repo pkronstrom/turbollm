@@ -1487,7 +1487,7 @@ def hud_status_clear(activity_id):
 
 @cli.command(name="run")
 @click.argument("model", required=False)
-@click.option("--harness", "-H", required=True, help="Harness to launch (e.g. goose, hermes)")
+@click.option("--harness", "-H", required=True, help="Harness to launch (e.g. pi, hermes)")
 @_harness_common_options
 def run_cmd(model, harness, port, backend, prompt, context_window, thinking):
     """Start model server + launch a harness by name."""
