@@ -23,7 +23,7 @@ describe("extension scaffold", () => {
     expect(fixedNames).toContain("run-workflow");
     expect(fixedNames).toContain("running-workflows");
     const runWorkflow = pkg.commands.find((c: { name: string }) => c.name === "run-workflow");
-    expect(runWorkflow.mode).toBe("view");
+    expect(runWorkflow?.mode).toBe("view");
   });
 
   it("tsconfig.json is valid JSON", () => {

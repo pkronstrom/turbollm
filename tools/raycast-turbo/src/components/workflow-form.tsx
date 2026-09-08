@@ -347,7 +347,7 @@ function renderField(param: WorkflowParam, defaults: Record<string, string>) {
           allowMultipleSelection={false}
           canChooseFiles={param.type === "file"}
           canChooseDirectories={param.type === "directory"}
-          extensions={param.type === "file" ? getAllowedExtensions(param) : undefined}
+          info={getAllowedExtensions(param)?.map((ext) => `.${ext}`).join(", ")}
         />
       );
     default:

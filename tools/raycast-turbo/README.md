@@ -63,11 +63,22 @@ When you invoke a workflow from Raycast — either via the generic **Run Turboll
 ## Development
 
 ```bash
+# Install exactly the locked development dependencies
+npm ci
+
 # Run unit tests (no Raycast runtime needed)
 npm test
 
 # Type-check
-npx tsc --noEmit
+npm run typecheck
+
+# Type-check and build into ./dist without replacing the installed extension
+npm run build
 ```
+
+The React and Node type versions match the Raycast API's dependencies. Keep
+`package-lock.json` synchronized when changing them. The file picker shows
+extension hints through its info text; the Raycast API does not expose an
+extension-filter property.
 
 Tests use [vitest](https://vitest.dev) with `@raycast/api` aliased to a stub file at `test/__mocks__/raycast-api.ts`, so they run in plain Node without a Raycast environment.

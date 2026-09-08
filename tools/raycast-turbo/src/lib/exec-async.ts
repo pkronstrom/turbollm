@@ -1,4 +1,4 @@
-import { exec } from "child_process";
+import { exec, type ExecException } from "child_process";
 
 /**
  * Wraps `child_process.exec` in a promise that preserves `{stdout, stderr}`
@@ -13,7 +13,7 @@ export function execAsync(cmd: string): Promise<{ stdout: string; stderr: string
   return new Promise((resolve, reject) => {
     exec(cmd, (err, stdout, stderr) => {
       if (err) {
-        const wrapped: NodeJS.ErrnoException & { stderr?: string } = err;
+        const wrapped: ExecException & { stderr?: string } = err;
         wrapped.stderr = stderr;
         reject(wrapped);
       } else {
