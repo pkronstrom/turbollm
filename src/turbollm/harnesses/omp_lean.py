@@ -9,8 +9,8 @@ from turbollm.harnesses.omp import OmpHarness
 from turbollm.resources import asset_path
 
 
-LEAN_TOOL_FLAGS = ["--tools=read,bash,edit,write,grep,glob,lsp,ask,todo"]
-HEADLESS_TOOL_FLAGS = ["--tools=read,bash,edit,write,grep,glob,lsp,todo"]
+LEAN_TOOL_FLAGS = ["--tools=read,bash,edit,write,grep,glob,lsp,ask,todo,web_search"]
+HEADLESS_TOOL_FLAGS = ["--tools=read,bash,edit,write,grep,glob,lsp,todo,web_search"]
 LEAN_PROMPT_PATH = asset_path(
     "qwen-lean-system-prompt.md", "integrations/omp/qwen-lean-system-prompt.md"
 )
