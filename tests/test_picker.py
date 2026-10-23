@@ -76,11 +76,11 @@ def test_thinking_toggle_shown_for_gguf_and_vllm_mlx():
 
 # --- _build_entry: omlx context selector collapses to a single value -------
 
-def test_omlx_context_options_collapse_to_single_value():
+def test_omlx_context_options_use_native_prompt_limit():
     model = _model(backend="omlx", context_default=32768, context_max=131072)
     entry = picker._build_entry("m", model, "omlx")
-    assert entry.ctx_options_k == (32,)
-    assert entry.ctx_idx == 0
+    assert entry.ctx_options_k == (16, 32, 64, 96, 128)
+    assert entry.ctx_idx == 1
 
 
 def test_non_omlx_context_options_use_ladder():
@@ -91,8 +91,8 @@ def test_non_omlx_context_options_use_ladder():
 
 # --- context_override_for ---------------------------------------------------
 
-def test_context_override_for_omlx_is_empty():
-    assert picker.context_override_for(_model(backend="omlx"), 65536) == {}
+def test_context_override_for_omlx_uses_prompt_limit():
+    assert picker.context_override_for(_model(backend="omlx"), 65536) == {"max_context_window": 65536}
 
 
 def test_context_override_for_gguf_uses_context_key():

@@ -105,14 +105,21 @@ enum MenuBuilder {
     /// Test seam: override to avoid spawning turbo-acquirer during unit tests.
     static var permissionsStateOverride: PermissionState? = nil
 
-    /// Reads TCC state by running `turbo-acquirer permissions-state`.
-    /// Falls back to direct TCC query if the binary is not found.
-    /// Results are cached inside `turbo-acquirer` itself (1-second file TTL).
+    private static let permissionCache = PermissionStateCache {
+        runPermissionsStateSubprocess() ?? Permissions.state()
+    }
+
+    /// Pure cached read: building a menu never launches or waits for a process.
     static func permissionsState() -> PermissionState {
+        permissionsStateOverride ?? permissionCache.state
+    }
+
+    static func refreshPermissions(completion: @escaping (PermissionState) -> Void) {
         if let override = permissionsStateOverride {
-            return override
+            completion(override)
+        } else {
+            permissionCache.refresh(completion: completion)
         }
-        return runPermissionsStateSubprocess() ?? Permissions.state()
     }
 
     private static func runPermissionsStateSubprocess() -> PermissionState? {
@@ -125,20 +132,10 @@ enum MenuBuilder {
         guard let binaryPath = candidates.first(where: { FileManager.default.isExecutableFile(atPath: $0) }) else {
             return nil
         }
-        let proc = Process()
-        proc.executableURL = URL(fileURLWithPath: binaryPath)
-        proc.arguments = ["permissions-state"]
-        let pipe = Pipe()
-        proc.standardOutput = pipe
-        proc.standardError = Pipe()
-        do {
-            try proc.run()
-            proc.waitUntilExit()
-        } catch {
-            return nil
-        }
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        return parsePermissionsJSON(data)
+        guard let result = try? BoundedSubprocess.run(
+            executable: binaryPath, arguments: ["permissions-state"], timeout: 3),
+              !result.timedOut, result.status == 0 else { return nil }
+        return parsePermissionsJSON(result.stdout)
     }
 
     private static func parsePermissionsJSON(_ data: Data) -> PermissionState? {

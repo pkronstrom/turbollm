@@ -46,6 +46,7 @@ def test_lean_harness_can_launch_a_new_server_when_port_is_occupied(monkeypatch)
     )
     monkeypatch.setattr(turbo_cli, "_server_is_running", lambda port: port == 8899)
     monkeypatch.setattr(turbo_cli, "_get_running_model", lambda port: running)
+    monkeypatch.setattr(turbo_cli, "_read_port_stamp", lambda port: None)
     monkeypatch.setattr(turbo_cli.click, "prompt", lambda *args, **kwargs: "launch-new-server")
     monkeypatch.setattr(turbo_cli, "_next_free_port", lambda port: 8901)
     monkeypatch.setattr(turbo_cli, "pick_model", lambda requires_backend: ("picked", selected))
@@ -73,6 +74,7 @@ def test_lean_harness_attaches_to_running_server_when_selected(monkeypatch):
     )
     monkeypatch.setattr(turbo_cli, "_server_is_running", lambda port: port == 8899)
     monkeypatch.setattr(turbo_cli, "_get_running_model", lambda port: running)
+    monkeypatch.setattr(turbo_cli, "_read_port_stamp", lambda port: None)
     monkeypatch.setattr(turbo_cli.click, "prompt", lambda *args, **kwargs: "use-running-server")
     monkeypatch.setattr(
         turbo_cli,

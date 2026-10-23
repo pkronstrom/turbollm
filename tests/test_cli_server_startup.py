@@ -17,164 +17,61 @@ class _Provider:
     def is_available(self):
         return True
 
+    def get_model_id(self, model):
+        return model["hf_repo"]
+
     def build_serve_cmd(self, model, port):
         return ["fake-server", "--port", str(port)]
 
 
-class _FailedProcess:
-    returncode = 2
-
-    def poll(self):
-        return self.returncode
-
-    def terminate(self):
-        pass
-
-    def wait(self):
-        return self.returncode
-
-
-def test_run_with_server_prints_backend_log_when_startup_fails(capsys, tmp_path):
-    model = {"name": "Broken Model", "hf_repo": "fake/broken", "backend": "fake"}
-    backend_log = "bind: address already in use\ntraceback line\n"
-
-    def fake_popen(_cmd, **kwargs):
-        stream = kwargs.get("stdout")
-        if hasattr(stream, "write"):
-            stream.write(backend_log)
-            stream.flush()
-        return _FailedProcess()
-
+def test_run_with_server_reports_startup_diagnostics(capsys, tmp_path):
+    import click
+    model = {"name": "Broken", "hf_repo": "fake/broken", "backend": "fake"}
     with patch.object(turbo_cli, "_server_is_running", return_value=False), patch.object(
         turbo_cli, "_get_provider_for", return_value=_Provider()
-    ), patch.object(turbo_cli.time, "sleep", return_value=None), patch.object(
-        turbo_cli.subprocess, "Popen", side_effect=fake_popen
-    ), patch.object(turbo_cli, "TURBOLLM_STATE_DIR", tmp_path / "state"):
-        with pytest.raises(SystemExit):
+    ), patch("turbollm.server_process.start_background", side_effect=click.ClickException("Backend log: bind failed")):
+        with pytest.raises(click.ClickException, match="bind failed"):
             turbo_cli._run_with_server(model, 8899, lambda _m, _p: None)
-
-    captured = capsys.readouterr()
-    # _run_with_server routes all status/error lines to stderr so they cannot
-    # leak into stdout-piping callers (e.g. `turbo transcribe | pi`). Backend
-    # log dumps go through the same stderr console.
-    err = captured.err
-    assert captured.out == ""
-    assert "Backend log" in err
-    assert "bind: address already in use" in err
+    assert capsys.readouterr().out == ""
 
 
-class _RunningProcess:
-    """Fake Popen that never exits on its own — used to exercise the
-    startup-success path and the teardown (terminate/wait) sequence."""
-
-    def __init__(self):
-        self._terminated = False
-        self.killed = False
-        self.wait_calls = []
-
-    def poll(self):
-        return None if not self._terminated else 0
-
-    def terminate(self):
-        self._terminated = True
-
-    def kill(self):
-        self.killed = True
-        self._terminated = True
-
-    def wait(self, timeout=None):
-        self.wait_calls.append(timeout)
-        return 0
+@pytest.mark.parametrize("keep_alive", [False, True])
+def test_run_with_server_stops_owned_server_only_when_ephemeral(keep_alive, tmp_path):
+    model = {"name": "Good", "hf_repo": "fake/good", "backend": "fake", "server": {"keep_alive": keep_alive}}
+    info = {"token": "our-launch"}
+    with patch.object(turbo_cli, "_server_is_running", return_value=False), patch.object(
+        turbo_cli, "_get_provider_for", return_value=_Provider()
+    ), patch("turbollm.server_process.start_background", return_value=info), patch(
+        "turbollm.server_process.read_status", return_value=info
+    ), patch("turbollm.server_process.stop_background") as stop, patch.object(turbo_cli, "TURBOLLM_STATE_DIR", tmp_path):
+        assert turbo_cli._run_with_server(model, 8899, lambda _m, _p: 17) == 17
+    assert stop.called is (not keep_alive)
 
 
-def test_run_with_server_writes_and_clears_port_stamp(tmp_path):
-    """Fix for BUG (item 6): harness/transcribe auto-started servers must get
-    a port stamp too, not just `turbo serve` — otherwise the --context-window
-    guard on attaching harnesses silently skips validation. The stamp must
-    also be cleared once the launch_fn returns."""
-    model = {
-        "name": "Good Model",
-        "hf_repo": "fake/good",
-        "backend": "fake",
-        "context_default": 65536,
-    }
-    proc = _RunningProcess()
-    state_dir = tmp_path / "state"
-
-    seen_stamp = {}
-
-    def fake_launch(_m, _p):
-        # Capture the stamp contents while the server is "up".
-        stamp_path = turbo_cli._port_stamp_path(8899)
-        seen_stamp.update(turbo_cli.json.loads(stamp_path.read_text()))
-        return 0
-
-    with patch.object(
-        turbo_cli, "_server_is_running", side_effect=[False, True, True]
-    ), patch.object(turbo_cli, "_get_provider_for", return_value=_Provider()), patch.object(
-        turbo_cli.time, "sleep", return_value=None
-    ), patch.object(turbo_cli.subprocess, "Popen", return_value=proc), patch.object(
-        turbo_cli, "TURBOLLM_STATE_DIR", state_dir
-    ):
-        rc = turbo_cli._run_with_server(model, 8899, fake_launch)
-
-    assert rc == 0
-    assert seen_stamp.get("max_tokens") == 65536
-    # Stamp is cleared once we own it and the run completes.
-    assert not (state_dir / "port-8899.json").exists()
+def test_run_with_server_cleans_up_after_client_failure(tmp_path):
+    model = {"name": "Good", "hf_repo": "fake/good", "backend": "fake"}
+    info = {"token": "our-launch"}
+    def fail(_m, _p):
+        raise RuntimeError("client failed")
+    with patch.object(turbo_cli, "_server_is_running", return_value=False), patch.object(
+        turbo_cli, "_get_provider_for", return_value=_Provider()
+    ), patch("turbollm.server_process.start_background", return_value=info), patch(
+        "turbollm.server_process.read_status", return_value=info
+    ), patch("turbollm.server_process.stop_background") as stop:
+        with pytest.raises(RuntimeError, match="client failed"):
+            turbo_cli._run_with_server(model, 8899, fail)
+    stop.assert_called_once()
 
 
-def test_run_with_server_teardown_escalates_to_kill_on_timeout(tmp_path):
-    """Fix for BUG-18: a server that ignores SIGTERM (terminate()) must be
-    force-killed after a bounded wait instead of hanging teardown forever."""
-    model = {"name": "Good Model", "hf_repo": "fake/good", "backend": "fake"}
-
-    class _HangingProcess(_RunningProcess):
-        def wait(self, timeout=None):
-            self.wait_calls.append(timeout)
-            if timeout is not None and not self.killed:
-                raise subprocess.TimeoutExpired(cmd="fake-server", timeout=timeout)
-            return 0
-
-        def poll(self):
-            # Stays "alive" (None) until kill() has been called.
-            return None if not self.killed else 0
-
-    proc = _HangingProcess()
-
-    with patch.object(
-        turbo_cli, "_server_is_running", side_effect=[False, True, True]
-    ), patch.object(turbo_cli, "_get_provider_for", return_value=_Provider()), patch.object(
-        turbo_cli.time, "sleep", return_value=None
-    ), patch.object(turbo_cli.subprocess, "Popen", return_value=proc), patch.object(
-        turbo_cli, "TURBOLLM_STATE_DIR", tmp_path / "state"
-    ):
+def test_run_with_server_does_not_stop_replacement(tmp_path):
+    model = {"name": "Good", "hf_repo": "fake/good", "backend": "fake"}
+    with patch.object(turbo_cli, "_server_is_running", return_value=False), patch.object(
+        turbo_cli, "_get_provider_for", return_value=_Provider()
+    ), patch("turbollm.server_process.start_background", return_value={"token": "ours"}), patch(
+        "turbollm.server_process.read_status", return_value={"token": "replacement"}
+    ), patch("turbollm.server_process.stop_background") as stop:
         turbo_cli._run_with_server(model, 8899, lambda _m, _p: 0)
-
-    assert proc.killed, "teardown must escalate to kill() after wait(timeout=...) expires"
-
-
-# ---------------------------------------------------------------------------
-# `_clear_port_stamp_if_owned` — losing-race protection (BUG-9)
-# ---------------------------------------------------------------------------
-
-
-def test_clear_port_stamp_if_owned_deletes_own_stamp(tmp_path):
-    with patch.object(turbo_cli, "TURBOLLM_STATE_DIR", tmp_path):
-        turbo_cli._write_port_stamp(9999, "some-alias", max_tokens=1000)
-        turbo_cli._clear_port_stamp_if_owned(9999)
-        assert not turbo_cli._port_stamp_path(9999).exists()
-
-
-def test_clear_port_stamp_if_owned_leaves_other_pid_stamp(tmp_path):
-    """A losing `turbo serve` (bind failed because the port was already busy)
-    must not delete the winning process's stamp in its own `finally` cleanup."""
-    with patch.object(turbo_cli, "TURBOLLM_STATE_DIR", tmp_path):
-        stamp_path = turbo_cli._port_stamp_path(9999)
-        stamp_path.parent.mkdir(parents=True, exist_ok=True)
-        stamp_path.write_text(turbo_cli.json.dumps({"alias": "winner", "pid": 424242}))
-        turbo_cli._clear_port_stamp_if_owned(9999)
-        assert stamp_path.exists()
+    stop.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

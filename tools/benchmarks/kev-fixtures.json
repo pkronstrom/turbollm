@@ -1,0 +1,974 @@
+{
+  "name": "turbollm-decision-smoke-v1",
+  "description": "Hand-written synthetic local smoke fixture, not the September206 benchmark or a general accuracy study. Score labels are argmax level indices, not rounded expected scores. Ambiguous probes are unscored.",
+  "cases": [
+    {
+      "id": "route-0",
+      "request": {
+        "state": "My card was charged twice for order 1182. Please refund the duplicate charge.",
+        "model": "kev-latest",
+        "questions": {
+          "decision": {
+            "type": "choice",
+            "instructions": "Which single team should handle the customer's request? Use none if no team matches.",
+            "criteria": {
+              "billing": "Card charges, invoices, and refunds for duplicate charges",
+              "shipping": "Parcel delivery status and lost parcels",
+              "returns": "Returning damaged goods or exchanging an incorrect item",
+              "security": "Account takeover and unauthorized sign-ins",
+              "none": "None of the named teams handles the request"
+            }
+          }
+        }
+      },
+      "expected": "billing"
+    },
+    {
+      "id": "route-1",
+      "request": {
+        "state": "Where is my parcel? Tracking has not updated for a week.",
+        "model": "kev-latest",
+        "questions": {
+          "decision": {
+            "type": "choice",
+            "instructions": "Which single team should handle the customer's request? Use none if no team matches.",
+            "criteria": {
+              "billing": "Card charges, invoices, and refunds for duplicate charges",
+              "shipping": "Parcel delivery status and lost parcels",
+              "returns": "Returning damaged goods or exchanging an incorrect item",
+              "security": "Account takeover and unauthorized sign-ins",
+              "none": "None of the named teams handles the request"
+            }
+          }
+        }
+      },
+      "expected": "shipping"
+    },
+    {
+      "id": "route-2",
+      "request": {
+        "state": "The shoes arrived in the wrong size. I need an exchange.",
+        "model": "kev-latest",
+        "questions": {
+          "decision": {
+            "type": "choice",
+            "instructions": "Which single team should handle the customer's request? Use none if no team matches.",
+            "criteria": {
+              "billing": "Card charges, invoices, and refunds for duplicate charges",
+              "shipping": "Parcel delivery status and lost parcels",
+              "returns": "Returning damaged goods or exchanging an incorrect item",
+              "security": "Account takeover and unauthorized sign-ins",
+              "none": "None of the named teams handles the request"
+            }
+          }
+        }
+      },
+      "expected": "returns"
+    },
+    {
+      "id": "route-3",
+      "request": {
+        "state": "Someone changed my password and signed in from a country I have never visited.",
+        "model": "kev-latest",
+        "questions": {
+          "decision": {
+            "type": "choice",
+            "instructions": "Which single team should handle the customer's request? Use none if no team matches.",
+            "criteria": {
+              "billing": "Card charges, invoices, and refunds for duplicate charges",
+              "shipping": "Parcel delivery status and lost parcels",
+              "returns": "Returning damaged goods or exchanging an incorrect item",
+              "security": "Account takeover and unauthorized sign-ins",
+              "none": "None of the named teams handles the request"
+            }
+          }
+        }
+      },
+      "expected": "security"
+    },
+    {
+      "id": "route-4",
+      "request": {
+        "state": "Please add dark mode to the app. My account and orders are working normally.",
+        "model": "kev-latest",
+        "questions": {
+          "decision": {
+            "type": "choice",
+            "instructions": "Which single team should handle the customer's request? Use none if no team matches.",
+            "criteria": {
+              "billing": "Card charges, invoices, and refunds for duplicate charges",
+              "shipping": "Parcel delivery status and lost parcels",
+              "returns": "Returning damaged goods or exchanging an incorrect item",
+              "security": "Account takeover and unauthorized sign-ins",
+              "none": "None of the named teams handles the request"
+            }
+          }
+        }
+      },
+      "expected": "none"
+    },
+    {
+      "id": "route-5",
+      "request": {
+        "state": "The delivered lamp is broken. How do I send it back?",
+        "model": "kev-latest",
+        "questions": {
+          "decision": {
+            "type": "choice",
+            "instructions": "Which single team should handle the customer's request? Use none if no team matches.",
+            "criteria": {
+              "billing": "Card charges, invoices, and refunds for duplicate charges",
+              "shipping": "Parcel delivery status and lost parcels",
+              "returns": "Returning damaged goods or exchanging an incorrect item",
+              "security": "Account takeover and unauthorized sign-ins",
+              "none": "None of the named teams handles the request"
+            }
+          }
+        }
+      },
+      "expected": "returns"
+    },
+    {
+      "id": "route-6",
+      "request": {
+        "state": "My invoice shows the wrong tax amount. The parcel arrived correctly.",
+        "model": "kev-latest",
+        "questions": {
+          "decision": {
+            "type": "choice",
+            "instructions": "Which single team should handle the customer's request? Use none if no team matches.",
+            "criteria": {
+              "billing": "Card charges, invoices, and refunds for duplicate charges",
+              "shipping": "Parcel delivery status and lost parcels",
+              "returns": "Returning damaged goods or exchanging an incorrect item",
+              "security": "Account takeover and unauthorized sign-ins",
+              "none": "None of the named teams handles the request"
+            }
+          }
+        }
+      },
+      "expected": "billing"
+    },
+    {
+      "id": "route-7",
+      "request": {
+        "state": "Tracking says delivered, but the package never arrived. No payment issue.",
+        "model": "kev-latest",
+        "questions": {
+          "decision": {
+            "type": "choice",
+            "instructions": "Which single team should handle the customer's request? Use none if no team matches.",
+            "criteria": {
+              "billing": "Card charges, invoices, and refunds for duplicate charges",
+              "shipping": "Parcel delivery status and lost parcels",
+              "returns": "Returning damaged goods or exchanging an incorrect item",
+              "security": "Account takeover and unauthorized sign-ins",
+              "none": "None of the named teams handles the request"
+            }
+          }
+        }
+      },
+      "expected": "shipping"
+    },
+    {
+      "id": "action-0",
+      "request": {
+        "state": "The user requested a CSV export. Export code is implemented, all requested tests passed, and no work remains.",
+        "model": "kev-latest",
+        "questions": {
+          "decision": {
+            "type": "choice",
+            "instructions": "Which action should the coding agent take next? Follow an explicit cancellation.",
+            "criteria": {
+              "report_complete": "All requested work is complete and verified",
+              "run_tests": "Implementation is complete but verification has not run",
+              "continue_work": "Requested implementation still remains",
+              "stop": "The user cancelled the task"
+            }
+          }
+        }
+      },
+      "expected": "report_complete"
+    },
+    {
+      "id": "action-1",
+      "request": {
+        "state": "The user requested a CSV export. Implementation is complete. Tests have not run yet.",
+        "model": "kev-latest",
+        "questions": {
+          "decision": {
+            "type": "choice",
+            "instructions": "Which action should the coding agent take next? Follow an explicit cancellation.",
+            "criteria": {
+              "report_complete": "All requested work is complete and verified",
+              "run_tests": "Implementation is complete but verification has not run",
+              "continue_work": "Requested implementation still remains",
+              "stop": "The user cancelled the task"
+            }
+          }
+        }
+      },
+      "expected": "run_tests"
+    },
+    {
+      "id": "action-2",
+      "request": {
+        "state": "The user requested CSV and PDF exports. CSV is implemented and tested. PDF is still missing.",
+        "model": "kev-latest",
+        "questions": {
+          "decision": {
+            "type": "choice",
+            "instructions": "Which action should the coding agent take next? Follow an explicit cancellation.",
+            "criteria": {
+              "report_complete": "All requested work is complete and verified",
+              "run_tests": "Implementation is complete but verification has not run",
+              "continue_work": "Requested implementation still remains",
+              "stop": "The user cancelled the task"
+            }
+          }
+        }
+      },
+      "expected": "continue_work"
+    },
+    {
+      "id": "action-3",
+      "request": {
+        "state": "The user explicitly said: Cancel this task and stop working. Some implementation remains unfinished.",
+        "model": "kev-latest",
+        "questions": {
+          "decision": {
+            "type": "choice",
+            "instructions": "Which action should the coding agent take next? Follow an explicit cancellation.",
+            "criteria": {
+              "report_complete": "All requested work is complete and verified",
+              "run_tests": "Implementation is complete but verification has not run",
+              "continue_work": "Requested implementation still remains",
+              "stop": "The user cancelled the task"
+            }
+          }
+        }
+      },
+      "expected": "stop"
+    },
+    {
+      "id": "complete-0",
+      "request": {
+        "state": "Requested: login form and logout button. Both are implemented. All tests passed. No blockers or remaining requirements.",
+        "model": "kev-latest",
+        "questions": {
+          "decision": {
+            "type": "noul",
+            "instructions": "Has all requested work been completed and all explicitly required verification passed?"
+          }
+        }
+      },
+      "expected": true
+    },
+    {
+      "id": "complete-1",
+      "request": {
+        "state": "Requested: login form and logout button. Login is implemented. The logout button is not implemented.",
+        "model": "kev-latest",
+        "questions": {
+          "decision": {
+            "type": "noul",
+            "instructions": "Has all requested work been completed and all explicitly required verification passed?"
+          }
+        }
+      },
+      "expected": false
+    },
+    {
+      "id": "complete-2",
+      "request": {
+        "state": "Implementation is complete. Verification is required before completion, and verification has not run.",
+        "model": "kev-latest",
+        "questions": {
+          "decision": {
+            "type": "noul",
+            "instructions": "Has all requested work been completed and all explicitly required verification passed?"
+          }
+        }
+      },
+      "expected": false
+    },
+    {
+      "id": "complete-3",
+      "request": {
+        "state": "Implementation is complete. All required verification passed. The user requested no further changes.",
+        "model": "kev-latest",
+        "questions": {
+          "decision": {
+            "type": "noul",
+            "instructions": "Has all requested work been completed and all explicitly required verification passed?"
+          }
+        }
+      },
+      "expected": true
+    },
+    {
+      "id": "complete-4",
+      "request": {
+        "state": "The change has been implemented, but the required regression test is failing.",
+        "model": "kev-latest",
+        "questions": {
+          "decision": {
+            "type": "noul",
+            "instructions": "Has all requested work been completed and all explicitly required verification passed?"
+          }
+        }
+      },
+      "expected": false
+    },
+    {
+      "id": "complete-5",
+      "request": {
+        "state": "The user requested documentation only. Documentation is updated and the requested spelling check passed.",
+        "model": "kev-latest",
+        "questions": {
+          "decision": {
+            "type": "noul",
+            "instructions": "Has all requested work been completed and all explicitly required verification passed?"
+          }
+        }
+      },
+      "expected": true
+    },
+    {
+      "id": "complete-6",
+      "request": {
+        "state": "The user requested two screens. Screen one is complete and tested. Screen two is still a placeholder.",
+        "model": "kev-latest",
+        "questions": {
+          "decision": {
+            "type": "noul",
+            "instructions": "Has all requested work been completed and all explicitly required verification passed?"
+          }
+        }
+      },
+      "expected": false
+    },
+    {
+      "id": "complete-7",
+      "request": {
+        "state": "The requested bug fix is implemented. The original reproduction and all required checks pass.",
+        "model": "kev-latest",
+        "questions": {
+          "decision": {
+            "type": "noul",
+            "instructions": "Has all requested work been completed and all explicitly required verification passed?"
+          }
+        }
+      },
+      "expected": true
+    },
+    {
+      "id": "complete-8",
+      "request": {
+        "state": "The user asked for a draft only. The reviewed draft is written, and all requested content is present.",
+        "model": "kev-latest",
+        "questions": {
+          "decision": {
+            "type": "noul",
+            "instructions": "Has all requested work been completed and all explicitly required verification passed?"
+          }
+        }
+      },
+      "expected": true
+    },
+    {
+      "id": "complete-9",
+      "request": {
+        "state": "The agent has written a plan. None of the requested implementation has started.",
+        "model": "kev-latest",
+        "questions": {
+          "decision": {
+            "type": "noul",
+            "instructions": "Has all requested work been completed and all explicitly required verification passed?"
+          }
+        }
+      },
+      "expected": false
+    },
+    {
+      "id": "complete-10",
+      "request": {
+        "state": "Requested fix: disable the broken button. The button is disabled and the requested browser check passed.",
+        "model": "kev-latest",
+        "questions": {
+          "decision": {
+            "type": "noul",
+            "instructions": "Has all requested work been completed and all explicitly required verification passed?"
+          }
+        }
+      },
+      "expected": true
+    },
+    {
+      "id": "complete-11",
+      "request": {
+        "state": "All code is written, but a required database migration has not been created.",
+        "model": "kev-latest",
+        "questions": {
+          "decision": {
+            "type": "noul",
+            "instructions": "Has all requested work been completed and all explicitly required verification passed?"
+          }
+        }
+      },
+      "expected": false
+    },
+    {
+      "id": "severity-0",
+      "request": {
+        "state": "Incident 0: exactly 0 users are currently affected. Classify severity solely using the affected-user thresholds in the criteria.",
+        "model": "kev-latest",
+        "questions": {
+          "decision": {
+            "type": "score",
+            "instructions": "Select the severity level according to the number of affected users. Ignore all other factors.",
+            "criteria": [
+              "No affected users: 0",
+              "Low: 1 to 9 affected users",
+              "Medium: 10 to 99 affected users",
+              "High: at least 100 affected users"
+            ]
+          }
+        }
+      },
+      "expected": "0"
+    },
+    {
+      "id": "severity-1",
+      "request": {
+        "state": "Incident 1: exactly 1 users are currently affected. Classify severity solely using the affected-user thresholds in the criteria.",
+        "model": "kev-latest",
+        "questions": {
+          "decision": {
+            "type": "score",
+            "instructions": "Select the severity level according to the number of affected users. Ignore all other factors.",
+            "criteria": [
+              "No affected users: 0",
+              "Low: 1 to 9 affected users",
+              "Medium: 10 to 99 affected users",
+              "High: at least 100 affected users"
+            ]
+          }
+        }
+      },
+      "expected": "1"
+    },
+    {
+      "id": "severity-2",
+      "request": {
+        "state": "Incident 2: exactly 8 users are currently affected. Classify severity solely using the affected-user thresholds in the criteria.",
+        "model": "kev-latest",
+        "questions": {
+          "decision": {
+            "type": "score",
+            "instructions": "Select the severity level according to the number of affected users. Ignore all other factors.",
+            "criteria": [
+              "No affected users: 0",
+              "Low: 1 to 9 affected users",
+              "Medium: 10 to 99 affected users",
+              "High: at least 100 affected users"
+            ]
+          }
+        }
+      },
+      "expected": "1"
+    },
+    {
+      "id": "severity-3",
+      "request": {
+        "state": "Incident 3: exactly 9 users are currently affected. Classify severity solely using the affected-user thresholds in the criteria.",
+        "model": "kev-latest",
+        "questions": {
+          "decision": {
+            "type": "score",
+            "instructions": "Select the severity level according to the number of affected users. Ignore all other factors.",
+            "criteria": [
+              "No affected users: 0",
+              "Low: 1 to 9 affected users",
+              "Medium: 10 to 99 affected users",
+              "High: at least 100 affected users"
+            ]
+          }
+        }
+      },
+      "expected": "1"
+    },
+    {
+      "id": "severity-4",
+      "request": {
+        "state": "Incident 4: exactly 10 users are currently affected. Classify severity solely using the affected-user thresholds in the criteria.",
+        "model": "kev-latest",
+        "questions": {
+          "decision": {
+            "type": "score",
+            "instructions": "Select the severity level according to the number of affected users. Ignore all other factors.",
+            "criteria": [
+              "No affected users: 0",
+              "Low: 1 to 9 affected users",
+              "Medium: 10 to 99 affected users",
+              "High: at least 100 affected users"
+            ]
+          }
+        }
+      },
+      "expected": "2"
+    },
+    {
+      "id": "severity-5",
+      "request": {
+        "state": "Incident 5: exactly 11 users are currently affected. Classify severity solely using the affected-user thresholds in the criteria.",
+        "model": "kev-latest",
+        "questions": {
+          "decision": {
+            "type": "score",
+            "instructions": "Select the severity level according to the number of affected users. Ignore all other factors.",
+            "criteria": [
+              "No affected users: 0",
+              "Low: 1 to 9 affected users",
+              "Medium: 10 to 99 affected users",
+              "High: at least 100 affected users"
+            ]
+          }
+        }
+      },
+      "expected": "2"
+    },
+    {
+      "id": "severity-6",
+      "request": {
+        "state": "Incident 6: exactly 52 users are currently affected. Classify severity solely using the affected-user thresholds in the criteria.",
+        "model": "kev-latest",
+        "questions": {
+          "decision": {
+            "type": "score",
+            "instructions": "Select the severity level according to the number of affected users. Ignore all other factors.",
+            "criteria": [
+              "No affected users: 0",
+              "Low: 1 to 9 affected users",
+              "Medium: 10 to 99 affected users",
+              "High: at least 100 affected users"
+            ]
+          }
+        }
+      },
+      "expected": "2"
+    },
+    {
+      "id": "severity-7",
+      "request": {
+        "state": "Incident 7: exactly 99 users are currently affected. Classify severity solely using the affected-user thresholds in the criteria.",
+        "model": "kev-latest",
+        "questions": {
+          "decision": {
+            "type": "score",
+            "instructions": "Select the severity level according to the number of affected users. Ignore all other factors.",
+            "criteria": [
+              "No affected users: 0",
+              "Low: 1 to 9 affected users",
+              "Medium: 10 to 99 affected users",
+              "High: at least 100 affected users"
+            ]
+          }
+        }
+      },
+      "expected": "2"
+    },
+    {
+      "id": "severity-8",
+      "request": {
+        "state": "Incident 8: exactly 100 users are currently affected. Classify severity solely using the affected-user thresholds in the criteria.",
+        "model": "kev-latest",
+        "questions": {
+          "decision": {
+            "type": "score",
+            "instructions": "Select the severity level according to the number of affected users. Ignore all other factors.",
+            "criteria": [
+              "No affected users: 0",
+              "Low: 1 to 9 affected users",
+              "Medium: 10 to 99 affected users",
+              "High: at least 100 affected users"
+            ]
+          }
+        }
+      },
+      "expected": "3"
+    },
+    {
+      "id": "severity-9",
+      "request": {
+        "state": "Incident 9: exactly 101 users are currently affected. Classify severity solely using the affected-user thresholds in the criteria.",
+        "model": "kev-latest",
+        "questions": {
+          "decision": {
+            "type": "score",
+            "instructions": "Select the severity level according to the number of affected users. Ignore all other factors.",
+            "criteria": [
+              "No affected users: 0",
+              "Low: 1 to 9 affected users",
+              "Medium: 10 to 99 affected users",
+              "High: at least 100 affected users"
+            ]
+          }
+        }
+      },
+      "expected": "3"
+    },
+    {
+      "id": "severity-10",
+      "request": {
+        "state": "Incident 10: exactly 750 users are currently affected. Classify severity solely using the affected-user thresholds in the criteria.",
+        "model": "kev-latest",
+        "questions": {
+          "decision": {
+            "type": "score",
+            "instructions": "Select the severity level according to the number of affected users. Ignore all other factors.",
+            "criteria": [
+              "No affected users: 0",
+              "Low: 1 to 9 affected users",
+              "Medium: 10 to 99 affected users",
+              "High: at least 100 affected users"
+            ]
+          }
+        }
+      },
+      "expected": "3"
+    },
+    {
+      "id": "severity-11",
+      "request": {
+        "state": "Incident 11: exactly 0 users are currently affected. Classify severity solely using the affected-user thresholds in the criteria.",
+        "model": "kev-latest",
+        "questions": {
+          "decision": {
+            "type": "score",
+            "instructions": "Select the severity level according to the number of affected users. Ignore all other factors.",
+            "criteria": [
+              "No affected users: 0",
+              "Low: 1 to 9 affected users",
+              "Medium: 10 to 99 affected users",
+              "High: at least 100 affected users"
+            ]
+          }
+        }
+      },
+      "expected": "0"
+    }
+  ],
+  "repeated_state": [
+    {
+      "id": "prefix-0",
+      "request": {
+        "state": "Task ledger. Use only each task's recorded status.\nTask T00: complete.\nTask T01: pending.\nTask T02: failed.\nTask T03: complete.\nTask T04: pending.\nTask T05: failed.\nTask T06: complete.\nTask T07: pending.\nTask T08: failed.\nTask T09: complete.\nTask T10: pending.\nTask T11: failed.\nTask T12: complete.\nTask T13: pending.\nTask T14: failed.\nTask T15: complete.\nTask T16: pending.\nTask T17: failed.\nTask T18: complete.\nTask T19: pending.\nTask T20: failed.\nTask T21: complete.\nTask T22: pending.\nTask T23: failed.\nTask T24: complete.\nTask T25: pending.\nTask T26: failed.\nTask T27: complete.\nTask T28: pending.\nTask T29: failed.",
+        "model": "kev-latest",
+        "questions": {
+          "decision": {
+            "type": "noul",
+            "instructions": "Is Task T00 complete?"
+          }
+        }
+      },
+      "expected": true
+    },
+    {
+      "id": "prefix-1",
+      "request": {
+        "state": "Task ledger. Use only each task's recorded status.\nTask T00: complete.\nTask T01: pending.\nTask T02: failed.\nTask T03: complete.\nTask T04: pending.\nTask T05: failed.\nTask T06: complete.\nTask T07: pending.\nTask T08: failed.\nTask T09: complete.\nTask T10: pending.\nTask T11: failed.\nTask T12: complete.\nTask T13: pending.\nTask T14: failed.\nTask T15: complete.\nTask T16: pending.\nTask T17: failed.\nTask T18: complete.\nTask T19: pending.\nTask T20: failed.\nTask T21: complete.\nTask T22: pending.\nTask T23: failed.\nTask T24: complete.\nTask T25: pending.\nTask T26: failed.\nTask T27: complete.\nTask T28: pending.\nTask T29: failed.",
+        "model": "kev-latest",
+        "questions": {
+          "decision": {
+            "type": "noul",
+            "instructions": "Is Task T01 complete?"
+          }
+        }
+      },
+      "expected": false
+    },
+    {
+      "id": "prefix-2",
+      "request": {
+        "state": "Task ledger. Use only each task's recorded status.\nTask T00: complete.\nTask T01: pending.\nTask T02: failed.\nTask T03: complete.\nTask T04: pending.\nTask T05: failed.\nTask T06: complete.\nTask T07: pending.\nTask T08: failed.\nTask T09: complete.\nTask T10: pending.\nTask T11: failed.\nTask T12: complete.\nTask T13: pending.\nTask T14: failed.\nTask T15: complete.\nTask T16: pending.\nTask T17: failed.\nTask T18: complete.\nTask T19: pending.\nTask T20: failed.\nTask T21: complete.\nTask T22: pending.\nTask T23: failed.\nTask T24: complete.\nTask T25: pending.\nTask T26: failed.\nTask T27: complete.\nTask T28: pending.\nTask T29: failed.",
+        "model": "kev-latest",
+        "questions": {
+          "decision": {
+            "type": "noul",
+            "instructions": "Is Task T02 complete?"
+          }
+        }
+      },
+      "expected": false
+    },
+    {
+      "id": "prefix-3",
+      "request": {
+        "state": "Task ledger. Use only each task's recorded status.\nTask T00: complete.\nTask T01: pending.\nTask T02: failed.\nTask T03: complete.\nTask T04: pending.\nTask T05: failed.\nTask T06: complete.\nTask T07: pending.\nTask T08: failed.\nTask T09: complete.\nTask T10: pending.\nTask T11: failed.\nTask T12: complete.\nTask T13: pending.\nTask T14: failed.\nTask T15: complete.\nTask T16: pending.\nTask T17: failed.\nTask T18: complete.\nTask T19: pending.\nTask T20: failed.\nTask T21: complete.\nTask T22: pending.\nTask T23: failed.\nTask T24: complete.\nTask T25: pending.\nTask T26: failed.\nTask T27: complete.\nTask T28: pending.\nTask T29: failed.",
+        "model": "kev-latest",
+        "questions": {
+          "decision": {
+            "type": "noul",
+            "instructions": "Is Task T03 complete?"
+          }
+        }
+      },
+      "expected": true
+    },
+    {
+      "id": "prefix-4",
+      "request": {
+        "state": "Task ledger. Use only each task's recorded status.\nTask T00: complete.\nTask T01: pending.\nTask T02: failed.\nTask T03: complete.\nTask T04: pending.\nTask T05: failed.\nTask T06: complete.\nTask T07: pending.\nTask T08: failed.\nTask T09: complete.\nTask T10: pending.\nTask T11: failed.\nTask T12: complete.\nTask T13: pending.\nTask T14: failed.\nTask T15: complete.\nTask T16: pending.\nTask T17: failed.\nTask T18: complete.\nTask T19: pending.\nTask T20: failed.\nTask T21: complete.\nTask T22: pending.\nTask T23: failed.\nTask T24: complete.\nTask T25: pending.\nTask T26: failed.\nTask T27: complete.\nTask T28: pending.\nTask T29: failed.",
+        "model": "kev-latest",
+        "questions": {
+          "decision": {
+            "type": "noul",
+            "instructions": "Is Task T04 complete?"
+          }
+        }
+      },
+      "expected": false
+    },
+    {
+      "id": "prefix-5",
+      "request": {
+        "state": "Task ledger. Use only each task's recorded status.\nTask T00: complete.\nTask T01: pending.\nTask T02: failed.\nTask T03: complete.\nTask T04: pending.\nTask T05: failed.\nTask T06: complete.\nTask T07: pending.\nTask T08: failed.\nTask T09: complete.\nTask T10: pending.\nTask T11: failed.\nTask T12: complete.\nTask T13: pending.\nTask T14: failed.\nTask T15: complete.\nTask T16: pending.\nTask T17: failed.\nTask T18: complete.\nTask T19: pending.\nTask T20: failed.\nTask T21: complete.\nTask T22: pending.\nTask T23: failed.\nTask T24: complete.\nTask T25: pending.\nTask T26: failed.\nTask T27: complete.\nTask T28: pending.\nTask T29: failed.",
+        "model": "kev-latest",
+        "questions": {
+          "decision": {
+            "type": "noul",
+            "instructions": "Is Task T05 complete?"
+          }
+        }
+      },
+      "expected": false
+    },
+    {
+      "id": "prefix-6",
+      "request": {
+        "state": "Task ledger. Use only each task's recorded status.\nTask T00: complete.\nTask T01: pending.\nTask T02: failed.\nTask T03: complete.\nTask T04: pending.\nTask T05: failed.\nTask T06: complete.\nTask T07: pending.\nTask T08: failed.\nTask T09: complete.\nTask T10: pending.\nTask T11: failed.\nTask T12: complete.\nTask T13: pending.\nTask T14: failed.\nTask T15: complete.\nTask T16: pending.\nTask T17: failed.\nTask T18: complete.\nTask T19: pending.\nTask T20: failed.\nTask T21: complete.\nTask T22: pending.\nTask T23: failed.\nTask T24: complete.\nTask T25: pending.\nTask T26: failed.\nTask T27: complete.\nTask T28: pending.\nTask T29: failed.",
+        "model": "kev-latest",
+        "questions": {
+          "decision": {
+            "type": "noul",
+            "instructions": "Is Task T06 complete?"
+          }
+        }
+      },
+      "expected": true
+    },
+    {
+      "id": "prefix-7",
+      "request": {
+        "state": "Task ledger. Use only each task's recorded status.\nTask T00: complete.\nTask T01: pending.\nTask T02: failed.\nTask T03: complete.\nTask T04: pending.\nTask T05: failed.\nTask T06: complete.\nTask T07: pending.\nTask T08: failed.\nTask T09: complete.\nTask T10: pending.\nTask T11: failed.\nTask T12: complete.\nTask T13: pending.\nTask T14: failed.\nTask T15: complete.\nTask T16: pending.\nTask T17: failed.\nTask T18: complete.\nTask T19: pending.\nTask T20: failed.\nTask T21: complete.\nTask T22: pending.\nTask T23: failed.\nTask T24: complete.\nTask T25: pending.\nTask T26: failed.\nTask T27: complete.\nTask T28: pending.\nTask T29: failed.",
+        "model": "kev-latest",
+        "questions": {
+          "decision": {
+            "type": "noul",
+            "instructions": "Is Task T07 complete?"
+          }
+        }
+      },
+      "expected": false
+    },
+    {
+      "id": "prefix-8",
+      "request": {
+        "state": "Task ledger. Use only each task's recorded status.\nTask T00: complete.\nTask T01: pending.\nTask T02: failed.\nTask T03: complete.\nTask T04: pending.\nTask T05: failed.\nTask T06: complete.\nTask T07: pending.\nTask T08: failed.\nTask T09: complete.\nTask T10: pending.\nTask T11: failed.\nTask T12: complete.\nTask T13: pending.\nTask T14: failed.\nTask T15: complete.\nTask T16: pending.\nTask T17: failed.\nTask T18: complete.\nTask T19: pending.\nTask T20: failed.\nTask T21: complete.\nTask T22: pending.\nTask T23: failed.\nTask T24: complete.\nTask T25: pending.\nTask T26: failed.\nTask T27: complete.\nTask T28: pending.\nTask T29: failed.",
+        "model": "kev-latest",
+        "questions": {
+          "decision": {
+            "type": "noul",
+            "instructions": "Is Task T08 complete?"
+          }
+        }
+      },
+      "expected": false
+    },
+    {
+      "id": "prefix-9",
+      "request": {
+        "state": "Task ledger. Use only each task's recorded status.\nTask T00: complete.\nTask T01: pending.\nTask T02: failed.\nTask T03: complete.\nTask T04: pending.\nTask T05: failed.\nTask T06: complete.\nTask T07: pending.\nTask T08: failed.\nTask T09: complete.\nTask T10: pending.\nTask T11: failed.\nTask T12: complete.\nTask T13: pending.\nTask T14: failed.\nTask T15: complete.\nTask T16: pending.\nTask T17: failed.\nTask T18: complete.\nTask T19: pending.\nTask T20: failed.\nTask T21: complete.\nTask T22: pending.\nTask T23: failed.\nTask T24: complete.\nTask T25: pending.\nTask T26: failed.\nTask T27: complete.\nTask T28: pending.\nTask T29: failed.",
+        "model": "kev-latest",
+        "questions": {
+          "decision": {
+            "type": "noul",
+            "instructions": "Is Task T09 complete?"
+          }
+        }
+      },
+      "expected": true
+    },
+    {
+      "id": "prefix-10",
+      "request": {
+        "state": "Task ledger. Use only each task's recorded status.\nTask T00: complete.\nTask T01: pending.\nTask T02: failed.\nTask T03: complete.\nTask T04: pending.\nTask T05: failed.\nTask T06: complete.\nTask T07: pending.\nTask T08: failed.\nTask T09: complete.\nTask T10: pending.\nTask T11: failed.\nTask T12: complete.\nTask T13: pending.\nTask T14: failed.\nTask T15: complete.\nTask T16: pending.\nTask T17: failed.\nTask T18: complete.\nTask T19: pending.\nTask T20: failed.\nTask T21: complete.\nTask T22: pending.\nTask T23: failed.\nTask T24: complete.\nTask T25: pending.\nTask T26: failed.\nTask T27: complete.\nTask T28: pending.\nTask T29: failed.",
+        "model": "kev-latest",
+        "questions": {
+          "decision": {
+            "type": "noul",
+            "instructions": "Is Task T10 complete?"
+          }
+        }
+      },
+      "expected": false
+    },
+    {
+      "id": "prefix-11",
+      "request": {
+        "state": "Task ledger. Use only each task's recorded status.\nTask T00: complete.\nTask T01: pending.\nTask T02: failed.\nTask T03: complete.\nTask T04: pending.\nTask T05: failed.\nTask T06: complete.\nTask T07: pending.\nTask T08: failed.\nTask T09: complete.\nTask T10: pending.\nTask T11: failed.\nTask T12: complete.\nTask T13: pending.\nTask T14: failed.\nTask T15: complete.\nTask T16: pending.\nTask T17: failed.\nTask T18: complete.\nTask T19: pending.\nTask T20: failed.\nTask T21: complete.\nTask T22: pending.\nTask T23: failed.\nTask T24: complete.\nTask T25: pending.\nTask T26: failed.\nTask T27: complete.\nTask T28: pending.\nTask T29: failed.",
+        "model": "kev-latest",
+        "questions": {
+          "decision": {
+            "type": "noul",
+            "instructions": "Is Task T11 complete?"
+          }
+        }
+      },
+      "expected": false
+    },
+    {
+      "id": "prefix-12",
+      "request": {
+        "state": "Task ledger. Use only each task's recorded status.\nTask T00: complete.\nTask T01: pending.\nTask T02: failed.\nTask T03: complete.\nTask T04: pending.\nTask T05: failed.\nTask T06: complete.\nTask T07: pending.\nTask T08: failed.\nTask T09: complete.\nTask T10: pending.\nTask T11: failed.\nTask T12: complete.\nTask T13: pending.\nTask T14: failed.\nTask T15: complete.\nTask T16: pending.\nTask T17: failed.\nTask T18: complete.\nTask T19: pending.\nTask T20: failed.\nTask T21: complete.\nTask T22: pending.\nTask T23: failed.\nTask T24: complete.\nTask T25: pending.\nTask T26: failed.\nTask T27: complete.\nTask T28: pending.\nTask T29: failed.",
+        "model": "kev-latest",
+        "questions": {
+          "decision": {
+            "type": "noul",
+            "instructions": "Is Task T12 complete?"
+          }
+        }
+      },
+      "expected": true
+    },
+    {
+      "id": "prefix-13",
+      "request": {
+        "state": "Task ledger. Use only each task's recorded status.\nTask T00: complete.\nTask T01: pending.\nTask T02: failed.\nTask T03: complete.\nTask T04: pending.\nTask T05: failed.\nTask T06: complete.\nTask T07: pending.\nTask T08: failed.\nTask T09: complete.\nTask T10: pending.\nTask T11: failed.\nTask T12: complete.\nTask T13: pending.\nTask T14: failed.\nTask T15: complete.\nTask T16: pending.\nTask T17: failed.\nTask T18: complete.\nTask T19: pending.\nTask T20: failed.\nTask T21: complete.\nTask T22: pending.\nTask T23: failed.\nTask T24: complete.\nTask T25: pending.\nTask T26: failed.\nTask T27: complete.\nTask T28: pending.\nTask T29: failed.",
+        "model": "kev-latest",
+        "questions": {
+          "decision": {
+            "type": "noul",
+            "instructions": "Is Task T13 complete?"
+          }
+        }
+      },
+      "expected": false
+    },
+    {
+      "id": "prefix-14",
+      "request": {
+        "state": "Task ledger. Use only each task's recorded status.\nTask T00: complete.\nTask T01: pending.\nTask T02: failed.\nTask T03: complete.\nTask T04: pending.\nTask T05: failed.\nTask T06: complete.\nTask T07: pending.\nTask T08: failed.\nTask T09: complete.\nTask T10: pending.\nTask T11: failed.\nTask T12: complete.\nTask T13: pending.\nTask T14: failed.\nTask T15: complete.\nTask T16: pending.\nTask T17: failed.\nTask T18: complete.\nTask T19: pending.\nTask T20: failed.\nTask T21: complete.\nTask T22: pending.\nTask T23: failed.\nTask T24: complete.\nTask T25: pending.\nTask T26: failed.\nTask T27: complete.\nTask T28: pending.\nTask T29: failed.",
+        "model": "kev-latest",
+        "questions": {
+          "decision": {
+            "type": "noul",
+            "instructions": "Is Task T14 complete?"
+          }
+        }
+      },
+      "expected": false
+    },
+    {
+      "id": "prefix-15",
+      "request": {
+        "state": "Task ledger. Use only each task's recorded status.\nTask T00: complete.\nTask T01: pending.\nTask T02: failed.\nTask T03: complete.\nTask T04: pending.\nTask T05: failed.\nTask T06: complete.\nTask T07: pending.\nTask T08: failed.\nTask T09: complete.\nTask T10: pending.\nTask T11: failed.\nTask T12: complete.\nTask T13: pending.\nTask T14: failed.\nTask T15: complete.\nTask T16: pending.\nTask T17: failed.\nTask T18: complete.\nTask T19: pending.\nTask T20: failed.\nTask T21: complete.\nTask T22: pending.\nTask T23: failed.\nTask T24: complete.\nTask T25: pending.\nTask T26: failed.\nTask T27: complete.\nTask T28: pending.\nTask T29: failed.",
+        "model": "kev-latest",
+        "questions": {
+          "decision": {
+            "type": "noul",
+            "instructions": "Is Task T15 complete?"
+          }
+        }
+      },
+      "expected": true
+    },
+    {
+      "id": "prefix-16",
+      "request": {
+        "state": "Task ledger. Use only each task's recorded status.\nTask T00: complete.\nTask T01: pending.\nTask T02: failed.\nTask T03: complete.\nTask T04: pending.\nTask T05: failed.\nTask T06: complete.\nTask T07: pending.\nTask T08: failed.\nTask T09: complete.\nTask T10: pending.\nTask T11: failed.\nTask T12: complete.\nTask T13: pending.\nTask T14: failed.\nTask T15: complete.\nTask T16: pending.\nTask T17: failed.\nTask T18: complete.\nTask T19: pending.\nTask T20: failed.\nTask T21: complete.\nTask T22: pending.\nTask T23: failed.\nTask T24: complete.\nTask T25: pending.\nTask T26: failed.\nTask T27: complete.\nTask T28: pending.\nTask T29: failed.",
+        "model": "kev-latest",
+        "questions": {
+          "decision": {
+            "type": "noul",
+            "instructions": "Is Task T16 complete?"
+          }
+        }
+      },
+      "expected": false
+    },
+    {
+      "id": "prefix-17",
+      "request": {
+        "state": "Task ledger. Use only each task's recorded status.\nTask T00: complete.\nTask T01: pending.\nTask T02: failed.\nTask T03: complete.\nTask T04: pending.\nTask T05: failed.\nTask T06: complete.\nTask T07: pending.\nTask T08: failed.\nTask T09: complete.\nTask T10: pending.\nTask T11: failed.\nTask T12: complete.\nTask T13: pending.\nTask T14: failed.\nTask T15: complete.\nTask T16: pending.\nTask T17: failed.\nTask T18: complete.\nTask T19: pending.\nTask T20: failed.\nTask T21: complete.\nTask T22: pending.\nTask T23: failed.\nTask T24: complete.\nTask T25: pending.\nTask T26: failed.\nTask T27: complete.\nTask T28: pending.\nTask T29: failed.",
+        "model": "kev-latest",
+        "questions": {
+          "decision": {
+            "type": "noul",
+            "instructions": "Is Task T17 complete?"
+          }
+        }
+      },
+      "expected": false
+    },
+    {
+      "id": "prefix-18",
+      "request": {
+        "state": "Task ledger. Use only each task's recorded status.\nTask T00: complete.\nTask T01: pending.\nTask T02: failed.\nTask T03: complete.\nTask T04: pending.\nTask T05: failed.\nTask T06: complete.\nTask T07: pending.\nTask T08: failed.\nTask T09: complete.\nTask T10: pending.\nTask T11: failed.\nTask T12: complete.\nTask T13: pending.\nTask T14: failed.\nTask T15: complete.\nTask T16: pending.\nTask T17: failed.\nTask T18: complete.\nTask T19: pending.\nTask T20: failed.\nTask T21: complete.\nTask T22: pending.\nTask T23: failed.\nTask T24: complete.\nTask T25: pending.\nTask T26: failed.\nTask T27: complete.\nTask T28: pending.\nTask T29: failed.",
+        "model": "kev-latest",
+        "questions": {
+          "decision": {
+            "type": "noul",
+            "instructions": "Is Task T18 complete?"
+          }
+        }
+      },
+      "expected": true
+    },
+    {
+      "id": "prefix-19",
+      "request": {
+        "state": "Task ledger. Use only each task's recorded status.\nTask T00: complete.\nTask T01: pending.\nTask T02: failed.\nTask T03: complete.\nTask T04: pending.\nTask T05: failed.\nTask T06: complete.\nTask T07: pending.\nTask T08: failed.\nTask T09: complete.\nTask T10: pending.\nTask T11: failed.\nTask T12: complete.\nTask T13: pending.\nTask T14: failed.\nTask T15: complete.\nTask T16: pending.\nTask T17: failed.\nTask T18: complete.\nTask T19: pending.\nTask T20: failed.\nTask T21: complete.\nTask T22: pending.\nTask T23: failed.\nTask T24: complete.\nTask T25: pending.\nTask T26: failed.\nTask T27: complete.\nTask T28: pending.\nTask T29: failed.",
+        "model": "kev-latest",
+        "questions": {
+          "decision": {
+            "type": "noul",
+            "instructions": "Is Task T19 complete?"
+          }
+        }
+      },
+      "expected": false
+    }
+  ],
+  "unscored": [
+    {
+      "id": "ambiguous-route",
+      "request": {
+        "state": "I was charged twice and my parcel is missing. Both problems matter equally; I have not chosen which one to resolve first.",
+        "questions": {
+          "decision": {
+            "type": "choice",
+            "instructions": "Which team should handle this?",
+            "criteria": {
+              "billing": "Duplicate card charges",
+              "shipping": "Missing parcels"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "missing-evidence",
+      "request": {
+        "state": "The agent has been working on the requested change. No implementation or test status has been reported.",
+        "questions": {
+          "decision": {
+            "type": "noul",
+            "instructions": "Is all requested work complete and verified?"
+          }
+        }
+      }
+    }
+  ]
+}

@@ -24,6 +24,9 @@ class Provider(Protocol):
 
 
 def get_provider(backend: str) -> Provider:
+    if backend == "kev":
+        from turbollm.providers.kev import KevProvider
+        return KevProvider()
     if backend == "gguf":
         from turbollm.providers.gguf import GgufProvider
         return GgufProvider()
@@ -39,4 +42,4 @@ def get_provider(backend: str) -> Provider:
     if backend == "mlx-audio":
         from turbollm.providers.mlx_audio import MlxAudioProvider
         return MlxAudioProvider()
-    raise ValueError(f"Unknown backend '{backend}'. Available: vllm-mlx, gguf, omlx, mlx-vlm, mlx-audio")
+    raise ValueError(f"Unknown backend '{backend}'. Available: vllm-mlx, gguf, omlx, mlx-vlm, mlx-audio, kev")

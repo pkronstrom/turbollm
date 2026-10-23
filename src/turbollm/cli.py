@@ -1,3 +1,4 @@
+import contextlib
 import json
 import os
 import socket
@@ -38,13 +39,14 @@ from turbollm.registry import (
     load_registry,
     resolve_model,
     supported_thinking_levels,
+    with_context_window,
 )
 
 console = Console()
 
 
 def _get_provider_for(m: dict):
-    backend = m.get("backend", get_defaults().get("backend", "vllm-mlx"))
+    backend = m.get("backend") or get_defaults().get("backend", "vllm-mlx")
     return get_provider(backend)
 
 
@@ -53,7 +55,7 @@ def _get_model_id(m: dict) -> str:
 
     Delegates to the provider so each backend can override (mlx-vlm reports a
     local filesystem path, others report hf_repo)."""
-    return _get_provider_for(m).get_model_id(m)
+    return m.get("_served_model_id") or _get_provider_for(m).get_model_id(m)
 
 
 def _next_free_port(start: int) -> int:
@@ -71,9 +73,9 @@ def _next_free_port(start: int) -> int:
 # Backends grouped by modality. Chat/text harnesses (pi, claude, codex, …) serve
 # text-generation models; mlx-audio is a speech-to-text (ASR) backend and must
 # not appear in their model pickers. The `transcribe` command targets it directly.
-_ALL_BACKENDS = ("vllm-mlx", "gguf", "omlx", "mlx-vlm", "mlx-audio")
+_ALL_BACKENDS = ("vllm-mlx", "gguf", "omlx", "mlx-vlm", "mlx-audio", "kev")
 _AUDIO_BACKENDS = ("mlx-audio",)
-_CHAT_BACKENDS = [b for b in _ALL_BACKENDS if b not in _AUDIO_BACKENDS]
+_CHAT_BACKENDS = [b for b in _ALL_BACKENDS if b not in (*_AUDIO_BACKENDS, "kev")]
 
 
 def _harness_requires_backend(harness_config: dict) -> list[str]:
@@ -182,12 +184,16 @@ def cli():
 
 @cli.command()
 @click.argument("model")
-def pull(model):
+@click.option("--update", is_flag=True, help="Check upstream and refresh an already downloaded model.")
+@click.option("--revision", help="Download a specific Hugging Face revision (implies --update).")
+def pull(model, update, revision):
     """Download a model. Accepts alias, owner/repo, or HuggingFace URL."""
     m = resolve_model(model)
+    if revision:
+        m = {**m, "revision": revision}
     provider = _get_provider_for(m)
 
-    if provider.is_downloaded(m):
+    if provider.is_downloaded(m) and not (update or revision):
         console.print(f"[green]Already downloaded:[/green] {m['hf_repo']}")
     else:
         size = f" ({m['size_gb']}GB)" if m.get("size_gb") else ""
@@ -345,7 +351,8 @@ def rm(model, yes):
 @click.option("--context-window", "context_window", default=None, type=int,
               help="Override the model's context_default for this server (tokens). "
                    "Use to start the server at e.g. 192K without editing models.toml.")
-def serve(model, port, backend, context_window):
+@click.option("--background", "-d", is_flag=True, help="Keep the server running between commands; stop with turbo stop.")
+def serve(model, port, backend, context_window, background):
     """Start model server (auto-detects backend)."""
     alias: str | None = None
     if model:
@@ -357,13 +364,12 @@ def serve(model, port, backend, context_window):
             alias = model
     else:
         alias, m = pick_model()
-    if backend:
-        m = {**m, "backend": backend}
-    if context_window:
+    m = {**m, "backend": backend or m.get("backend") or get_defaults().get("backend", "vllm-mlx")}
+    if context_window is not None:
         # Flows through both the provider (server --max-tokens) and the port
         # stamp's max_tokens field used by attaching harnesses to validate
         # their own --context-window against the server's actual capacity.
-        m = {**m, "context_default": int(context_window)}
+        m = with_context_window(m, int(context_window))
 
     provider = _get_provider_for(m)
     defaults = get_defaults()
@@ -376,11 +382,11 @@ def serve(model, port, backend, context_window):
         console.print(f"[yellow]Model not downloaded.[/yellow] Run: [bold]turbo pull {hint}[/bold]")
         raise SystemExit(1)
 
-    if not provider.is_available():
+    if not (provider.is_available(m) if m.get("backend") == "kev" else provider.is_available()):
         console.print(f"[red]{provider.name} not found.[/red] Install: [bold]{provider.install_hint}[/bold]")
         raise SystemExit(1)
 
-    port = port or defaults.get("port", 8899)
+    port = port or defaults.get(m.get("backend", ""), {}).get("port") or defaults.get("port", 8899)
 
     if _server_is_running(port):
         console.print(
@@ -389,24 +395,43 @@ def serve(model, port, backend, context_window):
         )
         raise SystemExit(1)
 
-    cmd = provider.build_serve_cmd(m, port)
-
     console.print(f"Serving [bold]{m['name']}[/bold] on port {port}")
     console.print(f"  [dim]backend: {provider.name}[/dim]")
-    console.print(f"  [dim]{' '.join(cmd)}[/dim]\n")
-    # effective_context (not context_default_tokens): the provider serves
-    # server-block-first precedence (a [server].max_tokens/context override
-    # beats context_default), so the stamp must record what will actually be
-    # served or the --context-window guard on attaching harnesses validates
-    # against the wrong number.
-    _write_port_stamp(port, alias, max_tokens=effective_context(m))
-    try:
-        subprocess.run(cmd)
-    finally:
-        # Only clear the stamp if it's still ours: a losing `turbo serve` on
-        # a port that turned out to be busy (bind failed) must not delete the
-        # winning process's stamp out from under it.
-        _clear_port_stamp_if_owned(port)
+    from turbollm.server_process import run_server, start_background
+
+    timeout = float(m.get("server", {}).get("startup_timeout") or defaults.get("server_startup_timeout") or 120)
+    kwargs = dict(model_id=provider.get_model_id(m), alias=alias, timeout=timeout)
+    if background:
+        info = start_background(None, m, port, TURBOLLM_STATE_DIR, **kwargs)
+        console.print(f"[green]Background server ready[/green] (pid {info['pid']}). Stop: turbo stop --port {port}")
+        console.print(f"  Log: {info['log']}")
+    else:
+        raise SystemExit(run_server(None, m, port, TURBOLLM_STATE_DIR, **kwargs))
+
+
+@cli.command(name="stop")
+@click.option("--port", "-p", default=8899, type=click.IntRange(1, 65535), show_default=True)
+def stop_cmd(port):
+    """Stop a verified Turbo background server and its backend."""
+    from turbollm.server_process import stop_background
+    stop_background(TURBOLLM_STATE_DIR, port)
+    console.print(f"Stopped background server on port {port}.")
+
+
+@cli.command(name="status")
+@click.option("--port", "-p", default=8899, type=click.IntRange(1, 65535), show_default=True)
+@click.option("--json", "as_json", is_flag=True)
+def status_cmd(port, as_json):
+    """Show the owned server on a port without loading a model."""
+    from turbollm.server_process import read_status, tcp_listening
+    info = read_status(TURBOLLM_STATE_DIR, port)
+    result = {"port": port, "listening": tcp_listening(port), "server": info}
+    if as_json:
+        click.echo(json.dumps(result))
+    elif info:
+        console.print(f"{info.get('alias') or info.get('model_id')} on port {port} (pid {info['pid']})")
+    else:
+        console.print(f"Port {port}: {'unmanaged listener' if result['listening'] else 'not running'}")
 
 
 @cli.command()
@@ -730,7 +755,8 @@ def transcribe(audio_file, model, language, response_format, port,
 
 def _server_is_running(port: int) -> bool:
     try:
-        urllib.request.urlopen(f"http://127.0.0.1:{port}/v1/models", timeout=2)
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/v1/models", timeout=2):
+            pass
         return True
     except Exception:
         return False
@@ -743,22 +769,6 @@ def _port_stamp_path(port: int) -> Path:
     return TURBOLLM_STATE_DIR / f"port-{port}.json"
 
 
-def _write_port_stamp(port: int, alias: str | None, max_tokens: int | None = None) -> None:
-    """Record the alias served on this port so `turbo <harness>` in another shell
-    can resolve back to the full registry entry (including pi/opencode/server
-    config) without depending on the server's advertised model id, which may not
-    match any hf_repo (e.g. backends that rename the served model).
-
-    ``max_tokens`` records the context size the server was actually started with,
-    so attaching harnesses can refuse oversized --context-window overrides loudly
-    instead of letting them silently get rejected by the server mid-request."""
-    TURBOLLM_STATE_DIR.mkdir(parents=True, exist_ok=True)
-    payload: dict = {"alias": alias, "pid": os.getpid(), "started_at": time.time()}
-    if max_tokens is not None:
-        payload["max_tokens"] = int(max_tokens)
-    _port_stamp_path(port).write_text(json.dumps(payload) + "\n")
-
-
 def _read_port_stamp(port: int) -> dict | None:
     p = _port_stamp_path(port)
     if not p.exists():
@@ -767,6 +777,11 @@ def _read_port_stamp(port: int) -> dict | None:
         data = json.loads(p.read_text())
     except (json.JSONDecodeError, OSError):
         return None
+    if not isinstance(data, dict):
+        return None
+    if data.get("identity"):
+        from turbollm.server_process import read_status
+        return read_status(TURBOLLM_STATE_DIR, port)
     pid = data.get("pid")
     if pid:
         try:
@@ -774,33 +789,6 @@ def _read_port_stamp(port: int) -> dict | None:
         except (OSError, ProcessLookupError):
             return None
     return data
-
-
-def _clear_port_stamp(port: int) -> None:
-    p = _port_stamp_path(port)
-    if p.exists():
-        try:
-            p.unlink()
-        except OSError:
-            pass
-
-
-def _clear_port_stamp_if_owned(port: int) -> None:
-    """Clear the port stamp only if it belongs to this process.
-
-    A `turbo serve`/`_run_with_server` invocation that loses a bind race
-    (another server won the port between our own liveness check and the
-    actual bind) must not delete the *winning* process's stamp in its
-    ``finally`` cleanup — that would erase a live server's stamp and quietly
-    reintroduce the "harness validates against the wrong context size" bug.
-    """
-    p = _port_stamp_path(port)
-    try:
-        data = json.loads(p.read_text())
-    except (OSError, json.JSONDecodeError):
-        return
-    if data.get("pid") == os.getpid():
-        _clear_port_stamp(port)
 
 
 def _get_running_model(port: int) -> dict | None:
@@ -813,138 +801,131 @@ def _get_running_model(port: int) -> dict | None:
     stamp = _read_port_stamp(port)
     if stamp and stamp.get("alias"):
         try:
-            return resolve_model(stamp["alias"])
+            resolved = resolve_model(stamp["alias"])
+            if stamp.get("hf_repo") and resolved.get("hf_repo") != stamp["hf_repo"]:
+                raise ValueError("registry alias now points to another model")
+            resolved = {**resolved, "backend": stamp.get("backend") or resolved.get("backend")}
+            if stamp.get("model_id"):
+                resolved["_served_model_id"] = stamp["model_id"]
+            if "revision" in stamp:
+                resolved["revision"] = stamp["revision"]
+            return with_context_window(resolved, int(stamp["max_tokens"])) if stamp.get("max_tokens") else resolved
         except Exception as e:
             Console(stderr=True).print(
                 f"[dim]stale port stamp: alias '{stamp['alias']}' no longer resolves "
                 f"({e}); falling back to server probe[/dim]"
             )
 
+    if stamp and stamp.get("hf_repo") and stamp.get("backend"):
+        for candidate in load_registry().get("models", {}).values():
+            if candidate.get("hf_repo") == stamp["hf_repo"] and candidate.get("backend") == stamp["backend"]:
+                candidate = {**candidate, "_served_model_id": stamp.get("model_id"),
+                             "revision": stamp["revision"] if "revision" in stamp else candidate.get("revision")}
+                return with_context_window(candidate, int(stamp["max_tokens"])) if stamp.get("max_tokens") else candidate
+        return {"name": stamp["hf_repo"], "hf_repo": stamp["hf_repo"], "backend": stamp["backend"],
+                "context_default": stamp.get("max_tokens", 32768), "_served_model_id": stamp.get("model_id"),
+                "revision": stamp.get("revision")}
     try:
-        resp = json.loads(urllib.request.urlopen(f"http://127.0.0.1:{port}/v1/models", timeout=2).read())
+        response = urllib.request.urlopen(f"http://127.0.0.1:{port}/v1/models", timeout=2)
+        try:
+            resp = json.loads(response.read())
+        finally:
+            response.close()
         model_id = resp["data"][0]["id"] if resp.get("data") else None
     except Exception:
         return None
+    reg = load_registry()
+    # Kev's aliases are shared by all checkpoints; identify the actual run.
+    if resp.get("models") and not model_id:
+        for candidate in reg.get("models", {}).values():
+            if candidate.get("backend") == "kev":
+                run = _get_provider_for(candidate).get_run(candidate)
+                if any(card.get("run") == run for card in resp["models"]):
+                    return candidate
+        return None
     if not model_id:
         return None
-    reg = load_registry()
     for m in reg.get("models", {}).values():
-        if m.get("hf_repo") == model_id:
-            return m
+        try:
+            if m.get("hf_repo") == model_id or _get_model_id(m) == model_id:
+                return m
+        except (click.ClickException, ValueError, KeyError, OSError):
+            continue
     # Unknown model on the server — return a synthetic dict
     return {"name": model_id, "hf_repo": model_id, "backend": "unknown"}
 
 
-def _read_log_tail(path: str, max_lines: int = 80) -> str:
-    try:
-        with open(path, encoding="utf-8", errors="replace") as handle:
-            lines = handle.readlines()
-    except OSError:
-        return ""
-    return "".join(lines[-max_lines:]).strip()
+def _attach_model(model: dict, port: int, *, context_window: int | None = None) -> dict:
+    """Validate identity and use the running server's actual context policy."""
+    running = _get_running_model(port)
+    backend = model.get("backend") or get_defaults().get("backend", "vllm-mlx")
+    if not running or running.get("backend") != backend or running.get("hf_repo") != model.get("hf_repo"):
+        name = (running or {}).get("name", "an unidentified server")
+        raise click.ClickException(f"Port {port} is serving {name}, different from {model.get('name', model.get('hf_repo'))}. Use another --port.")
+    if model.get("revision") and model["revision"] != running.get("revision"):
+        raise click.ClickException(f"Port {port} is serving a different model revision. Use another --port.")
+    if running.get("_served_model_id") and _get_model_id(model) != running["_served_model_id"]:
+        raise click.ClickException(f"Port {port} is serving a different provider model ID. Use another --port.")
+    stamp = _read_port_stamp(port)
+    served = stamp.get("max_tokens") if stamp else None
+    if running.get("_served_model_id"):
+        model = {**model, "_served_model_id": running["_served_model_id"]}
+    if served:
+        if context_window is not None and context_window > int(served):
+            raise click.ClickException(f"--context-window {context_window} exceeds the running server's max_tokens ({served}). Restart the server with the larger context.")
+        return with_context_window(model, context_window if context_window is not None else int(served))
+    return with_context_window(model, context_window) if context_window is not None else model
 
 
 def _run_with_server(m: dict, port: int, launch_fn):
-    """Start turbo server (or reuse running one) and run launch_fn(m, port).
+    """Attach to a verified server, or supervise an owned server for this call.
 
-    Handles server lifecycle: starts if needed, waits for ready,
-    stops on exit.  launch_fn should be a blocking call (e.g. subprocess.run).
-    Returns whatever launch_fn returns (used for headless exit codes).
+    Models with server.keep_alive=true retain their background process between
+    calls. Others stop after the client exits. The backend owns idle unloading.
     """
-    # Route every status/error line through stderr. The function's only data
-    # path is launch_fn's return value (and whatever launch_fn writes to
-    # stdout). Server-startup messages on stdout would otherwise leak into
-    # pipelines like `turbo transcribe file.wav | pi -p '…'`, where the LLM
-    # mistakes them for transcript content.
-    console = Console(stderr=True)
+    from turbollm.server_process import start_background, startup_lock, stop_background
 
-    # If a server is already running, just attach — no provider needed
+    status_console = Console(stderr=True)
+    defaults = get_defaults()
+    m = {**m, "backend": m.get("backend") or defaults.get("backend", "vllm-mlx")}
     if _server_is_running(port):
-        console.print(f"[green]Server already running on port {port}.[/green]")
-        return launch_fn(m, port)
+        attached = _attach_model(m, port)
+        current = with_context_window(attached, min(effective_context(m), effective_context(attached)))
+        return launch_fn(current, port)
 
     provider = _get_provider_for(m)
-
     if not provider.is_downloaded(m):
-        size = f" ({m['size_gb']}GB)" if m.get("size_gb") else ""
-        console.print(f"[yellow]Model not downloaded:[/yellow] {m.get('name', m['hf_repo'])}{size}")
-        if click.confirm("  Pull now?"):
-            provider.pull(m)
+        raise click.ClickException(
+            f"Model not downloaded: {m.get('name', m['hf_repo'])}. Run turbo pull {m['hf_repo']} first."
+        )
+    available = provider.is_available(m) if m["backend"] == "kev" else provider.is_available()
+    if not available:
+        raise click.ClickException(f"{provider.name} not found. Install: {provider.install_hint}")
+    timeout = float(m.get("server", {}).get("startup_timeout") or defaults.get("server_startup_timeout") or 120)
+    keep_alive = bool(m.get("server", {}).get("keep_alive", defaults.get("keep_alive", False)))
+    info = None
+    current = m
+    # Waiting clients attach only after the first launcher publishes readiness.
+    # Explicit `serve` and ephemeral starts retain their busy-port refusal.
+    with startup_lock(TURBOLLM_STATE_DIR, port, timeout) if keep_alive else contextlib.nullcontext():
+        if keep_alive and _server_is_running(port):
+            attached = _attach_model(m, port)
+            current = with_context_window(attached, min(effective_context(m), effective_context(attached)))
         else:
-            raise SystemExit(1)
-    if not provider.is_available():
-        console.print(f"[red]{provider.name} not found.[/red] Install: [bold]{provider.install_hint}[/bold]")
-        raise SystemExit(1)
-
-    cmd = provider.build_serve_cmd(m, port)
-    console.print(f"Starting [bold]{m['name']}[/bold] on port {port} [{provider.name}]...")
-    log_file = tempfile.NamedTemporaryFile(
-        mode="w+",
-        encoding="utf-8",
-        prefix="turbollm-server-",
-        suffix=".log",
-        delete=False,
-    )
-    log_path = log_file.name
-    server = subprocess.Popen(cmd, stdout=log_file, stderr=subprocess.STDOUT)
-
-    # Stamp the port so harnesses/transcribe attaching from another shell (and
-    # the --context-window guard in _dispatch_harness) can see what this
-    # auto-started server actually launched with. Previously only `turbo
-    # serve` wrote a stamp, so servers auto-started here (harness/transcribe)
-    # were invisible to that guard and it silently skipped validation.
-    _write_port_stamp(port, None, max_tokens=effective_context(m))
-
-    # Startup timeout in seconds. Per-model override beats global default;
-    # falls back to 120s. Larger models (e.g. Qwen3.6 35B) reliably need more
-    # than the default on cold disk caches. Uses a monotonic deadline (not an
-    # iteration count) so the configured seconds roughly match wall-clock
-    # time regardless of how long each _server_is_running probe takes.
-    startup_timeout = int(
-        m.get("server", {}).get("startup_timeout")
-        or get_defaults().get("server_startup_timeout")
-        or 120
-    )
+            status_console.print(f"Starting {m.get('name', m['hf_repo'])} on port {port}...")
+            info = start_background(None, m, port, TURBOLLM_STATE_DIR,
+                                    model_id=provider.get_model_id(m), timeout=timeout)
     try:
-        deadline = time.monotonic() + startup_timeout
-        while time.monotonic() < deadline:
-            if _server_is_running(port):
-                break
-            if server.poll() is not None:
-                break
-            time.sleep(1)
-
-        if not _server_is_running(port):
-            console.print("[red]Server failed to start.[/red]")
-            log_file.flush()
-            tail = _read_log_tail(log_path)
-            if tail:
-                console.print("[yellow]Backend log:[/yellow]")
-                console.print(tail)
-            if server.poll() is None:
-                server.terminate()
-            raise SystemExit(1)
-
-        console.print("[green]Server ready.[/green]")
-        try:
-            return launch_fn(m, port)
-        except KeyboardInterrupt:
-            return None
+        return launch_fn(current, port)
     finally:
-        if server.poll() is None:
-            server.terminate()
-            try:
-                server.wait(timeout=10)
-            except subprocess.TimeoutExpired:
-                server.kill()
-                server.wait()
-        log_file.close()
-        try:
-            os.unlink(log_path)
-        except OSError:
-            pass
-        _clear_port_stamp_if_owned(port)
-        console.print("[dim]Server stopped.[/dim]")
+        if info and keep_alive:
+            status_console.print(f"Server kept warm on port {port}. Stop: turbo stop --port {port}")
+        elif info:
+            # Never stop a replacement whose token differs from the one started here.
+            from turbollm.server_process import read_status
+            current = read_status(TURBOLLM_STATE_DIR, port)
+            if current and current.get("token") == info["token"]:
+                stop_background(TURBOLLM_STATE_DIR, port)
 
 
 # ---------------------------------------------------------------------------
@@ -971,7 +952,7 @@ def _run_harness(harness_name: str, m: dict, port: int, prompt: str | None = Non
     if prompt is not None:
         console.print(f"  Running {harness_name} (headless) → [dim]{model_id}[/dim]")
         try:
-            rc = _run_with_server(m, port, lambda _m, p: harness.headless(model_id, p, m, prompt))
+            rc = _run_with_server(m, port, lambda current, p: harness.headless(_get_model_id(current), p, current, prompt))
         except NotImplementedError as e:
             console.print(f"[red]{e}[/red]")
             raise SystemExit(2)
@@ -979,7 +960,7 @@ def _run_harness(harness_name: str, m: dict, port: int, prompt: str | None = Non
             raise SystemExit(rc)
         return
     console.print(f"  Launching {harness_name} → [dim]{model_id}[/dim]")
-    _run_with_server(m, port, lambda _m, p: harness.launch(model_id, p, m))
+    _run_with_server(m, port, lambda current, p: harness.launch(_get_model_id(current), p, current))
 
 
 def _is_backend_compatible(harness_config: dict, backend: str) -> bool:
@@ -1031,11 +1012,11 @@ def _dispatch_harness(
     def _apply_overrides(d: dict) -> dict:
         if backend:
             d = {**d, "backend": backend}
-        if context_window:
+        if context_window is not None:
             # Override the picker landing context for this invocation. Flows through
             # both the provider (server max-model-len) and the harness's models.json
             # via context_default_tokens().
-            d = {**d, "context_default": int(context_window)}
+            d = with_context_window(d, int(context_window))
         if thinking is not None:
             # Merge into pi config so PiHarness picks it up and appends `:level`
             # to the model arg. Harnesses that don't read pi config ignore it.
@@ -1051,6 +1032,10 @@ def _dispatch_harness(
 
     if model:
         m = resolve_model(model)
+        m = {**m, "backend": backend or m.get("backend") or get_defaults().get("backend", "vllm-mlx")}
+        m = _apply_overrides(m)
+        if _server_is_running(port):
+            m = _attach_model(m, port, context_window=context_window)
     elif _server_is_running(port):
         running = _get_running_model(port)
         running_backend = running.get("backend", "unknown") if running else "unknown"
@@ -1091,6 +1076,9 @@ def _dispatch_harness(
                         new_port,
                     )
                     return
+            stamp = _read_port_stamp(port)
+            if stamp and stamp.get("max_tokens"):
+                running = with_context_window(running, int(stamp["max_tokens"]))
             running = _apply_overrides(running)
             _run_harness(harness_name, running, port, prompt=prompt)
             return
@@ -1599,7 +1587,9 @@ def prune_cmd(dry_run, vault, audio_dir):
 # missing/unsupported/broken plugin never breaks core turbo (see plugins loader).
 # ---------------------------------------------------------------------------
 from turbollm.plugins import register_all  # noqa: E402
+from turbollm.decisions import decide_cmd  # noqa: E402
 
+cli.add_command(decide_cmd)
 register_all(cli)
 
 

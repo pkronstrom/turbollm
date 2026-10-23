@@ -1,9 +1,10 @@
 import shutil
 from pathlib import Path
 
+import click
 from rich.console import Console
 
-from turbollm.hf_download import quiet_hf, translate_hf_errors
+from turbollm.hf_download import quiet_hf, revision_kwargs, translate_hf_errors
 from turbollm.registry import _hf_snapshot_path
 
 console = Console()
@@ -36,19 +37,28 @@ class MlxAudioProvider:
         quiet_hf()
 
         console.print(f"  [dim]downloading {repo}…[/dim]")
-        local = snapshot_download(repo_id=repo)
+        local = snapshot_download(repo_id=repo, **revision_kwargs(model))
         snapshot_path = Path(local)
         total = sum(f.stat().st_size for f in snapshot_path.rglob("*") if f.is_file())
         console.print(f"  [green]Done![/green] {total / 1e9:.2f}GB total")
 
     def is_downloaded(self, model: dict) -> bool:
-        snap = _hf_snapshot_path(model["hf_repo"])
+        snap = _hf_snapshot_path(model["hf_repo"], **revision_kwargs(model))
         if not snap:
             return False
         # Either MLX safetensors or HF weights count as "downloaded"
         return any(snap.glob("*.safetensors")) or any(snap.glob("*.bin"))
 
     def get_model_id(self, model: dict) -> str:
+        if model.get("revision"):
+            snapshot = _hf_snapshot_path(model["hf_repo"], **revision_kwargs(model))
+            if snapshot is None:
+                raise click.ClickException(
+                    f"Audio revision {model['revision']!r} is not cached; run turbo pull first."
+                )
+            # mlx-audio's request loader accepts a local path, but a bare repo ID
+            # loads its default revision irrespective of the CLI download pin.
+            return str(snapshot)
         return model["hf_repo"]
 
     def pull_draft(self, model: dict) -> None:

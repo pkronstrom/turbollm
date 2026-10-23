@@ -69,8 +69,10 @@ that modifies KV cache or batch scheduling breaks the linear attention layers.
 upstream vLLM issue — the Multi-Token Predictor (MTP) had a bug where `spec_step_idx` wasn't
 forwarded properly, causing all draft tokens to use MTP layer 0 instead of cycling through layers.
 
-Fixed in GPU vLLM ([#36910](https://github.com/vllm-project/vllm/pull/36910)), but unclear if the
-fix has landed in vllm-mlx.
+Correction (2026-10-23): GPU vLLM [#36910](https://github.com/vllm-project/vllm/pull/36910)
+was closed without merging. It concerns MTP/Eagle layer selection, not vllm-mlx's
+external-draft sparse prefill. It does not establish a fix for the observation
+above; revalidate the exact backend/model combination before enabling these flags.
 
 **Re-check:**
 - [vllm-project/vllm#36872](https://github.com/vllm-project/vllm/issues/36872) — original bug report

@@ -72,12 +72,6 @@ def _build_entry(alias: str, m: dict, backend: str) -> PickerEntry:
     options = tuple(k for k in CONTEXT_LADDER_K if k <= max_ctx_k)
     if not options:
         options = (max_ctx_k,)
-    if backend == "omlx":
-        # providers/omlx.py never reads a context/max_tokens key — the model
-        # serves whatever its single configured context is. Collapse to one
-        # fixed option so the picker doesn't offer a selector that does
-        # nothing (see context_override_for).
-        options = (default_ctx_k,)
     # Land on the model's declared default; fall back to the largest option
     # below it, then the smallest available.
     if default_ctx_k in options:
@@ -270,7 +264,7 @@ def context_override_for(model: dict, ctx_tokens: int) -> dict:
     if backend == "gguf":
         overrides["context"] = ctx_tokens
     elif backend == "omlx":
-        pass
+        overrides["max_context_window"] = ctx_tokens
     else:
         # vllm-mlx and mlx-vlm use max_tokens as the context ceiling.
         overrides["max_tokens"] = ctx_tokens
@@ -300,11 +294,8 @@ def pick(
     ctx_tokens = entry.ctx_options_k[entry.ctx_idx] * 1024
 
     # Deep-copy mutable sub-blocks so we don't mutate the registry.
-    new_model = dict(entry.model)
-    new_model["server"] = {**entry.model.get("server", {})}
-    new_model["opencode"] = {**entry.model.get("opencode", {})}
-    new_model["pi"] = {**entry.model.get("pi", {})}
-    new_model["server"].update(context_override_for(entry.model, ctx_tokens))
+    from turbollm.registry import with_context_window
+    new_model = with_context_window(entry.model, ctx_tokens)
 
     # Propagate to harness-facing context fields so agents (opencode, pi) see
     # the same window as the server. Only override if a value exists on the

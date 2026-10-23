@@ -1,0 +1,121 @@
+{
+  "description": "Identical repeated prompt, not a quality or general cache benchmark",
+  "request": {
+    "model": "Qwen3.8-27B-oQ6e-mtp",
+    "messages": [
+      {
+        "role": "system",
+        "content": "You are a concise coding assistant."
+      },
+      {
+        "role": "user",
+        "content": "# reference entry 0: square(0) = 0\n# reference entry 1: square(1) = 1\n# reference entry 2: square(2) = 4\n# reference entry 3: square(3) = 9\n# reference entry 4: square(4) = 16\n# reference entry 5: square(5) = 25\n# reference entry 6: square(6) = 36\n# reference entry 7: square(7) = 49\n# reference entry 8: square(8) = 64\n# reference entry 9: square(9) = 81\n# reference entry 10: square(10) = 100\n# reference entry 11: square(11) = 121\n# reference entry 12: square(12) = 144\n# reference entry 13: square(13) = 169\n# reference entry 14: square(14) = 196\n# reference entry 15: square(15) = 225\n# reference entry 16: square(16) = 256\n# reference entry 17: square(17) = 289\n# reference entry 18: square(18) = 324\n# reference entry 19: square(19) = 361\n# reference entry 20: square(20) = 400\n# reference entry 21: square(21) = 441\n# reference entry 22: square(22) = 484\n# reference entry 23: square(23) = 529\n# reference entry 24: square(24) = 576\n# reference entry 25: square(25) = 625\n# reference entry 26: square(26) = 676\n# reference entry 27: square(27) = 729\n# reference entry 28: square(28) = 784\n# reference entry 29: square(29) = 841\n# reference entry 30: square(30) = 900\n# reference entry 31: square(31) = 961\n# reference entry 32: square(32) = 1024\n# reference entry 33: square(33) = 1089\n# reference entry 34: square(34) = 1156\n# reference entry 35: square(35) = 1225\n# reference entry 36: square(36) = 1296\n# reference entry 37: square(37) = 1369\n# reference entry 38: square(38) = 1444\n# reference entry 39: square(39) = 1521\n# reference entry 40: square(40) = 1600\n# reference entry 41: square(41) = 1681\n# reference entry 42: square(42) = 1764\n# reference entry 43: square(43) = 1849\n# reference entry 44: square(44) = 1936\n# reference entry 45: square(45) = 2025\n# reference entry 46: square(46) = 2116\n# reference entry 47: square(47) = 2209\n# reference entry 48: square(48) = 2304\n# reference entry 49: square(49) = 2401\n# reference entry 50: square(50) = 2500\n# reference entry 51: square(51) = 2601\n# reference entry 52: square(52) = 2704\n# reference entry 53: square(53) = 2809\n# reference entry 54: square(54) = 2916\n# reference entry 55: square(55) = 3025\n# reference entry 56: square(56) = 3136\n# reference entry 57: square(57) = 3249\n# reference entry 58: square(58) = 3364\n# reference entry 59: square(59) = 3481\n# reference entry 60: square(60) = 3600\n# reference entry 61: square(61) = 3721\n# reference entry 62: square(62) = 3844\n# reference entry 63: square(63) = 3969\n# reference entry 64: square(64) = 4096\n# reference entry 65: square(65) = 4225\n# reference entry 66: square(66) = 4356\n# reference entry 67: square(67) = 4489\n# reference entry 68: square(68) = 4624\n# reference entry 69: square(69) = 4761\n# reference entry 70: square(70) = 4900\n# reference entry 71: square(71) = 5041\n# reference entry 72: square(72) = 5184\n# reference entry 73: square(73) = 5329\n# reference entry 74: square(74) = 5476\n# reference entry 75: square(75) = 5625\n# reference entry 76: square(76) = 5776\n# reference entry 77: square(77) = 5929\n# reference entry 78: square(78) = 6084\n# reference entry 79: square(79) = 6241\n# reference entry 80: square(80) = 6400\n# reference entry 81: square(81) = 6561\n# reference entry 82: square(82) = 6724\n# reference entry 83: square(83) = 6889\n# reference entry 84: square(84) = 7056\n# reference entry 85: square(85) = 7225\n# reference entry 86: square(86) = 7396\n# reference entry 87: square(87) = 7569\n# reference entry 88: square(88) = 7744\n# reference entry 89: square(89) = 7921\n# reference entry 90: square(90) = 8100\n# reference entry 91: square(91) = 8281\n# reference entry 92: square(92) = 8464\n# reference entry 93: square(93) = 8649\n# reference entry 94: square(94) = 8836\n# reference entry 95: square(95) = 9025\n# reference entry 96: square(96) = 9216\n# reference entry 97: square(97) = 9409\n# reference entry 98: square(98) = 9604\n# reference entry 99: square(99) = 9801\n# reference entry 100: square(100) = 10000\n# reference entry 101: square(101) = 10201\n# reference entry 102: square(102) = 10404\n# reference entry 103: square(103) = 10609\n# reference entry 104: square(104) = 10816\n# reference entry 105: square(105) = 11025\n# reference entry 106: square(106) = 11236\n# reference entry 107: square(107) = 11449\n# reference entry 108: square(108) = 11664\n# reference entry 109: square(109) = 11881\n# reference entry 110: square(110) = 12100\n# reference entry 111: square(111) = 12321\n# reference entry 112: square(112) = 12544\n# reference entry 113: square(113) = 12769\n# reference entry 114: square(114) = 12996\n# reference entry 115: square(115) = 13225\n# reference entry 116: square(116) = 13456\n# reference entry 117: square(117) = 13689\n# reference entry 118: square(118) = 13924\n# reference entry 119: square(119) = 14161\n# reference entry 120: square(120) = 14400\n# reference entry 121: square(121) = 14641\n# reference entry 122: square(122) = 14884\n# reference entry 123: square(123) = 15129\n# reference entry 124: square(124) = 15376\n# reference entry 125: square(125) = 15625\n# reference entry 126: square(126) = 15876\n# reference entry 127: square(127) = 16129\n# reference entry 128: square(128) = 16384\n# reference entry 129: square(129) = 16641\n# reference entry 130: square(130) = 16900\n# reference entry 131: square(131) = 17161\n# reference entry 132: square(132) = 17424\n# reference entry 133: square(133) = 17689\n# reference entry 134: square(134) = 17956\n# reference entry 135: square(135) = 18225\n# reference entry 136: square(136) = 18496\n# reference entry 137: square(137) = 18769\n# reference entry 138: square(138) = 19044\n# reference entry 139: square(139) = 19321\n# reference entry 140: square(140) = 19600\n# reference entry 141: square(141) = 19881\n# reference entry 142: square(142) = 20164\n# reference entry 143: square(143) = 20449\n# reference entry 144: square(144) = 20736\n# reference entry 145: square(145) = 21025\n# reference entry 146: square(146) = 21316\n# reference entry 147: square(147) = 21609\n# reference entry 148: square(148) = 21904\n# reference entry 149: square(149) = 22201\n# reference entry 150: square(150) = 22500\n# reference entry 151: square(151) = 22801\n# reference entry 152: square(152) = 23104\n# reference entry 153: square(153) = 23409\n# reference entry 154: square(154) = 23716\n# reference entry 155: square(155) = 24025\n# reference entry 156: square(156) = 24336\n# reference entry 157: square(157) = 24649\n# reference entry 158: square(158) = 24964\n# reference entry 159: square(159) = 25281\n# reference entry 160: square(160) = 25600\n# reference entry 161: square(161) = 25921\n# reference entry 162: square(162) = 26244\n# reference entry 163: square(163) = 26569\n# reference entry 164: square(164) = 26896\n# reference entry 165: square(165) = 27225\n# reference entry 166: square(166) = 27556\n# reference entry 167: square(167) = 27889\n# reference entry 168: square(168) = 28224\n# reference entry 169: square(169) = 28561\n# reference entry 170: square(170) = 28900\n# reference entry 171: square(171) = 29241\n# reference entry 172: square(172) = 29584\n# reference entry 173: square(173) = 29929\n# reference entry 174: square(174) = 30276\n# reference entry 175: square(175) = 30625\n# reference entry 176: square(176) = 30976\n# reference entry 177: square(177) = 31329\n# reference entry 178: square(178) = 31684\n# reference entry 179: square(179) = 32041\n# reference entry 180: square(180) = 32400\n# reference entry 181: square(181) = 32761\n# reference entry 182: square(182) = 33124\n# reference entry 183: square(183) = 33489\n# reference entry 184: square(184) = 33856\n# reference entry 185: square(185) = 34225\n# reference entry 186: square(186) = 34596\n# reference entry 187: square(187) = 34969\n# reference entry 188: square(188) = 35344\n# reference entry 189: square(189) = 35721\n# reference entry 190: square(190) = 36100\n# reference entry 191: square(191) = 36481\n# reference entry 192: square(192) = 36864\n# reference entry 193: square(193) = 37249\n# reference entry 194: square(194) = 37636\n# reference entry 195: square(195) = 38025\n# reference entry 196: square(196) = 38416\n# reference entry 197: square(197) = 38809\n# reference entry 198: square(198) = 39204\n# reference entry 199: square(199) = 39601\n# reference entry 200: square(200) = 40000\n# reference entry 201: square(201) = 40401\n# reference entry 202: square(202) = 40804\n# reference entry 203: square(203) = 41209\n# reference entry 204: square(204) = 41616\n# reference entry 205: square(205) = 42025\n# reference entry 206: square(206) = 42436\n# reference entry 207: square(207) = 42849\n# reference entry 208: square(208) = 43264\n# reference entry 209: square(209) = 43681\n# reference entry 210: square(210) = 44100\n# reference entry 211: square(211) = 44521\n# reference entry 212: square(212) = 44944\n# reference entry 213: square(213) = 45369\n# reference entry 214: square(214) = 45796\n# reference entry 215: square(215) = 46225\n# reference entry 216: square(216) = 46656\n# reference entry 217: square(217) = 47089\n# reference entry 218: square(218) = 47524\n# reference entry 219: square(219) = 47961\n# reference entry 220: square(220) = 48400\n# reference entry 221: square(221) = 48841\n# reference entry 222: square(222) = 49284\n# reference entry 223: square(223) = 49729\n# reference entry 224: square(224) = 50176\n# reference entry 225: square(225) = 50625\n# reference entry 226: square(226) = 51076\n# reference entry 227: square(227) = 51529\n# reference entry 228: square(228) = 51984\n# reference entry 229: square(229) = 52441\n# reference entry 230: square(230) = 52900\n# reference entry 231: square(231) = 53361\n# reference entry 232: square(232) = 53824\n# reference entry 233: square(233) = 54289\n# reference entry 234: square(234) = 54756\n# reference entry 235: square(235) = 55225\n# reference entry 236: square(236) = 55696\n# reference entry 237: square(237) = 56169\n# reference entry 238: square(238) = 56644\n# reference entry 239: square(239) = 57121\n# reference entry 240: square(240) = 57600\n# reference entry 241: square(241) = 58081\n# reference entry 242: square(242) = 58564\n# reference entry 243: square(243) = 59049\n# reference entry 244: square(244) = 59536\n# reference entry 245: square(245) = 60025\n# reference entry 246: square(246) = 60516\n# reference entry 247: square(247) = 61009\n# reference entry 248: square(248) = 61504\n# reference entry 249: square(249) = 62001\n# reference entry 250: square(250) = 62500\n# reference entry 251: square(251) = 63001\n# reference entry 252: square(252) = 63504\n# reference entry 253: square(253) = 64009\n# reference entry 254: square(254) = 64516\n# reference entry 255: square(255) = 65025\n\ndef square(n):\n    return n*n\n\nWhat does square(17) return? Reply only with the integer."
+      }
+    ],
+    "stream": true,
+    "stream_options": {
+      "include_usage": true
+    },
+    "max_tokens": 256,
+    "temperature": 1.0,
+    "top_p": 0.95,
+    "top_k": 20,
+    "min_p": 0,
+    "presence_penalty": 0,
+    "chat_template_kwargs": {
+      "enable_thinking": true,
+      "preserve_thinking": true,
+      "reasoning_effort": "low"
+    }
+  },
+  "runs": [
+    {
+      "run": 1,
+      "first_delta_s": 31.830397666082717,
+      "first_content_s": 34.1187326250365,
+      "total_s": 34.13096375006717,
+      "content": "\n\n289",
+      "correct": true,
+      "reasoning_chars": 129,
+      "usage": {
+        "prompt_tokens": 5339,
+        "completion_tokens": 54,
+        "total_tokens": 5393,
+        "input_tokens": 5339,
+        "output_tokens": 54,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 50
+        },
+        "model_load_duration": 4.9,
+        "time_to_first_token": 26.71,
+        "time_to_first_visible_token": 26.88,
+        "total_time": 29.19,
+        "prompt_eval_duration": 26.71,
+        "generation_duration": 2.47,
+        "prompt_tokens_per_second": 199.86,
+        "generation_tokens_per_second": 21.85
+      }
+    },
+    {
+      "run": 2,
+      "first_delta_s": 0.3670750829624012,
+      "first_content_s": 1.604275833000429,
+      "total_s": 1.604804166010581,
+      "content": "\n\n289",
+      "correct": true,
+      "reasoning_chars": 149,
+      "usage": {
+        "prompt_tokens": 5339,
+        "completion_tokens": 54,
+        "total_tokens": 5393,
+        "input_tokens": 5339,
+        "output_tokens": 54,
+        "prompt_tokens_details": {
+          "cached_tokens": 5334
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 50
+        },
+        "time_to_first_token": 0.35,
+        "time_to_first_visible_token": 0.36,
+        "total_time": 1.59,
+        "prompt_eval_duration": 0.35,
+        "generation_duration": 1.24,
+        "prompt_tokens_per_second": 14.1,
+        "generation_tokens_per_second": 43.58
+      }
+    },
+    {
+      "run": 3,
+      "first_delta_s": 0.26288345898501575,
+      "first_content_s": 1.5288490420207381,
+      "total_s": 1.5330934999510646,
+      "content": "\n\n289",
+      "correct": true,
+      "reasoning_chars": 189,
+      "usage": {
+        "prompt_tokens": 5339,
+        "completion_tokens": 62,
+        "total_tokens": 5401,
+        "input_tokens": 5339,
+        "output_tokens": 62,
+        "prompt_tokens_details": {
+          "cached_tokens": 5334
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 58
+        },
+        "time_to_first_token": 0.25,
+        "time_to_first_visible_token": 0.25,
+        "total_time": 1.52,
+        "prompt_eval_duration": 0.25,
+        "generation_duration": 1.27,
+        "prompt_tokens_per_second": 19.77,
+        "generation_tokens_per_second": 48.76
+      }
+    }
+  ]
+}

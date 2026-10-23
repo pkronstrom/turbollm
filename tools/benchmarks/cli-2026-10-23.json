@@ -1,0 +1,37 @@
+[
+  {
+    "args": [
+      "--help"
+    ],
+    "median_ms": 74.68924997374415,
+    "range_ms": [
+      73.58399999793619,
+      79.75420798175037
+    ],
+    "parses_warm_process": 1
+  },
+  {
+    "args": [
+      "workflows",
+      "list",
+      "--json"
+    ],
+    "median_ms": 74.71912493929267,
+    "range_ms": [
+      69.561833050102,
+      75.77404100447893
+    ],
+    "parses_warm_process": 0
+  },
+  {
+    "args": [
+      "ls"
+    ],
+    "median_ms": 94.88299989607185,
+    "range_ms": [
+      84.54041695222259,
+      114.17824996169657
+    ],
+    "parses_warm_process": 0
+  }
+]

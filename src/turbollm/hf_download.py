@@ -1,19 +1,4 @@
-"""Shared HuggingFace Hub download helpers used by providers.
-
-Extracted three near-identical blocks that had drifted across
-providers/*.py (audit DRY findings):
-  - `quiet_hf()`      — the httpx/huggingface_hub logging + telemetry-env
-                        boilerplate that was copy-pasted in all five providers.
-  - `configured_path` — the `_configured_path` helper triplicated (with two
-                        different expansion idioms) in gguf/vllm_mlx/mlx_vlm.
-  - `download_repo_with_progress` — the ~40-line file-listing/progress/summary
-                        dance duplicated between vllm_mlx.pull and omlx.pull;
-                        the omlx copy had already drifted and silently lost
-                        `local_dir` support, which this restores.
-  - `translate_hf_errors` — a decorator so provider `pull()`s report a clean
-                        one-line error for network/auth failures instead of a
-                        raw huggingface_hub traceback.
-"""
+"""Shared Hugging Face downloads, revision options, paths, and error handling."""
 
 import functools
 import logging
@@ -49,6 +34,55 @@ def configured_path(model: dict, key: str) -> Path | None:
     return Path(os.path.expanduser(str(value)))
 
 
+def local_revision_matches(
+    model: dict, directory: Path, *, prefix: str = "", filenames: list[str] | None = None
+) -> bool:
+    """Validate local-dir artifacts against a pin using only local Hub metadata.
+
+    An exact commit can be checked directly. Branch/tag pins require a cached
+    Hub ref; without one we conservatively refuse to claim the files match.
+    No metadata or mismatched shards/config means the local model is unverified.
+    """
+    revision = model.get(prefix + "revision")
+    if not revision:
+        return True
+    revision_path = Path(str(revision))
+    if revision_path.is_absolute() or ".." in revision_path.parts:
+        return False
+    expected = str(revision)
+    repo = model.get(prefix + "hf_repo")
+    if repo:
+        from turbollm.registry import _hf_cache_path
+        try:
+            cached = (_hf_cache_path(repo) / "refs" / revision_path).read_text().strip()
+        except OSError:
+            cached = None
+        if cached:
+            if Path(cached).name != cached or cached in (".", ".."):
+                return False
+            expected = cached
+    if filenames is None:
+        filenames = [str(path.relative_to(directory)) for path in directory.rglob("*")
+                     if path.is_file() and ".cache" not in path.relative_to(directory).parts
+                     and (path.suffix in (".safetensors", ".bin", ".gguf")
+                          or path.name == "config.json" or path.name.endswith(".index.json"))]
+    if not filenames:
+        return False
+    for name in filenames:
+        relative = Path(name)
+        if relative.is_absolute() or ".." in relative.parts or not (directory / relative).is_file():
+            return False
+        metadata = directory / ".cache" / "huggingface" / "download" / (name + ".metadata")
+        try:
+            with metadata.open() as handle:
+                commit = handle.readline().strip()
+        except (OSError, UnicodeError):
+            return False
+        if commit != expected:
+            return False
+    return True
+
+
 def translate_hf_errors(fn):
     """Decorator: turn huggingface_hub network/auth errors into a one-line
     click error instead of a raw traceback surfacing from `pull()`."""
@@ -70,53 +104,31 @@ def translate_hf_errors(fn):
     return wrapper
 
 
-def download_repo_with_progress(repo: str, local_dir: Path | None = None) -> Path:
-    """Download a full HF repo snapshot: small files quietly, safetensors
-    with a per-file progress bar. Returns the resolved snapshot directory
-    (`local_dir` if given, else the HF cache snapshot path).
+def revision_kwargs(model: dict, key: str = "revision") -> dict:
+    """Only pass configured revisions, retaining Hub defaults otherwise."""
+    revision = model.get(key)
+    return {"revision": revision} if revision else {}
+
+
+def download_repo_with_progress(
+    repo: str, local_dir: Path | None = None, *, revision: str | None = None
+) -> Path:
+    """Download one coherent snapshot with the Hub's concurrent progress UI.
+
+    snapshot_download resolves the revision to a commit once and fetches its
+    files concurrently. Avoid individual unpinned downloads followed by a
+    second snapshot pass (which could also mix files across moving revisions).
     """
-    from huggingface_hub import hf_hub_download, list_repo_files, snapshot_download
-    from rich.progress import (
-        BarColumn, DownloadColumn, Progress, SpinnerColumn,
-        TextColumn, TimeRemainingColumn, TransferSpeedColumn,
-    )
+    from huggingface_hub import snapshot_download
 
     quiet_hf()
-    os.environ["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"
-
-    files = list_repo_files(repo_id=repo)
-    model_files = [f for f in files if not f.startswith(".")]
-    safetensor_files = [f for f in model_files if f.endswith(".safetensors")]
-    other_files = [f for f in model_files if not f.endswith(".safetensors")]
-
-    download_kwargs = {"repo_id": repo}
+    download_kwargs = {"repo_id": repo, "max_workers": 8}
+    if revision:
+        download_kwargs["revision"] = revision
     if local_dir is not None:
         local_dir.mkdir(parents=True, exist_ok=True)
         download_kwargs["local_dir"] = str(local_dir)
-
-    # Download small files first (configs, tokenizer) quietly.
-    for f in other_files:
-        hf_hub_download(filename=f, **download_kwargs)
-
-    # Download safetensors with per-file progress.
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[bold blue]{task.fields[filename]}"),
-        BarColumn(bar_width=30), DownloadColumn(),
-        TransferSpeedColumn(), TimeRemainingColumn(),
-        console=console, transient=True,
-    ) as progress:
-        for f in safetensor_files:
-            fname = f.split("/")[-1]
-            task = progress.add_task("dl", filename=fname, total=None, start=True)
-            local_file = hf_hub_download(filename=f, **download_kwargs)
-            fsize = Path(local_file).stat().st_size
-            progress.update(task, completed=fsize, total=fsize)
-            progress.remove_task(task)
-            console.print(f"  [green]done[/green] {fname} ({fsize / 1e9:.1f}GB)")
-
-    # Ensure snapshot is fully resolved (also covers the metadata-only repos).
-    local = snapshot_download(**download_kwargs)
-    total_size = sum(f.stat().st_size for f in Path(local).rglob("*") if f.is_file()) / 1e9
+    local = Path(snapshot_download(**download_kwargs))
+    total_size = sum(f.stat().st_size for f in local.rglob("*") if f.is_file()) / 1e9
     console.print(f"\n  [green]Done![/green] {total_size:.1f}GB total")
-    return Path(local)
+    return local

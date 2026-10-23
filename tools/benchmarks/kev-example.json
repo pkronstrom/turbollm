@@ -1,0 +1,16 @@
+{
+  "state": "The customer asks why their invoice contains two charges. The duplicate charge has already been refunded and the confirmation email was sent.",
+  "questions": {
+    "team": {
+      "type": "choice",
+      "instructions": "Which team owns this issue?",
+      "criteria": {"billing": "Invoices, payments, refunds", "technical": "Software faults and outages", "shipping": "Delivery and tracking"}
+    },
+    "refunded": {"type": "noul", "instructions": "Has the duplicate charge already been refunded?"},
+    "progress": {
+      "type": "score",
+      "instructions": "Rate resolution progress.",
+      "criteria": ["No action taken", "Refund pending", "Refund completed and customer notified"]
+    }
+  }
+}

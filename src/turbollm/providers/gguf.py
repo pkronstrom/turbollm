@@ -5,7 +5,7 @@ from pathlib import Path
 import click
 from rich.console import Console
 
-from turbollm.hf_download import configured_path, quiet_hf, translate_hf_errors
+from turbollm.hf_download import configured_path, local_revision_matches, revision_kwargs, quiet_hf, translate_hf_errors
 from turbollm.registry import (
     _hf_cache_path,
     _hf_snapshot_path,
@@ -178,11 +178,11 @@ class GgufProvider:
             return False
         local = configured_path(model, "local_path")
         if local is not None:
-            target_exists = (local / hf_file).exists()
+            target_exists = (local / hf_file).exists() and local_revision_matches(model, local, filenames=[hf_file])
         else:
-            snap = _hf_snapshot_path(model["hf_repo"])
+            snap = _hf_snapshot_path(model["hf_repo"], **revision_kwargs(model))
             target_exists = bool(snap and (snap / hf_file).exists())
-            if not target_exists:
+            if not target_exists and not model.get("revision"):
                 cache = _hf_cache_path(model["hf_repo"])
                 target_exists = cache.exists() and any(cache.rglob(hf_file))
         if not target_exists:
@@ -218,7 +218,9 @@ class GgufProvider:
         if not repo or not filename:
             return
         destination = configured_path(model, path_key)
-        kwargs = {"repo_id": repo, "filename": filename}
+        revision_key = {"hf_repo": "revision", "draft_hf_repo": "draft_revision",
+                        "mmproj_hf_repo": "mmproj_revision"}[repo_key]
+        kwargs = {"repo_id": repo, "filename": filename, **revision_kwargs(model, revision_key)}
         if destination is not None:
             destination.mkdir(parents=True, exist_ok=True)
             kwargs["local_dir"] = str(destination)
@@ -273,6 +275,9 @@ class GgufProvider:
         hf_file = model.get("hf_file")
         configured = configured_path(model, "local_path")
 
+        if configured and not local_revision_matches(model, configured, filenames=[hf_file] if hf_file else None):
+            configured = None
+
         if configured and hf_file:
             p = configured / hf_file
             if p.exists():
@@ -283,7 +288,7 @@ class GgufProvider:
             if ggufs:
                 return ggufs[0]
 
-        local = _hf_snapshot_path(model["hf_repo"])
+        local = _hf_snapshot_path(model["hf_repo"], **revision_kwargs(model))
 
         if local and hf_file:
             p = local / hf_file
@@ -311,11 +316,13 @@ class GgufProvider:
         if not repo or not filename:
             return None
         configured = configured_path(model, path_key)
-        if configured is not None:
+        prefix = "draft_" if repo_key == "draft_hf_repo" else "mmproj_"
+        if configured is not None and local_revision_matches(model, configured, prefix=prefix, filenames=[filename]):
             p = configured / filename
             if p.exists():
                 return p
-        snap = _hf_snapshot_path(repo)
+        revision_key = "draft_revision" if repo_key == "draft_hf_repo" else "mmproj_revision"
+        snap = _hf_snapshot_path(repo, **revision_kwargs(model, revision_key))
         if snap and (snap / filename).exists():
             return snap / filename
         return None

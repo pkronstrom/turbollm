@@ -4,7 +4,7 @@ from pathlib import Path
 
 from rich.console import Console
 
-from turbollm.hf_download import configured_path, download_repo_with_progress, translate_hf_errors
+from turbollm.hf_download import configured_path, local_revision_matches, revision_kwargs, download_repo_with_progress, translate_hf_errors
 from turbollm.registry import (
     _hf_cache_path,
     _hf_snapshot_path,
@@ -107,18 +107,11 @@ class VllmMlxProvider:
 
     @translate_hf_errors
     def pull(self, model: dict) -> None:
-        from huggingface_hub import snapshot_download
-
         repo = model["hf_repo"]
         local_path = configured_path(model, "local_path")
-        download_repo_with_progress(repo, local_path)
+        download_repo_with_progress(repo, local_path, **revision_kwargs(model))
 
-        # Pull draft model if configured
-        draft_repo = model.get("draft_hf_repo")
-        if draft_repo:
-            console.print(f"\n  Pulling draft model: [dim]{draft_repo}[/dim]")
-            snapshot_download(repo_id=draft_repo)
-            console.print(f"  [green]Done![/green] Draft model cached\n")
+        self.pull_draft(model)
 
     def is_downloaded(self, model: dict) -> bool:
         p = self._model_path(model)
@@ -137,20 +130,20 @@ class VllmMlxProvider:
             return
         from huggingface_hub import snapshot_download
         console.print(f"\n  Pulling draft model: [dim]{draft_repo}[/dim]")
-        snapshot_download(repo_id=draft_repo)
+        snapshot_download(repo_id=draft_repo, **revision_kwargs(model, "draft_revision"))
         console.print(f"  [green]Done![/green] Draft model cached")
 
     def _model_path(self, model: dict) -> Path | None:
         local = configured_path(model, "local_path")
-        if local is not None and any(local.glob("*.safetensors")):
+        if local is not None and any(local.glob("*.safetensors")) and local_revision_matches(model, local):
             return local
 
         repo = model["hf_repo"]
-        snap = _hf_snapshot_path(repo)
+        snap = _hf_snapshot_path(repo, **revision_kwargs(model))
         if snap and any(snap.glob("*.safetensors")):
             return snap
         legacy = _legacy_path(repo)
-        if legacy.exists() and any(legacy.glob("*.safetensors")):
+        if not model.get("revision") and legacy.exists() and any(legacy.glob("*.safetensors")):
             return legacy
         return None
 
@@ -158,7 +151,7 @@ class VllmMlxProvider:
         draft_repo = model.get("draft_hf_repo")
         if not draft_repo:
             return None
-        snap = _hf_snapshot_path(draft_repo)
+        snap = _hf_snapshot_path(draft_repo, **revision_kwargs(model, "draft_revision"))
         if snap and any(snap.glob("*.safetensors")):
             return snap
         return None

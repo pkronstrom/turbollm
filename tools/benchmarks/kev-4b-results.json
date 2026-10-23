@@ -1,0 +1,4816 @@
+{
+  "fixture": "turbollm-decision-smoke-v1",
+  "checkpoint": "jaredpalmer/kev-4b@v1.0",
+  "offline": true,
+  "platform": "macOS-15.8.1-arm64-arm-64bit-Mach-O",
+  "cold_ready_seconds_cached_files": 4.634802332962863,
+  "first_inference": {
+    "id": "route-0",
+    "type": "choice",
+    "expected": "billing",
+    "predicted": "billing",
+    "correct": true,
+    "wall_ms": 188.80391702987254,
+    "response": {
+      "model": "kev-latest",
+      "answers": {
+        "decision": {
+          "type": "choice",
+          "choice": "billing",
+          "confidence": 0.8202,
+          "probabilities": {
+            "billing": 0.8561,
+            "shipping": 0.005,
+            "returns": 0.006,
+            "security": 0.002,
+            "none": 0.1309
+          }
+        }
+      },
+      "usage": {
+        "input_tokens": 97,
+        "output_tokens": 82
+      },
+      "latency_ms": 186.3
+    }
+  },
+  "initial_models": {
+    "models": [
+      {
+        "name": "kev-latest",
+        "description": "Kev pointer head on Qwen/Qwen3.5-4B-Base, serving jaredpalmer/kev-4b@v1.0 at temperature 2.41",
+        "release_date": "2026-10-23",
+        "run": "jaredpalmer/kev-4b@v1.0",
+        "base": "Qwen/Qwen3.5-4B-Base",
+        "lora": 16,
+        "device": "mps",
+        "backend": "mlx",
+        "dtype": "bfloat16",
+        "temperature": 2.406050072164233,
+        "max_state_tokens": 65536,
+        "truncate_states": false,
+        "cuda_graphs": null,
+        "prefix_cache": {
+          "size": 4,
+          "min_state_tokens": 0,
+          "max_tokens": 65536,
+          "hits": 0,
+          "misses": 0,
+          "cached_states": 0,
+          "oom_retries": 0
+        },
+        "batches": {
+          "count": 0,
+          "requests": 0,
+          "queued": 0
+        }
+      },
+      {
+        "name": "jev-latest",
+        "description": "Kev pointer head on Qwen/Qwen3.5-4B-Base, serving jaredpalmer/kev-4b@v1.0 at temperature 2.41",
+        "release_date": "2026-10-23",
+        "run": "jaredpalmer/kev-4b@v1.0",
+        "base": "Qwen/Qwen3.5-4B-Base",
+        "lora": 16,
+        "device": "mps",
+        "backend": "mlx",
+        "dtype": "bfloat16",
+        "temperature": 2.406050072164233,
+        "max_state_tokens": 65536,
+        "truncate_states": false,
+        "cuda_graphs": null,
+        "prefix_cache": {
+          "size": 4,
+          "min_state_tokens": 0,
+          "max_tokens": 65536,
+          "hits": 0,
+          "misses": 0,
+          "cached_states": 0,
+          "oom_retries": 0
+        },
+        "batches": {
+          "count": 0,
+          "requests": 0,
+          "queued": 0
+        }
+      }
+    ]
+  },
+  "short_summary": {
+    "requests": 108,
+    "correct": 108,
+    "p50_wall_ms": 103.96237502573058,
+    "p95_wall_ms": 127.63558293227106,
+    "mean_wall_ms": 105.09452849941293
+  },
+  "short_by_type": {
+    "choice": {
+      "requests": 36,
+      "correct": 36,
+      "p50_wall_ms": 107.05024999333546,
+      "p95_wall_ms": 131.4886249601841,
+      "mean_wall_ms": 111.1133795509684
+    },
+    "noul": {
+      "requests": 36,
+      "correct": 36,
+      "p50_wall_ms": 101.47762496490031,
+      "p95_wall_ms": 105.59562500566244,
+      "mean_wall_ms": 98.99791310696553
+    },
+    "score": {
+      "requests": 36,
+      "correct": 36,
+      "p50_wall_ms": 105.42318754596636,
+      "p95_wall_ms": 107.14166704565287,
+      "mean_wall_ms": 105.17229284030489
+    }
+  },
+  "short_rows": [
+    {
+      "id": "route-0",
+      "type": "choice",
+      "expected": "billing",
+      "predicted": "billing",
+      "correct": true,
+      "wall_ms": 128.40374989900738,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "choice",
+            "choice": "billing",
+            "confidence": 0.8202,
+            "probabilities": {
+              "billing": 0.8561,
+              "shipping": 0.005,
+              "returns": 0.006,
+              "security": 0.002,
+              "none": 0.1309
+            }
+          }
+        },
+        "usage": {
+          "input_tokens": 97,
+          "output_tokens": 82
+        },
+        "latency_ms": 126.7
+      }
+    },
+    {
+      "id": "route-1",
+      "type": "choice",
+      "expected": "shipping",
+      "predicted": "shipping",
+      "correct": true,
+      "wall_ms": 102.92820795439184,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "choice",
+            "choice": "shipping",
+            "confidence": 0.8889,
+            "probabilities": {
+              "billing": 0.0019,
+              "shipping": 0.9111,
+              "returns": 0.0055,
+              "security": 0.0009,
+              "none": 0.0807
+            }
+          }
+        },
+        "usage": {
+          "input_tokens": 91,
+          "output_tokens": 85
+        },
+        "latency_ms": 101.2
+      }
+    },
+    {
+      "id": "route-2",
+      "type": "choice",
+      "expected": "returns",
+      "predicted": "returns",
+      "correct": true,
+      "wall_ms": 103.10616693459451,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "choice",
+            "choice": "returns",
+            "confidence": 0.8291,
+            "probabilities": {
+              "billing": 0.0049,
+              "shipping": 0.008,
+              "returns": 0.8633,
+              "security": 0.0006,
+              "none": 0.1233
+            }
+          }
+        },
+        "usage": {
+          "input_tokens": 91,
+          "output_tokens": 84
+        },
+        "latency_ms": 101.4
+      }
+    },
+    {
+      "id": "route-3",
+      "type": "choice",
+      "expected": "security",
+      "predicted": "security",
+      "correct": true,
+      "wall_ms": 121.12374999560416,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "choice",
+            "choice": "security",
+            "confidence": 0.9028,
+            "probabilities": {
+              "billing": 0.0011,
+              "shipping": 0.0012,
+              "returns": 0.0005,
+              "security": 0.9223,
+              "none": 0.075
+            }
+          }
+        },
+        "usage": {
+          "input_tokens": 93,
+          "output_tokens": 84
+        },
+        "latency_ms": 119.5
+      }
+    },
+    {
+      "id": "route-4",
+      "type": "choice",
+      "expected": "none",
+      "predicted": "none",
+      "correct": true,
+      "wall_ms": 127.38449999596924,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "choice",
+            "choice": "none",
+            "confidence": 0.8945,
+            "probabilities": {
+              "billing": 0.017,
+              "shipping": 0.0244,
+              "returns": 0.0167,
+              "security": 0.0263,
+              "none": 0.9156
+            }
+          }
+        },
+        "usage": {
+          "input_tokens": 94,
+          "output_tokens": 84
+        },
+        "latency_ms": 125.7
+      }
+    },
+    {
+      "id": "route-5",
+      "type": "choice",
+      "expected": "returns",
+      "predicted": "returns",
+      "correct": true,
+      "wall_ms": 102.6188749819994,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "choice",
+            "choice": "returns",
+            "confidence": 0.6766,
+            "probabilities": {
+              "billing": 0.0218,
+              "shipping": 0.066,
+              "returns": 0.7413,
+              "security": 0.0013,
+              "none": 0.1696
+            }
+          }
+        },
+        "usage": {
+          "input_tokens": 91,
+          "output_tokens": 84
+        },
+        "latency_ms": 100.9
+      }
+    },
+    {
+      "id": "route-6",
+      "type": "choice",
+      "expected": "billing",
+      "predicted": "billing",
+      "correct": true,
+      "wall_ms": 103.1003330135718,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "choice",
+            "choice": "billing",
+            "confidence": 0.3477,
+            "probabilities": {
+              "billing": 0.4782,
+              "shipping": 0.0478,
+              "returns": 0.027,
+              "security": 0.0019,
+              "none": 0.4452
+            }
+          }
+        },
+        "usage": {
+          "input_tokens": 91,
+          "output_tokens": 84
+        },
+        "latency_ms": 101.4
+      }
+    },
+    {
+      "id": "route-7",
+      "type": "choice",
+      "expected": "shipping",
+      "predicted": "shipping",
+      "correct": true,
+      "wall_ms": 103.58266707044095,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "choice",
+            "choice": "shipping",
+            "confidence": 0.858,
+            "probabilities": {
+              "billing": 0.0049,
+              "shipping": 0.8864,
+              "returns": 0.0069,
+              "security": 0.0016,
+              "none": 0.1002
+            }
+          }
+        },
+        "usage": {
+          "input_tokens": 92,
+          "output_tokens": 84
+        },
+        "latency_ms": 101.9
+      }
+    },
+    {
+      "id": "action-0",
+      "type": "choice",
+      "expected": "report_complete",
+      "predicted": "report_complete",
+      "correct": true,
+      "wall_ms": 103.5922080045566,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "choice",
+            "choice": "report_complete",
+            "confidence": 0.9538,
+            "probabilities": {
+              "report_complete": 0.9653,
+              "run_tests": 0.0124,
+              "continue_work": 0.0087,
+              "stop": 0.0135
+            }
+          }
+        },
+        "usage": {
+          "input_tokens": 83,
+          "output_tokens": 78
+        },
+        "latency_ms": 101.9
+      }
+    },
+    {
+      "id": "action-1",
+      "type": "choice",
+      "expected": "run_tests",
+      "predicted": "run_tests",
+      "correct": true,
+      "wall_ms": 101.21404204983264,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "choice",
+            "choice": "run_tests",
+            "confidence": 0.9308,
+            "probabilities": {
+              "report_complete": 0.0199,
+              "run_tests": 0.9481,
+              "continue_work": 0.0194,
+              "stop": 0.0126
+            }
+          }
+        },
+        "usage": {
+          "input_tokens": 78,
+          "output_tokens": 78
+        },
+        "latency_ms": 99.5
+      }
+    },
+    {
+      "id": "action-2",
+      "type": "choice",
+      "expected": "continue_work",
+      "predicted": "continue_work",
+      "correct": true,
+      "wall_ms": 103.52991707623005,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "choice",
+            "choice": "continue_work",
+            "confidence": 0.9598,
+            "probabilities": {
+              "report_complete": 0.008,
+              "run_tests": 0.0115,
+              "continue_work": 0.9699,
+              "stop": 0.0107
+            }
+          }
+        },
+        "usage": {
+          "input_tokens": 80,
+          "output_tokens": 77
+        },
+        "latency_ms": 101.8
+      }
+    },
+    {
+      "id": "action-3",
+      "type": "choice",
+      "expected": "stop",
+      "predicted": "stop",
+      "correct": true,
+      "wall_ms": 101.96295799687505,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "choice",
+            "choice": "stop",
+            "confidence": 0.9856,
+            "probabilities": {
+              "report_complete": 0.0012,
+              "run_tests": 0.0028,
+              "continue_work": 0.0068,
+              "stop": 0.9892
+            }
+          }
+        },
+        "usage": {
+          "input_tokens": 78,
+          "output_tokens": 77
+        },
+        "latency_ms": 100.3
+      }
+    },
+    {
+      "id": "complete-0",
+      "type": "noul",
+      "expected": true,
+      "predicted": true,
+      "correct": true,
+      "wall_ms": 102.15116711333394,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "noul",
+            "noul": 0.9717
+          }
+        },
+        "usage": {
+          "input_tokens": 44,
+          "output_tokens": 22
+        },
+        "latency_ms": 100.6
+      }
+    },
+    {
+      "id": "complete-1",
+      "type": "noul",
+      "expected": false,
+      "predicted": false,
+      "correct": true,
+      "wall_ms": 100.42887507006526,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "noul",
+            "noul": 0.143
+          }
+        },
+        "usage": {
+          "input_tokens": 41,
+          "output_tokens": 21
+        },
+        "latency_ms": 98.9
+      }
+    },
+    {
+      "id": "complete-2",
+      "type": "noul",
+      "expected": false,
+      "predicted": false,
+      "correct": true,
+      "wall_ms": 100.59083404485136,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "noul",
+            "noul": 0.0359
+          }
+        },
+        "usage": {
+          "input_tokens": 38,
+          "output_tokens": 22
+        },
+        "latency_ms": 99.0
+      }
+    },
+    {
+      "id": "complete-3",
+      "type": "noul",
+      "expected": true,
+      "predicted": true,
+      "correct": true,
+      "wall_ms": 100.38304096087813,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "noul",
+            "noul": 0.9661
+          }
+        },
+        "usage": {
+          "input_tokens": 38,
+          "output_tokens": 22
+        },
+        "latency_ms": 98.8
+      }
+    },
+    {
+      "id": "complete-4",
+      "type": "noul",
+      "expected": false,
+      "predicted": false,
+      "correct": true,
+      "wall_ms": 75.94350003637373,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "noul",
+            "noul": 0.0438
+          }
+        },
+        "usage": {
+          "input_tokens": 36,
+          "output_tokens": 22
+        },
+        "latency_ms": 74.3
+      }
+    },
+    {
+      "id": "complete-5",
+      "type": "noul",
+      "expected": true,
+      "predicted": true,
+      "correct": true,
+      "wall_ms": 100.02162493765354,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "noul",
+            "noul": 0.8663
+          }
+        },
+        "usage": {
+          "input_tokens": 38,
+          "output_tokens": 22
+        },
+        "latency_ms": 98.4
+      }
+    },
+    {
+      "id": "complete-6",
+      "type": "noul",
+      "expected": false,
+      "predicted": false,
+      "correct": true,
+      "wall_ms": 101.71116702258587,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "noul",
+            "noul": 0.0174
+          }
+        },
+        "usage": {
+          "input_tokens": 42,
+          "output_tokens": 22
+        },
+        "latency_ms": 100.1
+      }
+    },
+    {
+      "id": "complete-7",
+      "type": "noul",
+      "expected": true,
+      "predicted": true,
+      "correct": true,
+      "wall_ms": 100.18045792821795,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "noul",
+            "noul": 0.9683
+          }
+        },
+        "usage": {
+          "input_tokens": 38,
+          "output_tokens": 22
+        },
+        "latency_ms": 98.6
+      }
+    },
+    {
+      "id": "complete-8",
+      "type": "noul",
+      "expected": true,
+      "predicted": true,
+      "correct": true,
+      "wall_ms": 100.9405410150066,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "noul",
+            "noul": 0.6682
+          }
+        },
+        "usage": {
+          "input_tokens": 43,
+          "output_tokens": 22
+        },
+        "latency_ms": 99.4
+      }
+    },
+    {
+      "id": "complete-9",
+      "type": "noul",
+      "expected": false,
+      "predicted": false,
+      "correct": true,
+      "wall_ms": 94.36837502289563,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "noul",
+            "noul": 0.3933
+          }
+        },
+        "usage": {
+          "input_tokens": 37,
+          "output_tokens": 22
+        },
+        "latency_ms": 92.9
+      }
+    },
+    {
+      "id": "complete-10",
+      "type": "noul",
+      "expected": true,
+      "predicted": true,
+      "correct": true,
+      "wall_ms": 101.44954093266279,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "noul",
+            "noul": 0.9042
+          }
+        },
+        "usage": {
+          "input_tokens": 41,
+          "output_tokens": 22
+        },
+        "latency_ms": 99.9
+      }
+    },
+    {
+      "id": "complete-11",
+      "type": "noul",
+      "expected": false,
+      "predicted": false,
+      "correct": true,
+      "wall_ms": 94.58625002298504,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "noul",
+            "noul": 0.0549
+          }
+        },
+        "usage": {
+          "input_tokens": 37,
+          "output_tokens": 22
+        },
+        "latency_ms": 93.0
+      }
+    },
+    {
+      "id": "severity-0",
+      "type": "score",
+      "expected": "0",
+      "predicted": "0",
+      "correct": true,
+      "wall_ms": 103.5569169325754,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "score",
+            "score": 0.0334,
+            "legend": {
+              "0": "No affected users: 0",
+              "1": "Low: 1 to 9 affected users",
+              "2": "Medium: 10 to 99 affected users",
+              "3": "High: at least 100 affected users"
+            },
+            "probabilities": {
+              "0": 0.9793,
+              "1": 0.0119,
+              "2": 0.005,
+              "3": 0.0038
+            },
+            "confidence": 0.9666
+          }
+        },
+        "usage": {
+          "input_tokens": 90,
+          "output_tokens": 137
+        },
+        "latency_ms": 101.8
+      }
+    },
+    {
+      "id": "severity-1",
+      "type": "score",
+      "expected": "1",
+      "predicted": "1",
+      "correct": true,
+      "wall_ms": 103.86366595048457,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "score",
+            "score": 0.98,
+            "legend": {
+              "0": "No affected users: 0",
+              "1": "Low: 1 to 9 affected users",
+              "2": "Medium: 10 to 99 affected users",
+              "3": "High: at least 100 affected users"
+            },
+            "probabilities": {
+              "0": 0.027,
+              "1": 0.9684,
+              "2": 0.0022,
+              "3": 0.0024
+            },
+            "confidence": 0.9661
+          }
+        },
+        "usage": {
+          "input_tokens": 90,
+          "output_tokens": 135
+        },
+        "latency_ms": 102.1
+      }
+    },
+    {
+      "id": "severity-2",
+      "type": "score",
+      "expected": "1",
+      "predicted": "1",
+      "correct": true,
+      "wall_ms": 103.188915993087,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "score",
+            "score": 0.9999,
+            "legend": {
+              "0": "No affected users: 0",
+              "1": "Low: 1 to 9 affected users",
+              "2": "Medium: 10 to 99 affected users",
+              "3": "High: at least 100 affected users"
+            },
+            "probabilities": {
+              "0": 0.0078,
+              "1": 0.9867,
+              "2": 0.0032,
+              "3": 0.0022
+            },
+            "confidence": 0.9845
+          }
+        },
+        "usage": {
+          "input_tokens": 90,
+          "output_tokens": 138
+        },
+        "latency_ms": 101.5
+      }
+    },
+    {
+      "id": "severity-3",
+      "type": "score",
+      "expected": "1",
+      "predicted": "1",
+      "correct": true,
+      "wall_ms": 103.1145000597462,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "score",
+            "score": 0.9973,
+            "legend": {
+              "0": "No affected users: 0",
+              "1": "Low: 1 to 9 affected users",
+              "2": "Medium: 10 to 99 affected users",
+              "3": "High: at least 100 affected users"
+            },
+            "probabilities": {
+              "0": 0.0113,
+              "1": 0.9825,
+              "2": 0.0039,
+              "3": 0.0023
+            },
+            "confidence": 0.9801
+          }
+        },
+        "usage": {
+          "input_tokens": 90,
+          "output_tokens": 138
+        },
+        "latency_ms": 101.4
+      }
+    },
+    {
+      "id": "severity-4",
+      "type": "score",
+      "expected": "2",
+      "predicted": "2",
+      "correct": true,
+      "wall_ms": 103.91183302272111,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "score",
+            "score": 1.9836,
+            "legend": {
+              "0": "No affected users: 0",
+              "1": "Low: 1 to 9 affected users",
+              "2": "Medium: 10 to 99 affected users",
+              "3": "High: at least 100 affected users"
+            },
+            "probabilities": {
+              "0": 0.0054,
+              "1": 0.0072,
+              "2": 0.9858,
+              "3": 0.0016
+            },
+            "confidence": 0.9804
+          }
+        },
+        "usage": {
+          "input_tokens": 91,
+          "output_tokens": 138
+        },
+        "latency_ms": 102.1
+      }
+    },
+    {
+      "id": "severity-5",
+      "type": "score",
+      "expected": "2",
+      "predicted": "2",
+      "correct": true,
+      "wall_ms": 104.58770801778883,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "score",
+            "score": 1.9662,
+            "legend": {
+              "0": "No affected users: 0",
+              "1": "Low: 1 to 9 affected users",
+              "2": "Medium: 10 to 99 affected users",
+              "3": "High: at least 100 affected users"
+            },
+            "probabilities": {
+              "0": 0.0108,
+              "1": 0.0154,
+              "2": 0.9706,
+              "3": 0.0032
+            },
+            "confidence": 0.9598
+          }
+        },
+        "usage": {
+          "input_tokens": 91,
+          "output_tokens": 138
+        },
+        "latency_ms": 102.9
+      }
+    },
+    {
+      "id": "severity-6",
+      "type": "score",
+      "expected": "2",
+      "predicted": "2",
+      "correct": true,
+      "wall_ms": 104.07212504651397,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "score",
+            "score": 1.9887,
+            "legend": {
+              "0": "No affected users: 0",
+              "1": "Low: 1 to 9 affected users",
+              "2": "Medium: 10 to 99 affected users",
+              "3": "High: at least 100 affected users"
+            },
+            "probabilities": {
+              "0": 0.0058,
+              "1": 0.0034,
+              "2": 0.9873,
+              "3": 0.0036
+            },
+            "confidence": 0.9815
+          }
+        },
+        "usage": {
+          "input_tokens": 91,
+          "output_tokens": 138
+        },
+        "latency_ms": 102.3
+      }
+    },
+    {
+      "id": "severity-7",
+      "type": "score",
+      "expected": "2",
+      "predicted": "2",
+      "correct": true,
+      "wall_ms": 103.71220798697323,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "score",
+            "score": 1.9376,
+            "legend": {
+              "0": "No affected users: 0",
+              "1": "Low: 1 to 9 affected users",
+              "2": "Medium: 10 to 99 affected users",
+              "3": "High: at least 100 affected users"
+            },
+            "probabilities": {
+              "0": 0.0327,
+              "1": 0.0343,
+              "2": 0.8958,
+              "3": 0.0372
+            },
+            "confidence": 0.8631
+          }
+        },
+        "usage": {
+          "input_tokens": 91,
+          "output_tokens": 138
+        },
+        "latency_ms": 101.9
+      }
+    },
+    {
+      "id": "severity-8",
+      "type": "score",
+      "expected": "3",
+      "predicted": "3",
+      "correct": true,
+      "wall_ms": 104.01291702874005,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "score",
+            "score": 2.9506,
+            "legend": {
+              "0": "No affected users: 0",
+              "1": "Low: 1 to 9 affected users",
+              "2": "Medium: 10 to 99 affected users",
+              "3": "High: at least 100 affected users"
+            },
+            "probabilities": {
+              "0": 0.0053,
+              "1": 0.0028,
+              "2": 0.0281,
+              "3": 0.9639
+            },
+            "confidence": 0.9506
+          }
+        },
+        "usage": {
+          "input_tokens": 92,
+          "output_tokens": 138
+        },
+        "latency_ms": 102.3
+      }
+    },
+    {
+      "id": "severity-9",
+      "type": "score",
+      "expected": "3",
+      "predicted": "3",
+      "correct": true,
+      "wall_ms": 103.64033293444663,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "score",
+            "score": 2.9297,
+            "legend": {
+              "0": "No affected users: 0",
+              "1": "Low: 1 to 9 affected users",
+              "2": "Medium: 10 to 99 affected users",
+              "3": "High: at least 100 affected users"
+            },
+            "probabilities": {
+              "0": 0.008,
+              "1": 0.0047,
+              "2": 0.0371,
+              "3": 0.9503
+            },
+            "confidence": 0.9297
+          }
+        },
+        "usage": {
+          "input_tokens": 92,
+          "output_tokens": 137
+        },
+        "latency_ms": 101.9
+      }
+    },
+    {
+      "id": "severity-10",
+      "type": "score",
+      "expected": "3",
+      "predicted": "3",
+      "correct": true,
+      "wall_ms": 104.25120801664889,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "score",
+            "score": 2.9112,
+            "legend": {
+              "0": "No affected users: 0",
+              "1": "Low: 1 to 9 affected users",
+              "2": "Medium: 10 to 99 affected users",
+              "3": "High: at least 100 affected users"
+            },
+            "probabilities": {
+              "0": 0.017,
+              "1": 0.0035,
+              "2": 0.0308,
+              "3": 0.9487
+            },
+            "confidence": 0.9112
+          }
+        },
+        "usage": {
+          "input_tokens": 93,
+          "output_tokens": 137
+        },
+        "latency_ms": 102.5
+      }
+    },
+    {
+      "id": "severity-11",
+      "type": "score",
+      "expected": "0",
+      "predicted": "0",
+      "correct": true,
+      "wall_ms": 103.79237507004291,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "score",
+            "score": 0.038,
+            "legend": {
+              "0": "No affected users: 0",
+              "1": "Low: 1 to 9 affected users",
+              "2": "Medium: 10 to 99 affected users",
+              "3": "High: at least 100 affected users"
+            },
+            "probabilities": {
+              "0": 0.9708,
+              "1": 0.0232,
+              "2": 0.0033,
+              "3": 0.0028
+            },
+            "confidence": 0.962
+          }
+        },
+        "usage": {
+          "input_tokens": 91,
+          "output_tokens": 136
+        },
+        "latency_ms": 102.1
+      }
+    },
+    {
+      "id": "route-0",
+      "type": "choice",
+      "expected": "billing",
+      "predicted": "billing",
+      "correct": true,
+      "wall_ms": 127.63558293227106,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "choice",
+            "choice": "billing",
+            "confidence": 0.8202,
+            "probabilities": {
+              "billing": 0.8561,
+              "shipping": 0.005,
+              "returns": 0.006,
+              "security": 0.002,
+              "none": 0.1309
+            }
+          }
+        },
+        "usage": {
+          "input_tokens": 97,
+          "output_tokens": 82
+        },
+        "latency_ms": 125.9
+      }
+    },
+    {
+      "id": "route-1",
+      "type": "choice",
+      "expected": "shipping",
+      "predicted": "shipping",
+      "correct": true,
+      "wall_ms": 102.56637493148446,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "choice",
+            "choice": "shipping",
+            "confidence": 0.8889,
+            "probabilities": {
+              "billing": 0.0019,
+              "shipping": 0.9111,
+              "returns": 0.0055,
+              "security": 0.0009,
+              "none": 0.0807
+            }
+          }
+        },
+        "usage": {
+          "input_tokens": 91,
+          "output_tokens": 85
+        },
+        "latency_ms": 100.8
+      }
+    },
+    {
+      "id": "route-2",
+      "type": "choice",
+      "expected": "returns",
+      "predicted": "returns",
+      "correct": true,
+      "wall_ms": 103.08533301576972,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "choice",
+            "choice": "returns",
+            "confidence": 0.8291,
+            "probabilities": {
+              "billing": 0.0049,
+              "shipping": 0.008,
+              "returns": 0.8633,
+              "security": 0.0006,
+              "none": 0.1233
+            }
+          }
+        },
+        "usage": {
+          "input_tokens": 91,
+          "output_tokens": 84
+        },
+        "latency_ms": 101.4
+      }
+    },
+    {
+      "id": "route-3",
+      "type": "choice",
+      "expected": "security",
+      "predicted": "security",
+      "correct": true,
+      "wall_ms": 120.56345806922764,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "choice",
+            "choice": "security",
+            "confidence": 0.9028,
+            "probabilities": {
+              "billing": 0.0011,
+              "shipping": 0.0012,
+              "returns": 0.0005,
+              "security": 0.9223,
+              "none": 0.075
+            }
+          }
+        },
+        "usage": {
+          "input_tokens": 93,
+          "output_tokens": 84
+        },
+        "latency_ms": 118.8
+      }
+    },
+    {
+      "id": "route-4",
+      "type": "choice",
+      "expected": "none",
+      "predicted": "none",
+      "correct": true,
+      "wall_ms": 128.20479192305356,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "choice",
+            "choice": "none",
+            "confidence": 0.8945,
+            "probabilities": {
+              "billing": 0.017,
+              "shipping": 0.0244,
+              "returns": 0.0167,
+              "security": 0.0263,
+              "none": 0.9156
+            }
+          }
+        },
+        "usage": {
+          "input_tokens": 94,
+          "output_tokens": 84
+        },
+        "latency_ms": 126.5
+      }
+    },
+    {
+      "id": "route-5",
+      "type": "choice",
+      "expected": "returns",
+      "predicted": "returns",
+      "correct": true,
+      "wall_ms": 104.27979100495577,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "choice",
+            "choice": "returns",
+            "confidence": 0.6766,
+            "probabilities": {
+              "billing": 0.0218,
+              "shipping": 0.066,
+              "returns": 0.7413,
+              "security": 0.0013,
+              "none": 0.1696
+            }
+          }
+        },
+        "usage": {
+          "input_tokens": 91,
+          "output_tokens": 84
+        },
+        "latency_ms": 102.6
+      }
+    },
+    {
+      "id": "route-6",
+      "type": "choice",
+      "expected": "billing",
+      "predicted": "billing",
+      "correct": true,
+      "wall_ms": 105.36979197058827,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "choice",
+            "choice": "billing",
+            "confidence": 0.3477,
+            "probabilities": {
+              "billing": 0.4782,
+              "shipping": 0.0478,
+              "returns": 0.027,
+              "security": 0.0019,
+              "none": 0.4452
+            }
+          }
+        },
+        "usage": {
+          "input_tokens": 91,
+          "output_tokens": 84
+        },
+        "latency_ms": 103.6
+      }
+    },
+    {
+      "id": "route-7",
+      "type": "choice",
+      "expected": "shipping",
+      "predicted": "shipping",
+      "correct": true,
+      "wall_ms": 105.65295803826302,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "choice",
+            "choice": "shipping",
+            "confidence": 0.858,
+            "probabilities": {
+              "billing": 0.0049,
+              "shipping": 0.8864,
+              "returns": 0.0069,
+              "security": 0.0016,
+              "none": 0.1002
+            }
+          }
+        },
+        "usage": {
+          "input_tokens": 92,
+          "output_tokens": 84
+        },
+        "latency_ms": 103.9
+      }
+    },
+    {
+      "id": "action-0",
+      "type": "choice",
+      "expected": "report_complete",
+      "predicted": "report_complete",
+      "correct": true,
+      "wall_ms": 106.7335419356823,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "choice",
+            "choice": "report_complete",
+            "confidence": 0.9538,
+            "probabilities": {
+              "report_complete": 0.9653,
+              "run_tests": 0.0124,
+              "continue_work": 0.0087,
+              "stop": 0.0135
+            }
+          }
+        },
+        "usage": {
+          "input_tokens": 83,
+          "output_tokens": 78
+        },
+        "latency_ms": 105.1
+      }
+    },
+    {
+      "id": "action-1",
+      "type": "choice",
+      "expected": "run_tests",
+      "predicted": "run_tests",
+      "correct": true,
+      "wall_ms": 104.85429200343788,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "choice",
+            "choice": "run_tests",
+            "confidence": 0.9308,
+            "probabilities": {
+              "report_complete": 0.0199,
+              "run_tests": 0.9481,
+              "continue_work": 0.0194,
+              "stop": 0.0126
+            }
+          }
+        },
+        "usage": {
+          "input_tokens": 78,
+          "output_tokens": 78
+        },
+        "latency_ms": 103.2
+      }
+    },
+    {
+      "id": "action-2",
+      "type": "choice",
+      "expected": "continue_work",
+      "predicted": "continue_work",
+      "correct": true,
+      "wall_ms": 105.43537500780076,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "choice",
+            "choice": "continue_work",
+            "confidence": 0.9598,
+            "probabilities": {
+              "report_complete": 0.008,
+              "run_tests": 0.0115,
+              "continue_work": 0.9699,
+              "stop": 0.0107
+            }
+          }
+        },
+        "usage": {
+          "input_tokens": 80,
+          "output_tokens": 77
+        },
+        "latency_ms": 103.7
+      }
+    },
+    {
+      "id": "action-3",
+      "type": "choice",
+      "expected": "stop",
+      "predicted": "stop",
+      "correct": true,
+      "wall_ms": 103.9061249466613,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "choice",
+            "choice": "stop",
+            "confidence": 0.9856,
+            "probabilities": {
+              "report_complete": 0.0012,
+              "run_tests": 0.0028,
+              "continue_work": 0.0068,
+              "stop": 0.9892
+            }
+          }
+        },
+        "usage": {
+          "input_tokens": 78,
+          "output_tokens": 77
+        },
+        "latency_ms": 102.2
+      }
+    },
+    {
+      "id": "complete-0",
+      "type": "noul",
+      "expected": true,
+      "predicted": true,
+      "correct": true,
+      "wall_ms": 103.5880419658497,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "noul",
+            "noul": 0.9717
+          }
+        },
+        "usage": {
+          "input_tokens": 44,
+          "output_tokens": 22
+        },
+        "latency_ms": 102.0
+      }
+    },
+    {
+      "id": "complete-1",
+      "type": "noul",
+      "expected": false,
+      "predicted": false,
+      "correct": true,
+      "wall_ms": 102.76058304589242,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "noul",
+            "noul": 0.143
+          }
+        },
+        "usage": {
+          "input_tokens": 41,
+          "output_tokens": 21
+        },
+        "latency_ms": 101.2
+      }
+    },
+    {
+      "id": "complete-2",
+      "type": "noul",
+      "expected": false,
+      "predicted": false,
+      "correct": true,
+      "wall_ms": 101.43525002058595,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "noul",
+            "noul": 0.0359
+          }
+        },
+        "usage": {
+          "input_tokens": 38,
+          "output_tokens": 22
+        },
+        "latency_ms": 99.9
+      }
+    },
+    {
+      "id": "complete-3",
+      "type": "noul",
+      "expected": true,
+      "predicted": true,
+      "correct": true,
+      "wall_ms": 101.73545801080763,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "noul",
+            "noul": 0.9661
+          }
+        },
+        "usage": {
+          "input_tokens": 38,
+          "output_tokens": 22
+        },
+        "latency_ms": 100.2
+      }
+    },
+    {
+      "id": "complete-4",
+      "type": "noul",
+      "expected": false,
+      "predicted": false,
+      "correct": true,
+      "wall_ms": 77.25537498481572,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "noul",
+            "noul": 0.0438
+          }
+        },
+        "usage": {
+          "input_tokens": 36,
+          "output_tokens": 22
+        },
+        "latency_ms": 75.7
+      }
+    },
+    {
+      "id": "complete-5",
+      "type": "noul",
+      "expected": true,
+      "predicted": true,
+      "correct": true,
+      "wall_ms": 101.9894159398973,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "noul",
+            "noul": 0.8663
+          }
+        },
+        "usage": {
+          "input_tokens": 38,
+          "output_tokens": 22
+        },
+        "latency_ms": 100.4
+      }
+    },
+    {
+      "id": "complete-6",
+      "type": "noul",
+      "expected": false,
+      "predicted": false,
+      "correct": true,
+      "wall_ms": 101.88783309422433,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "noul",
+            "noul": 0.0174
+          }
+        },
+        "usage": {
+          "input_tokens": 42,
+          "output_tokens": 22
+        },
+        "latency_ms": 100.3
+      }
+    },
+    {
+      "id": "complete-7",
+      "type": "noul",
+      "expected": true,
+      "predicted": true,
+      "correct": true,
+      "wall_ms": 100.80033296253532,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "noul",
+            "noul": 0.9683
+          }
+        },
+        "usage": {
+          "input_tokens": 38,
+          "output_tokens": 22
+        },
+        "latency_ms": 99.1
+      }
+    },
+    {
+      "id": "complete-8",
+      "type": "noul",
+      "expected": true,
+      "predicted": true,
+      "correct": true,
+      "wall_ms": 101.50570899713784,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "noul",
+            "noul": 0.6682
+          }
+        },
+        "usage": {
+          "input_tokens": 43,
+          "output_tokens": 22
+        },
+        "latency_ms": 99.9
+      }
+    },
+    {
+      "id": "complete-9",
+      "type": "noul",
+      "expected": false,
+      "predicted": false,
+      "correct": true,
+      "wall_ms": 97.03179099597037,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "noul",
+            "noul": 0.3933
+          }
+        },
+        "usage": {
+          "input_tokens": 37,
+          "output_tokens": 22
+        },
+        "latency_ms": 93.3
+      }
+    },
+    {
+      "id": "complete-10",
+      "type": "noul",
+      "expected": true,
+      "predicted": true,
+      "correct": true,
+      "wall_ms": 101.751041947864,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "noul",
+            "noul": 0.9042
+          }
+        },
+        "usage": {
+          "input_tokens": 41,
+          "output_tokens": 22
+        },
+        "latency_ms": 100.1
+      }
+    },
+    {
+      "id": "complete-11",
+      "type": "noul",
+      "expected": false,
+      "predicted": false,
+      "correct": true,
+      "wall_ms": 94.2845829995349,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "noul",
+            "noul": 0.0549
+          }
+        },
+        "usage": {
+          "input_tokens": 37,
+          "output_tokens": 22
+        },
+        "latency_ms": 92.8
+      }
+    },
+    {
+      "id": "severity-0",
+      "type": "score",
+      "expected": "0",
+      "predicted": "0",
+      "correct": true,
+      "wall_ms": 105.63995805568993,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "score",
+            "score": 0.0334,
+            "legend": {
+              "0": "No affected users: 0",
+              "1": "Low: 1 to 9 affected users",
+              "2": "Medium: 10 to 99 affected users",
+              "3": "High: at least 100 affected users"
+            },
+            "probabilities": {
+              "0": 0.9793,
+              "1": 0.0119,
+              "2": 0.005,
+              "3": 0.0038
+            },
+            "confidence": 0.9666
+          }
+        },
+        "usage": {
+          "input_tokens": 90,
+          "output_tokens": 137
+        },
+        "latency_ms": 103.9
+      }
+    },
+    {
+      "id": "severity-1",
+      "type": "score",
+      "expected": "1",
+      "predicted": "1",
+      "correct": true,
+      "wall_ms": 104.2763750301674,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "score",
+            "score": 0.98,
+            "legend": {
+              "0": "No affected users: 0",
+              "1": "Low: 1 to 9 affected users",
+              "2": "Medium: 10 to 99 affected users",
+              "3": "High: at least 100 affected users"
+            },
+            "probabilities": {
+              "0": 0.027,
+              "1": 0.9684,
+              "2": 0.0022,
+              "3": 0.0024
+            },
+            "confidence": 0.9661
+          }
+        },
+        "usage": {
+          "input_tokens": 90,
+          "output_tokens": 135
+        },
+        "latency_ms": 102.5
+      }
+    },
+    {
+      "id": "severity-2",
+      "type": "score",
+      "expected": "1",
+      "predicted": "1",
+      "correct": true,
+      "wall_ms": 104.95041706599295,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "score",
+            "score": 0.9999,
+            "legend": {
+              "0": "No affected users: 0",
+              "1": "Low: 1 to 9 affected users",
+              "2": "Medium: 10 to 99 affected users",
+              "3": "High: at least 100 affected users"
+            },
+            "probabilities": {
+              "0": 0.0078,
+              "1": 0.9867,
+              "2": 0.0032,
+              "3": 0.0022
+            },
+            "confidence": 0.9845
+          }
+        },
+        "usage": {
+          "input_tokens": 90,
+          "output_tokens": 138
+        },
+        "latency_ms": 103.3
+      }
+    },
+    {
+      "id": "severity-3",
+      "type": "score",
+      "expected": "1",
+      "predicted": "1",
+      "correct": true,
+      "wall_ms": 105.9157089330256,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "score",
+            "score": 0.9973,
+            "legend": {
+              "0": "No affected users: 0",
+              "1": "Low: 1 to 9 affected users",
+              "2": "Medium: 10 to 99 affected users",
+              "3": "High: at least 100 affected users"
+            },
+            "probabilities": {
+              "0": 0.0113,
+              "1": 0.9825,
+              "2": 0.0039,
+              "3": 0.0023
+            },
+            "confidence": 0.9801
+          }
+        },
+        "usage": {
+          "input_tokens": 90,
+          "output_tokens": 138
+        },
+        "latency_ms": 103.9
+      }
+    },
+    {
+      "id": "severity-4",
+      "type": "score",
+      "expected": "2",
+      "predicted": "2",
+      "correct": true,
+      "wall_ms": 104.24945899285376,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "score",
+            "score": 1.9836,
+            "legend": {
+              "0": "No affected users: 0",
+              "1": "Low: 1 to 9 affected users",
+              "2": "Medium: 10 to 99 affected users",
+              "3": "High: at least 100 affected users"
+            },
+            "probabilities": {
+              "0": 0.0054,
+              "1": 0.0072,
+              "2": 0.9858,
+              "3": 0.0016
+            },
+            "confidence": 0.9804
+          }
+        },
+        "usage": {
+          "input_tokens": 91,
+          "output_tokens": 138
+        },
+        "latency_ms": 102.4
+      }
+    },
+    {
+      "id": "severity-5",
+      "type": "score",
+      "expected": "2",
+      "predicted": "2",
+      "correct": true,
+      "wall_ms": 105.51554209087044,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "score",
+            "score": 1.9662,
+            "legend": {
+              "0": "No affected users: 0",
+              "1": "Low: 1 to 9 affected users",
+              "2": "Medium: 10 to 99 affected users",
+              "3": "High: at least 100 affected users"
+            },
+            "probabilities": {
+              "0": 0.0108,
+              "1": 0.0154,
+              "2": 0.9706,
+              "3": 0.0032
+            },
+            "confidence": 0.9598
+          }
+        },
+        "usage": {
+          "input_tokens": 91,
+          "output_tokens": 138
+        },
+        "latency_ms": 103.7
+      }
+    },
+    {
+      "id": "severity-6",
+      "type": "score",
+      "expected": "2",
+      "predicted": "2",
+      "correct": true,
+      "wall_ms": 105.66037497483194,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "score",
+            "score": 1.9887,
+            "legend": {
+              "0": "No affected users: 0",
+              "1": "Low: 1 to 9 affected users",
+              "2": "Medium: 10 to 99 affected users",
+              "3": "High: at least 100 affected users"
+            },
+            "probabilities": {
+              "0": 0.0058,
+              "1": 0.0034,
+              "2": 0.9873,
+              "3": 0.0036
+            },
+            "confidence": 0.9815
+          }
+        },
+        "usage": {
+          "input_tokens": 91,
+          "output_tokens": 138
+        },
+        "latency_ms": 103.9
+      }
+    },
+    {
+      "id": "severity-7",
+      "type": "score",
+      "expected": "2",
+      "predicted": "2",
+      "correct": true,
+      "wall_ms": 105.33083300106227,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "score",
+            "score": 1.9376,
+            "legend": {
+              "0": "No affected users: 0",
+              "1": "Low: 1 to 9 affected users",
+              "2": "Medium: 10 to 99 affected users",
+              "3": "High: at least 100 affected users"
+            },
+            "probabilities": {
+              "0": 0.0327,
+              "1": 0.0343,
+              "2": 0.8958,
+              "3": 0.0372
+            },
+            "confidence": 0.8631
+          }
+        },
+        "usage": {
+          "input_tokens": 91,
+          "output_tokens": 138
+        },
+        "latency_ms": 103.6
+      }
+    },
+    {
+      "id": "severity-8",
+      "type": "score",
+      "expected": "3",
+      "predicted": "3",
+      "correct": true,
+      "wall_ms": 106.10129195265472,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "score",
+            "score": 2.9506,
+            "legend": {
+              "0": "No affected users: 0",
+              "1": "Low: 1 to 9 affected users",
+              "2": "Medium: 10 to 99 affected users",
+              "3": "High: at least 100 affected users"
+            },
+            "probabilities": {
+              "0": 0.0053,
+              "1": 0.0028,
+              "2": 0.0281,
+              "3": 0.9639
+            },
+            "confidence": 0.9506
+          }
+        },
+        "usage": {
+          "input_tokens": 92,
+          "output_tokens": 138
+        },
+        "latency_ms": 104.3
+      }
+    },
+    {
+      "id": "severity-9",
+      "type": "score",
+      "expected": "3",
+      "predicted": "3",
+      "correct": true,
+      "wall_ms": 105.99262500181794,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "score",
+            "score": 2.9297,
+            "legend": {
+              "0": "No affected users: 0",
+              "1": "Low: 1 to 9 affected users",
+              "2": "Medium: 10 to 99 affected users",
+              "3": "High: at least 100 affected users"
+            },
+            "probabilities": {
+              "0": 0.008,
+              "1": 0.0047,
+              "2": 0.0371,
+              "3": 0.9503
+            },
+            "confidence": 0.9297
+          }
+        },
+        "usage": {
+          "input_tokens": 92,
+          "output_tokens": 137
+        },
+        "latency_ms": 104.2
+      }
+    },
+    {
+      "id": "severity-10",
+      "type": "score",
+      "expected": "3",
+      "predicted": "3",
+      "correct": true,
+      "wall_ms": 105.72933405637741,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "score",
+            "score": 2.9112,
+            "legend": {
+              "0": "No affected users: 0",
+              "1": "Low: 1 to 9 affected users",
+              "2": "Medium: 10 to 99 affected users",
+              "3": "High: at least 100 affected users"
+            },
+            "probabilities": {
+              "0": 0.017,
+              "1": 0.0035,
+              "2": 0.0308,
+              "3": 0.9487
+            },
+            "confidence": 0.9112
+          }
+        },
+        "usage": {
+          "input_tokens": 93,
+          "output_tokens": 137
+        },
+        "latency_ms": 103.9
+      }
+    },
+    {
+      "id": "severity-11",
+      "type": "score",
+      "expected": "0",
+      "predicted": "0",
+      "correct": true,
+      "wall_ms": 106.56212503090501,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "score",
+            "score": 0.038,
+            "legend": {
+              "0": "No affected users: 0",
+              "1": "Low: 1 to 9 affected users",
+              "2": "Medium: 10 to 99 affected users",
+              "3": "High: at least 100 affected users"
+            },
+            "probabilities": {
+              "0": 0.9708,
+              "1": 0.0232,
+              "2": 0.0033,
+              "3": 0.0028
+            },
+            "confidence": 0.962
+          }
+        },
+        "usage": {
+          "input_tokens": 91,
+          "output_tokens": 136
+        },
+        "latency_ms": 104.8
+      }
+    },
+    {
+      "id": "route-0",
+      "type": "choice",
+      "expected": "billing",
+      "predicted": "billing",
+      "correct": true,
+      "wall_ms": 131.4886249601841,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "choice",
+            "choice": "billing",
+            "confidence": 0.8202,
+            "probabilities": {
+              "billing": 0.8561,
+              "shipping": 0.005,
+              "returns": 0.006,
+              "security": 0.002,
+              "none": 0.1309
+            }
+          }
+        },
+        "usage": {
+          "input_tokens": 97,
+          "output_tokens": 82
+        },
+        "latency_ms": 129.7
+      }
+    },
+    {
+      "id": "route-1",
+      "type": "choice",
+      "expected": "shipping",
+      "predicted": "shipping",
+      "correct": true,
+      "wall_ms": 107.5653750449419,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "choice",
+            "choice": "shipping",
+            "confidence": 0.8889,
+            "probabilities": {
+              "billing": 0.0019,
+              "shipping": 0.9111,
+              "returns": 0.0055,
+              "security": 0.0009,
+              "none": 0.0807
+            }
+          }
+        },
+        "usage": {
+          "input_tokens": 91,
+          "output_tokens": 85
+        },
+        "latency_ms": 105.7
+      }
+    },
+    {
+      "id": "route-2",
+      "type": "choice",
+      "expected": "returns",
+      "predicted": "returns",
+      "correct": true,
+      "wall_ms": 108.45941607840359,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "choice",
+            "choice": "returns",
+            "confidence": 0.8291,
+            "probabilities": {
+              "billing": 0.0049,
+              "shipping": 0.008,
+              "returns": 0.8633,
+              "security": 0.0006,
+              "none": 0.1233
+            }
+          }
+        },
+        "usage": {
+          "input_tokens": 91,
+          "output_tokens": 84
+        },
+        "latency_ms": 106.6
+      }
+    },
+    {
+      "id": "route-3",
+      "type": "choice",
+      "expected": "security",
+      "predicted": "security",
+      "correct": true,
+      "wall_ms": 127.74599995464087,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "choice",
+            "choice": "security",
+            "confidence": 0.9028,
+            "probabilities": {
+              "billing": 0.0011,
+              "shipping": 0.0012,
+              "returns": 0.0005,
+              "security": 0.9223,
+              "none": 0.075
+            }
+          }
+        },
+        "usage": {
+          "input_tokens": 93,
+          "output_tokens": 84
+        },
+        "latency_ms": 126.0
+      }
+    },
+    {
+      "id": "route-4",
+      "type": "choice",
+      "expected": "none",
+      "predicted": "none",
+      "correct": true,
+      "wall_ms": 135.43770799878985,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "choice",
+            "choice": "none",
+            "confidence": 0.8945,
+            "probabilities": {
+              "billing": 0.017,
+              "shipping": 0.0244,
+              "returns": 0.0167,
+              "security": 0.0263,
+              "none": 0.9156
+            }
+          }
+        },
+        "usage": {
+          "input_tokens": 94,
+          "output_tokens": 84
+        },
+        "latency_ms": 133.5
+      }
+    },
+    {
+      "id": "route-5",
+      "type": "choice",
+      "expected": "returns",
+      "predicted": "returns",
+      "correct": true,
+      "wall_ms": 109.87187491264194,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "choice",
+            "choice": "returns",
+            "confidence": 0.6766,
+            "probabilities": {
+              "billing": 0.0218,
+              "shipping": 0.066,
+              "returns": 0.7413,
+              "security": 0.0013,
+              "none": 0.1696
+            }
+          }
+        },
+        "usage": {
+          "input_tokens": 91,
+          "output_tokens": 84
+        },
+        "latency_ms": 108.1
+      }
+    },
+    {
+      "id": "route-6",
+      "type": "choice",
+      "expected": "billing",
+      "predicted": "billing",
+      "correct": true,
+      "wall_ms": 110.74220901355147,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "choice",
+            "choice": "billing",
+            "confidence": 0.3477,
+            "probabilities": {
+              "billing": 0.4782,
+              "shipping": 0.0478,
+              "returns": 0.027,
+              "security": 0.0019,
+              "none": 0.4452
+            }
+          }
+        },
+        "usage": {
+          "input_tokens": 91,
+          "output_tokens": 84
+        },
+        "latency_ms": 109.0
+      }
+    },
+    {
+      "id": "route-7",
+      "type": "choice",
+      "expected": "shipping",
+      "predicted": "shipping",
+      "correct": true,
+      "wall_ms": 112.25695803295821,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "choice",
+            "choice": "shipping",
+            "confidence": 0.858,
+            "probabilities": {
+              "billing": 0.0049,
+              "shipping": 0.8864,
+              "returns": 0.0069,
+              "security": 0.0016,
+              "none": 0.1002
+            }
+          }
+        },
+        "usage": {
+          "input_tokens": 92,
+          "output_tokens": 84
+        },
+        "latency_ms": 110.5
+      }
+    },
+    {
+      "id": "action-0",
+      "type": "choice",
+      "expected": "report_complete",
+      "predicted": "report_complete",
+      "correct": true,
+      "wall_ms": 111.5509580122307,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "choice",
+            "choice": "report_complete",
+            "confidence": 0.9538,
+            "probabilities": {
+              "report_complete": 0.9653,
+              "run_tests": 0.0124,
+              "continue_work": 0.0087,
+              "stop": 0.0135
+            }
+          }
+        },
+        "usage": {
+          "input_tokens": 83,
+          "output_tokens": 78
+        },
+        "latency_ms": 109.8
+      }
+    },
+    {
+      "id": "action-1",
+      "type": "choice",
+      "expected": "run_tests",
+      "predicted": "run_tests",
+      "correct": true,
+      "wall_ms": 108.99458301719278,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "choice",
+            "choice": "run_tests",
+            "confidence": 0.9308,
+            "probabilities": {
+              "report_complete": 0.0199,
+              "run_tests": 0.9481,
+              "continue_work": 0.0194,
+              "stop": 0.0126
+            }
+          }
+        },
+        "usage": {
+          "input_tokens": 78,
+          "output_tokens": 78
+        },
+        "latency_ms": 107.2
+      }
+    },
+    {
+      "id": "action-2",
+      "type": "choice",
+      "expected": "continue_work",
+      "predicted": "continue_work",
+      "correct": true,
+      "wall_ms": 107.76620800606906,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "choice",
+            "choice": "continue_work",
+            "confidence": 0.9598,
+            "probabilities": {
+              "report_complete": 0.008,
+              "run_tests": 0.0115,
+              "continue_work": 0.9699,
+              "stop": 0.0107
+            }
+          }
+        },
+        "usage": {
+          "input_tokens": 80,
+          "output_tokens": 77
+        },
+        "latency_ms": 106.0
+      }
+    },
+    {
+      "id": "action-3",
+      "type": "choice",
+      "expected": "stop",
+      "predicted": "stop",
+      "correct": true,
+      "wall_ms": 107.36695805098861,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "choice",
+            "choice": "stop",
+            "confidence": 0.9856,
+            "probabilities": {
+              "report_complete": 0.0012,
+              "run_tests": 0.0028,
+              "continue_work": 0.0068,
+              "stop": 0.9892
+            }
+          }
+        },
+        "usage": {
+          "input_tokens": 78,
+          "output_tokens": 77
+        },
+        "latency_ms": 105.6
+      }
+    },
+    {
+      "id": "complete-0",
+      "type": "noul",
+      "expected": true,
+      "predicted": true,
+      "correct": true,
+      "wall_ms": 106.74412501975894,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "noul",
+            "noul": 0.9717
+          }
+        },
+        "usage": {
+          "input_tokens": 44,
+          "output_tokens": 22
+        },
+        "latency_ms": 105.1
+      }
+    },
+    {
+      "id": "complete-1",
+      "type": "noul",
+      "expected": false,
+      "predicted": false,
+      "correct": true,
+      "wall_ms": 105.59562500566244,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "noul",
+            "noul": 0.143
+          }
+        },
+        "usage": {
+          "input_tokens": 41,
+          "output_tokens": 21
+        },
+        "latency_ms": 103.9
+      }
+    },
+    {
+      "id": "complete-2",
+      "type": "noul",
+      "expected": false,
+      "predicted": false,
+      "correct": true,
+      "wall_ms": 103.73283294029534,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "noul",
+            "noul": 0.0359
+          }
+        },
+        "usage": {
+          "input_tokens": 38,
+          "output_tokens": 22
+        },
+        "latency_ms": 102.1
+      }
+    },
+    {
+      "id": "complete-3",
+      "type": "noul",
+      "expected": true,
+      "predicted": true,
+      "correct": true,
+      "wall_ms": 103.38233399670571,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "noul",
+            "noul": 0.9661
+          }
+        },
+        "usage": {
+          "input_tokens": 38,
+          "output_tokens": 22
+        },
+        "latency_ms": 101.8
+      }
+    },
+    {
+      "id": "complete-4",
+      "type": "noul",
+      "expected": false,
+      "predicted": false,
+      "correct": true,
+      "wall_ms": 78.63591692876071,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "noul",
+            "noul": 0.0438
+          }
+        },
+        "usage": {
+          "input_tokens": 36,
+          "output_tokens": 22
+        },
+        "latency_ms": 77.0
+      }
+    },
+    {
+      "id": "complete-5",
+      "type": "noul",
+      "expected": true,
+      "predicted": true,
+      "correct": true,
+      "wall_ms": 103.73804101254791,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "noul",
+            "noul": 0.8663
+          }
+        },
+        "usage": {
+          "input_tokens": 38,
+          "output_tokens": 22
+        },
+        "latency_ms": 102.2
+      }
+    },
+    {
+      "id": "complete-6",
+      "type": "noul",
+      "expected": false,
+      "predicted": false,
+      "correct": true,
+      "wall_ms": 103.73316693585366,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "noul",
+            "noul": 0.0174
+          }
+        },
+        "usage": {
+          "input_tokens": 42,
+          "output_tokens": 22
+        },
+        "latency_ms": 102.2
+      }
+    },
+    {
+      "id": "complete-7",
+      "type": "noul",
+      "expected": true,
+      "predicted": true,
+      "correct": true,
+      "wall_ms": 103.43599994666874,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "noul",
+            "noul": 0.9683
+          }
+        },
+        "usage": {
+          "input_tokens": 38,
+          "output_tokens": 22
+        },
+        "latency_ms": 101.9
+      }
+    },
+    {
+      "id": "complete-8",
+      "type": "noul",
+      "expected": true,
+      "predicted": true,
+      "correct": true,
+      "wall_ms": 102.79179201461375,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "noul",
+            "noul": 0.6682
+          }
+        },
+        "usage": {
+          "input_tokens": 43,
+          "output_tokens": 22
+        },
+        "latency_ms": 101.2
+      }
+    },
+    {
+      "id": "complete-9",
+      "type": "noul",
+      "expected": false,
+      "predicted": false,
+      "correct": true,
+      "wall_ms": 94.77441594935954,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "noul",
+            "noul": 0.3933
+          }
+        },
+        "usage": {
+          "input_tokens": 37,
+          "output_tokens": 22
+        },
+        "latency_ms": 93.2
+      }
+    },
+    {
+      "id": "complete-10",
+      "type": "noul",
+      "expected": true,
+      "predicted": true,
+      "correct": true,
+      "wall_ms": 102.78558300342411,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "noul",
+            "noul": 0.9042
+          }
+        },
+        "usage": {
+          "input_tokens": 41,
+          "output_tokens": 22
+        },
+        "latency_ms": 101.3
+      }
+    },
+    {
+      "id": "complete-11",
+      "type": "noul",
+      "expected": false,
+      "predicted": false,
+      "correct": true,
+      "wall_ms": 95.79425002448261,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "noul",
+            "noul": 0.0549
+          }
+        },
+        "usage": {
+          "input_tokens": 37,
+          "output_tokens": 22
+        },
+        "latency_ms": 94.3
+      }
+    },
+    {
+      "id": "severity-0",
+      "type": "score",
+      "expected": "0",
+      "predicted": "0",
+      "correct": true,
+      "wall_ms": 105.14483298175037,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "score",
+            "score": 0.0334,
+            "legend": {
+              "0": "No affected users: 0",
+              "1": "Low: 1 to 9 affected users",
+              "2": "Medium: 10 to 99 affected users",
+              "3": "High: at least 100 affected users"
+            },
+            "probabilities": {
+              "0": 0.9793,
+              "1": 0.0119,
+              "2": 0.005,
+              "3": 0.0038
+            },
+            "confidence": 0.9666
+          }
+        },
+        "usage": {
+          "input_tokens": 90,
+          "output_tokens": 137
+        },
+        "latency_ms": 103.3
+      }
+    },
+    {
+      "id": "severity-1",
+      "type": "score",
+      "expected": "1",
+      "predicted": "1",
+      "correct": true,
+      "wall_ms": 105.22637504618615,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "score",
+            "score": 0.98,
+            "legend": {
+              "0": "No affected users: 0",
+              "1": "Low: 1 to 9 affected users",
+              "2": "Medium: 10 to 99 affected users",
+              "3": "High: at least 100 affected users"
+            },
+            "probabilities": {
+              "0": 0.027,
+              "1": 0.9684,
+              "2": 0.0022,
+              "3": 0.0024
+            },
+            "confidence": 0.9661
+          }
+        },
+        "usage": {
+          "input_tokens": 90,
+          "output_tokens": 135
+        },
+        "latency_ms": 103.5
+      }
+    },
+    {
+      "id": "severity-2",
+      "type": "score",
+      "expected": "1",
+      "predicted": "1",
+      "correct": true,
+      "wall_ms": 105.75458407402039,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "score",
+            "score": 0.9999,
+            "legend": {
+              "0": "No affected users: 0",
+              "1": "Low: 1 to 9 affected users",
+              "2": "Medium: 10 to 99 affected users",
+              "3": "High: at least 100 affected users"
+            },
+            "probabilities": {
+              "0": 0.0078,
+              "1": 0.9867,
+              "2": 0.0032,
+              "3": 0.0022
+            },
+            "confidence": 0.9845
+          }
+        },
+        "usage": {
+          "input_tokens": 90,
+          "output_tokens": 138
+        },
+        "latency_ms": 104.0
+      }
+    },
+    {
+      "id": "severity-3",
+      "type": "score",
+      "expected": "1",
+      "predicted": "1",
+      "correct": true,
+      "wall_ms": 106.27262492198497,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "score",
+            "score": 0.9973,
+            "legend": {
+              "0": "No affected users: 0",
+              "1": "Low: 1 to 9 affected users",
+              "2": "Medium: 10 to 99 affected users",
+              "3": "High: at least 100 affected users"
+            },
+            "probabilities": {
+              "0": 0.0113,
+              "1": 0.9825,
+              "2": 0.0039,
+              "3": 0.0023
+            },
+            "confidence": 0.9801
+          }
+        },
+        "usage": {
+          "input_tokens": 90,
+          "output_tokens": 138
+        },
+        "latency_ms": 104.5
+      }
+    },
+    {
+      "id": "severity-4",
+      "type": "score",
+      "expected": "2",
+      "predicted": "2",
+      "correct": true,
+      "wall_ms": 106.16320790722966,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "score",
+            "score": 1.9836,
+            "legend": {
+              "0": "No affected users: 0",
+              "1": "Low: 1 to 9 affected users",
+              "2": "Medium: 10 to 99 affected users",
+              "3": "High: at least 100 affected users"
+            },
+            "probabilities": {
+              "0": 0.0054,
+              "1": 0.0072,
+              "2": 0.9858,
+              "3": 0.0016
+            },
+            "confidence": 0.9804
+          }
+        },
+        "usage": {
+          "input_tokens": 91,
+          "output_tokens": 138
+        },
+        "latency_ms": 104.4
+      }
+    },
+    {
+      "id": "severity-5",
+      "type": "score",
+      "expected": "2",
+      "predicted": "2",
+      "correct": true,
+      "wall_ms": 105.8110420126468,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "score",
+            "score": 1.9662,
+            "legend": {
+              "0": "No affected users: 0",
+              "1": "Low: 1 to 9 affected users",
+              "2": "Medium: 10 to 99 affected users",
+              "3": "High: at least 100 affected users"
+            },
+            "probabilities": {
+              "0": 0.0108,
+              "1": 0.0154,
+              "2": 0.9706,
+              "3": 0.0032
+            },
+            "confidence": 0.9598
+          }
+        },
+        "usage": {
+          "input_tokens": 91,
+          "output_tokens": 138
+        },
+        "latency_ms": 104.1
+      }
+    },
+    {
+      "id": "severity-6",
+      "type": "score",
+      "expected": "2",
+      "predicted": "2",
+      "correct": true,
+      "wall_ms": 105.81333306618035,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "score",
+            "score": 1.9887,
+            "legend": {
+              "0": "No affected users: 0",
+              "1": "Low: 1 to 9 affected users",
+              "2": "Medium: 10 to 99 affected users",
+              "3": "High: at least 100 affected users"
+            },
+            "probabilities": {
+              "0": 0.0058,
+              "1": 0.0034,
+              "2": 0.9873,
+              "3": 0.0036
+            },
+            "confidence": 0.9815
+          }
+        },
+        "usage": {
+          "input_tokens": 91,
+          "output_tokens": 138
+        },
+        "latency_ms": 104.1
+      }
+    },
+    {
+      "id": "severity-7",
+      "type": "score",
+      "expected": "2",
+      "predicted": "2",
+      "correct": true,
+      "wall_ms": 106.62541596684605,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "score",
+            "score": 1.9376,
+            "legend": {
+              "0": "No affected users: 0",
+              "1": "Low: 1 to 9 affected users",
+              "2": "Medium: 10 to 99 affected users",
+              "3": "High: at least 100 affected users"
+            },
+            "probabilities": {
+              "0": 0.0327,
+              "1": 0.0343,
+              "2": 0.8958,
+              "3": 0.0372
+            },
+            "confidence": 0.8631
+          }
+        },
+        "usage": {
+          "input_tokens": 91,
+          "output_tokens": 138
+        },
+        "latency_ms": 104.9
+      }
+    },
+    {
+      "id": "severity-8",
+      "type": "score",
+      "expected": "3",
+      "predicted": "3",
+      "correct": true,
+      "wall_ms": 105.91637494508177,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "score",
+            "score": 2.9506,
+            "legend": {
+              "0": "No affected users: 0",
+              "1": "Low: 1 to 9 affected users",
+              "2": "Medium: 10 to 99 affected users",
+              "3": "High: at least 100 affected users"
+            },
+            "probabilities": {
+              "0": 0.0053,
+              "1": 0.0028,
+              "2": 0.0281,
+              "3": 0.9639
+            },
+            "confidence": 0.9506
+          }
+        },
+        "usage": {
+          "input_tokens": 92,
+          "output_tokens": 138
+        },
+        "latency_ms": 104.3
+      }
+    },
+    {
+      "id": "severity-9",
+      "type": "score",
+      "expected": "3",
+      "predicted": "3",
+      "correct": true,
+      "wall_ms": 106.97404202073812,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "score",
+            "score": 2.9297,
+            "legend": {
+              "0": "No affected users: 0",
+              "1": "Low: 1 to 9 affected users",
+              "2": "Medium: 10 to 99 affected users",
+              "3": "High: at least 100 affected users"
+            },
+            "probabilities": {
+              "0": 0.008,
+              "1": 0.0047,
+              "2": 0.0371,
+              "3": 0.9503
+            },
+            "confidence": 0.9297
+          }
+        },
+        "usage": {
+          "input_tokens": 92,
+          "output_tokens": 137
+        },
+        "latency_ms": 105.4
+      }
+    },
+    {
+      "id": "severity-10",
+      "type": "score",
+      "expected": "3",
+      "predicted": "3",
+      "correct": true,
+      "wall_ms": 107.14166704565287,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "score",
+            "score": 2.9112,
+            "legend": {
+              "0": "No affected users: 0",
+              "1": "Low: 1 to 9 affected users",
+              "2": "Medium: 10 to 99 affected users",
+              "3": "High: at least 100 affected users"
+            },
+            "probabilities": {
+              "0": 0.017,
+              "1": 0.0035,
+              "2": 0.0308,
+              "3": 0.9487
+            },
+            "confidence": 0.9112
+          }
+        },
+        "usage": {
+          "input_tokens": 93,
+          "output_tokens": 137
+        },
+        "latency_ms": 105.5
+      }
+    },
+    {
+      "id": "severity-11",
+      "type": "score",
+      "expected": "0",
+      "predicted": "0",
+      "correct": true,
+      "wall_ms": 107.7302920166403,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "score",
+            "score": 0.038,
+            "legend": {
+              "0": "No affected users: 0",
+              "1": "Low: 1 to 9 affected users",
+              "2": "Medium: 10 to 99 affected users",
+              "3": "High: at least 100 affected users"
+            },
+            "probabilities": {
+              "0": 0.9708,
+              "1": 0.0232,
+              "2": 0.0033,
+              "3": 0.0028
+            },
+            "confidence": 0.962
+          }
+        },
+        "usage": {
+          "input_tokens": 91,
+          "output_tokens": 136
+        },
+        "latency_ms": 106.0
+      }
+    }
+  ],
+  "repeated_first": {
+    "id": "prefix-0",
+    "type": "noul",
+    "expected": true,
+    "predicted": true,
+    "correct": true,
+    "wall_ms": 214.78024998214096,
+    "response": {
+      "model": "kev-latest",
+      "answers": {
+        "decision": {
+          "type": "noul",
+          "noul": 0.992
+        }
+      },
+      "usage": {
+        "input_tokens": 267,
+        "output_tokens": 21
+      },
+      "latency_ms": 213.3
+    }
+  },
+  "repeated_warm_summary": {
+    "requests": 19,
+    "correct": 19,
+    "p50_wall_ms": 28.261957922950387,
+    "p95_wall_ms": 29.254082939587533,
+    "mean_wall_ms": 28.24858341390561
+  },
+  "repeated_rows": [
+    {
+      "id": "prefix-0",
+      "type": "noul",
+      "expected": true,
+      "predicted": true,
+      "correct": true,
+      "wall_ms": 214.78024998214096,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "noul",
+            "noul": 0.992
+          }
+        },
+        "usage": {
+          "input_tokens": 267,
+          "output_tokens": 21
+        },
+        "latency_ms": 213.3
+      }
+    },
+    {
+      "id": "prefix-1",
+      "type": "noul",
+      "expected": false,
+      "predicted": false,
+      "correct": true,
+      "wall_ms": 27.974124997854233,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "noul",
+            "noul": 0.0068
+          }
+        },
+        "usage": {
+          "input_tokens": 267,
+          "output_tokens": 22
+        },
+        "latency_ms": 26.1
+      }
+    },
+    {
+      "id": "prefix-2",
+      "type": "noul",
+      "expected": false,
+      "predicted": false,
+      "correct": true,
+      "wall_ms": 28.011874994263053,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "noul",
+            "noul": 0.03
+          }
+        },
+        "usage": {
+          "input_tokens": 267,
+          "output_tokens": 20
+        },
+        "latency_ms": 26.3
+      }
+    },
+    {
+      "id": "prefix-3",
+      "type": "noul",
+      "expected": true,
+      "predicted": true,
+      "correct": true,
+      "wall_ms": 27.767584077082574,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "noul",
+            "noul": 0.9939
+          }
+        },
+        "usage": {
+          "input_tokens": 267,
+          "output_tokens": 22
+        },
+        "latency_ms": 26.2
+      }
+    },
+    {
+      "id": "prefix-4",
+      "type": "noul",
+      "expected": false,
+      "predicted": false,
+      "correct": true,
+      "wall_ms": 27.5716669857502,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "noul",
+            "noul": 0.0092
+          }
+        },
+        "usage": {
+          "input_tokens": 267,
+          "output_tokens": 22
+        },
+        "latency_ms": 26.0
+      }
+    },
+    {
+      "id": "prefix-5",
+      "type": "noul",
+      "expected": false,
+      "predicted": false,
+      "correct": true,
+      "wall_ms": 27.475083013996482,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "noul",
+            "noul": 0.0139
+          }
+        },
+        "usage": {
+          "input_tokens": 267,
+          "output_tokens": 22
+        },
+        "latency_ms": 25.9
+      }
+    },
+    {
+      "id": "prefix-6",
+      "type": "noul",
+      "expected": true,
+      "predicted": true,
+      "correct": true,
+      "wall_ms": 27.93866698630154,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "noul",
+            "noul": 0.9948
+          }
+        },
+        "usage": {
+          "input_tokens": 267,
+          "output_tokens": 22
+        },
+        "latency_ms": 26.3
+      }
+    },
+    {
+      "id": "prefix-7",
+      "type": "noul",
+      "expected": false,
+      "predicted": false,
+      "correct": true,
+      "wall_ms": 28.015834046527743,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "noul",
+            "noul": 0.014
+          }
+        },
+        "usage": {
+          "input_tokens": 267,
+          "output_tokens": 21
+        },
+        "latency_ms": 26.3
+      }
+    },
+    {
+      "id": "prefix-8",
+      "type": "noul",
+      "expected": false,
+      "predicted": false,
+      "correct": true,
+      "wall_ms": 27.83979196101427,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "noul",
+            "noul": 0.0171
+          }
+        },
+        "usage": {
+          "input_tokens": 267,
+          "output_tokens": 22
+        },
+        "latency_ms": 26.1
+      }
+    },
+    {
+      "id": "prefix-9",
+      "type": "noul",
+      "expected": true,
+      "predicted": true,
+      "correct": true,
+      "wall_ms": 28.29316700808704,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "noul",
+            "noul": 0.995
+          }
+        },
+        "usage": {
+          "input_tokens": 267,
+          "output_tokens": 21
+        },
+        "latency_ms": 26.5
+      }
+    },
+    {
+      "id": "prefix-10",
+      "type": "noul",
+      "expected": false,
+      "predicted": false,
+      "correct": true,
+      "wall_ms": 28.435208019800484,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "noul",
+            "noul": 0.0189
+          }
+        },
+        "usage": {
+          "input_tokens": 267,
+          "output_tokens": 22
+        },
+        "latency_ms": 26.6
+      }
+    },
+    {
+      "id": "prefix-11",
+      "type": "noul",
+      "expected": false,
+      "predicted": false,
+      "correct": true,
+      "wall_ms": 28.261957922950387,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "noul",
+            "noul": 0.0185
+          }
+        },
+        "usage": {
+          "input_tokens": 267,
+          "output_tokens": 22
+        },
+        "latency_ms": 26.7
+      }
+    },
+    {
+      "id": "prefix-12",
+      "type": "noul",
+      "expected": true,
+      "predicted": true,
+      "correct": true,
+      "wall_ms": 28.629667009226978,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "noul",
+            "noul": 0.9951
+          }
+        },
+        "usage": {
+          "input_tokens": 267,
+          "output_tokens": 22
+        },
+        "latency_ms": 27.0
+      }
+    },
+    {
+      "id": "prefix-13",
+      "type": "noul",
+      "expected": false,
+      "predicted": false,
+      "correct": true,
+      "wall_ms": 28.08320801705122,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "noul",
+            "noul": 0.0159
+          }
+        },
+        "usage": {
+          "input_tokens": 267,
+          "output_tokens": 22
+        },
+        "latency_ms": 26.4
+      }
+    },
+    {
+      "id": "prefix-14",
+      "type": "noul",
+      "expected": false,
+      "predicted": false,
+      "correct": true,
+      "wall_ms": 28.5302079282701,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "noul",
+            "noul": 0.0211
+          }
+        },
+        "usage": {
+          "input_tokens": 267,
+          "output_tokens": 22
+        },
+        "latency_ms": 26.9
+      }
+    },
+    {
+      "id": "prefix-15",
+      "type": "noul",
+      "expected": true,
+      "predicted": true,
+      "correct": true,
+      "wall_ms": 28.30162493046373,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "noul",
+            "noul": 0.9945
+          }
+        },
+        "usage": {
+          "input_tokens": 267,
+          "output_tokens": 22
+        },
+        "latency_ms": 26.7
+      }
+    },
+    {
+      "id": "prefix-16",
+      "type": "noul",
+      "expected": false,
+      "predicted": false,
+      "correct": true,
+      "wall_ms": 28.785792062990367,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "noul",
+            "noul": 0.0165
+          }
+        },
+        "usage": {
+          "input_tokens": 267,
+          "output_tokens": 22
+        },
+        "latency_ms": 27.2
+      }
+    },
+    {
+      "id": "prefix-17",
+      "type": "noul",
+      "expected": false,
+      "predicted": false,
+      "correct": true,
+      "wall_ms": 28.89779198449105,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "noul",
+            "noul": 0.0206
+          }
+        },
+        "usage": {
+          "input_tokens": 267,
+          "output_tokens": 22
+        },
+        "latency_ms": 27.2
+      }
+    },
+    {
+      "id": "prefix-18",
+      "type": "noul",
+      "expected": true,
+      "predicted": true,
+      "correct": true,
+      "wall_ms": 28.655749978497624,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "noul",
+            "noul": 0.9941
+          }
+        },
+        "usage": {
+          "input_tokens": 267,
+          "output_tokens": 22
+        },
+        "latency_ms": 27.0
+      }
+    },
+    {
+      "id": "prefix-19",
+      "type": "noul",
+      "expected": false,
+      "predicted": false,
+      "correct": true,
+      "wall_ms": 29.254082939587533,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "noul",
+            "noul": 0.021
+          }
+        },
+        "usage": {
+          "input_tokens": 267,
+          "output_tokens": 21
+        },
+        "latency_ms": 27.6
+      }
+    }
+  ],
+  "prefix_cache_before": {
+    "size": 4,
+    "min_state_tokens": 0,
+    "max_tokens": 65536,
+    "hits": 0,
+    "misses": 114,
+    "cached_states": 4,
+    "oom_retries": 0
+  },
+  "prefix_cache_after": {
+    "size": 4,
+    "min_state_tokens": 0,
+    "max_tokens": 65536,
+    "hits": 19,
+    "misses": 115,
+    "cached_states": 4,
+    "oom_retries": 0
+  },
+  "option_order": [
+    {
+      "id": "route-0",
+      "stable": true,
+      "original": {
+        "id": "route-0",
+        "type": "choice",
+        "expected": "billing",
+        "predicted": "billing",
+        "correct": true,
+        "wall_ms": 144.8322079377249,
+        "response": {
+          "model": "kev-latest",
+          "answers": {
+            "decision": {
+              "type": "choice",
+              "choice": "billing",
+              "confidence": 0.8202,
+              "probabilities": {
+                "billing": 0.8561,
+                "shipping": 0.005,
+                "returns": 0.006,
+                "security": 0.002,
+                "none": 0.1309
+              }
+            }
+          },
+          "usage": {
+            "input_tokens": 97,
+            "output_tokens": 82
+          },
+          "latency_ms": 143.3
+        }
+      },
+      "reversed": {
+        "id": "route-0",
+        "type": "choice",
+        "expected": "billing",
+        "predicted": "billing",
+        "correct": true,
+        "wall_ms": 91.32120804861188,
+        "response": {
+          "model": "kev-latest",
+          "answers": {
+            "decision": {
+              "type": "choice",
+              "choice": "billing",
+              "confidence": 0.8801,
+              "probabilities": {
+                "none": 0.0835,
+                "security": 0.0023,
+                "returns": 0.0071,
+                "shipping": 0.0031,
+                "billing": 0.9041
+              }
+            }
+          },
+          "usage": {
+            "input_tokens": 97,
+            "output_tokens": 85
+          },
+          "latency_ms": 89.6
+        }
+      }
+    },
+    {
+      "id": "route-1",
+      "stable": true,
+      "original": {
+        "id": "route-1",
+        "type": "choice",
+        "expected": "shipping",
+        "predicted": "shipping",
+        "correct": true,
+        "wall_ms": 116.215749992989,
+        "response": {
+          "model": "kev-latest",
+          "answers": {
+            "decision": {
+              "type": "choice",
+              "choice": "shipping",
+              "confidence": 0.8889,
+              "probabilities": {
+                "billing": 0.0019,
+                "shipping": 0.9111,
+                "returns": 0.0055,
+                "security": 0.0009,
+                "none": 0.0807
+              }
+            }
+          },
+          "usage": {
+            "input_tokens": 91,
+            "output_tokens": 85
+          },
+          "latency_ms": 114.5
+        }
+      },
+      "reversed": {
+        "id": "route-1",
+        "type": "choice",
+        "expected": "shipping",
+        "predicted": "shipping",
+        "correct": true,
+        "wall_ms": 89.67683301307261,
+        "response": {
+          "model": "kev-latest",
+          "answers": {
+            "decision": {
+              "type": "choice",
+              "choice": "shipping",
+              "confidence": 0.8889,
+              "probabilities": {
+                "none": 0.0814,
+                "security": 0.0009,
+                "returns": 0.0038,
+                "shipping": 0.9111,
+                "billing": 0.0027
+              }
+            }
+          },
+          "usage": {
+            "input_tokens": 91,
+            "output_tokens": 85
+          },
+          "latency_ms": 88.0
+        }
+      }
+    },
+    {
+      "id": "route-2",
+      "stable": true,
+      "original": {
+        "id": "route-2",
+        "type": "choice",
+        "expected": "returns",
+        "predicted": "returns",
+        "correct": true,
+        "wall_ms": 115.9655419178307,
+        "response": {
+          "model": "kev-latest",
+          "answers": {
+            "decision": {
+              "type": "choice",
+              "choice": "returns",
+              "confidence": 0.8291,
+              "probabilities": {
+                "billing": 0.0049,
+                "shipping": 0.008,
+                "returns": 0.8633,
+                "security": 0.0006,
+                "none": 0.1233
+              }
+            }
+          },
+          "usage": {
+            "input_tokens": 91,
+            "output_tokens": 84
+          },
+          "latency_ms": 114.2
+        }
+      },
+      "reversed": {
+        "id": "route-2",
+        "type": "choice",
+        "expected": "returns",
+        "predicted": "returns",
+        "correct": true,
+        "wall_ms": 90.19329096190631,
+        "response": {
+          "model": "kev-latest",
+          "answers": {
+            "decision": {
+              "type": "choice",
+              "choice": "returns",
+              "confidence": 0.8111,
+              "probabilities": {
+                "none": 0.1293,
+                "security": 0.0013,
+                "returns": 0.8489,
+                "shipping": 0.0091,
+                "billing": 0.0115
+              }
+            }
+          },
+          "usage": {
+            "input_tokens": 91,
+            "output_tokens": 85
+          },
+          "latency_ms": 88.3
+        }
+      }
+    },
+    {
+      "id": "route-3",
+      "stable": true,
+      "original": {
+        "id": "route-3",
+        "type": "choice",
+        "expected": "security",
+        "predicted": "security",
+        "correct": true,
+        "wall_ms": 134.41999990027398,
+        "response": {
+          "model": "kev-latest",
+          "answers": {
+            "decision": {
+              "type": "choice",
+              "choice": "security",
+              "confidence": 0.9028,
+              "probabilities": {
+                "billing": 0.0011,
+                "shipping": 0.0012,
+                "returns": 0.0005,
+                "security": 0.9223,
+                "none": 0.075
+              }
+            }
+          },
+          "usage": {
+            "input_tokens": 93,
+            "output_tokens": 84
+          },
+          "latency_ms": 132.7
+        }
+      },
+      "reversed": {
+        "id": "route-3",
+        "type": "choice",
+        "expected": "security",
+        "predicted": "security",
+        "correct": true,
+        "wall_ms": 87.59179094340652,
+        "response": {
+          "model": "kev-latest",
+          "answers": {
+            "decision": {
+              "type": "choice",
+              "choice": "security",
+              "confidence": 0.8954,
+              "probabilities": {
+                "none": 0.0804,
+                "security": 0.9164,
+                "returns": 0.0007,
+                "shipping": 0.0011,
+                "billing": 0.0014
+              }
+            }
+          },
+          "usage": {
+            "input_tokens": 93,
+            "output_tokens": 85
+          },
+          "latency_ms": 85.8
+        }
+      }
+    },
+    {
+      "id": "route-4",
+      "stable": true,
+      "original": {
+        "id": "route-4",
+        "type": "choice",
+        "expected": "none",
+        "predicted": "none",
+        "correct": true,
+        "wall_ms": 139.1918750014156,
+        "response": {
+          "model": "kev-latest",
+          "answers": {
+            "decision": {
+              "type": "choice",
+              "choice": "none",
+              "confidence": 0.8945,
+              "probabilities": {
+                "billing": 0.017,
+                "shipping": 0.0244,
+                "returns": 0.0167,
+                "security": 0.0263,
+                "none": 0.9156
+              }
+            }
+          },
+          "usage": {
+            "input_tokens": 94,
+            "output_tokens": 84
+          },
+          "latency_ms": 137.4
+        }
+      },
+      "reversed": {
+        "id": "route-4",
+        "type": "choice",
+        "expected": "none",
+        "predicted": "none",
+        "correct": true,
+        "wall_ms": 86.9688750244677,
+        "response": {
+          "model": "kev-latest",
+          "answers": {
+            "decision": {
+              "type": "choice",
+              "choice": "none",
+              "confidence": 0.9066,
+              "probabilities": {
+                "none": 0.9252,
+                "security": 0.0136,
+                "returns": 0.0178,
+                "shipping": 0.0153,
+                "billing": 0.028
+              }
+            }
+          },
+          "usage": {
+            "input_tokens": 94,
+            "output_tokens": 84
+          },
+          "latency_ms": 85.3
+        }
+      }
+    },
+    {
+      "id": "route-5",
+      "stable": true,
+      "original": {
+        "id": "route-5",
+        "type": "choice",
+        "expected": "returns",
+        "predicted": "returns",
+        "correct": true,
+        "wall_ms": 112.99054196570069,
+        "response": {
+          "model": "kev-latest",
+          "answers": {
+            "decision": {
+              "type": "choice",
+              "choice": "returns",
+              "confidence": 0.6766,
+              "probabilities": {
+                "billing": 0.0218,
+                "shipping": 0.066,
+                "returns": 0.7413,
+                "security": 0.0013,
+                "none": 0.1696
+              }
+            }
+          },
+          "usage": {
+            "input_tokens": 91,
+            "output_tokens": 84
+          },
+          "latency_ms": 111.2
+        }
+      },
+      "reversed": {
+        "id": "route-5",
+        "type": "choice",
+        "expected": "returns",
+        "predicted": "returns",
+        "correct": true,
+        "wall_ms": 87.27245894260705,
+        "response": {
+          "model": "kev-latest",
+          "answers": {
+            "decision": {
+              "type": "choice",
+              "choice": "returns",
+              "confidence": 0.5215,
+              "probabilities": {
+                "none": 0.2869,
+                "security": 0.0019,
+                "returns": 0.6172,
+                "shipping": 0.0616,
+                "billing": 0.0324
+              }
+            }
+          },
+          "usage": {
+            "input_tokens": 91,
+            "output_tokens": 85
+          },
+          "latency_ms": 85.6
+        }
+      }
+    },
+    {
+      "id": "route-6",
+      "stable": true,
+      "original": {
+        "id": "route-6",
+        "type": "choice",
+        "expected": "billing",
+        "predicted": "billing",
+        "correct": true,
+        "wall_ms": 112.08374996203929,
+        "response": {
+          "model": "kev-latest",
+          "answers": {
+            "decision": {
+              "type": "choice",
+              "choice": "billing",
+              "confidence": 0.3477,
+              "probabilities": {
+                "billing": 0.4782,
+                "shipping": 0.0478,
+                "returns": 0.027,
+                "security": 0.0019,
+                "none": 0.4452
+              }
+            }
+          },
+          "usage": {
+            "input_tokens": 91,
+            "output_tokens": 84
+          },
+          "latency_ms": 110.3
+        }
+      },
+      "reversed": {
+        "id": "route-6",
+        "type": "choice",
+        "expected": "billing",
+        "predicted": "billing",
+        "correct": true,
+        "wall_ms": 87.26704097352922,
+        "response": {
+          "model": "kev-latest",
+          "answers": {
+            "decision": {
+              "type": "choice",
+              "choice": "billing",
+              "confidence": 0.446,
+              "probabilities": {
+                "none": 0.3732,
+                "security": 0.0033,
+                "returns": 0.0301,
+                "shipping": 0.0367,
+                "billing": 0.5568
+              }
+            }
+          },
+          "usage": {
+            "input_tokens": 91,
+            "output_tokens": 84
+          },
+          "latency_ms": 85.4
+        }
+      }
+    },
+    {
+      "id": "route-7",
+      "stable": true,
+      "original": {
+        "id": "route-7",
+        "type": "choice",
+        "expected": "shipping",
+        "predicted": "shipping",
+        "correct": true,
+        "wall_ms": 113.3538750000298,
+        "response": {
+          "model": "kev-latest",
+          "answers": {
+            "decision": {
+              "type": "choice",
+              "choice": "shipping",
+              "confidence": 0.858,
+              "probabilities": {
+                "billing": 0.0049,
+                "shipping": 0.8864,
+                "returns": 0.0069,
+                "security": 0.0016,
+                "none": 0.1002
+              }
+            }
+          },
+          "usage": {
+            "input_tokens": 92,
+            "output_tokens": 84
+          },
+          "latency_ms": 111.7
+        }
+      },
+      "reversed": {
+        "id": "route-7",
+        "type": "choice",
+        "expected": "shipping",
+        "predicted": "shipping",
+        "correct": true,
+        "wall_ms": 87.04141702037305,
+        "response": {
+          "model": "kev-latest",
+          "answers": {
+            "decision": {
+              "type": "choice",
+              "choice": "shipping",
+              "confidence": 0.8631,
+              "probabilities": {
+                "none": 0.0973,
+                "security": 0.001,
+                "returns": 0.0046,
+                "shipping": 0.8905,
+                "billing": 0.0066
+              }
+            }
+          },
+          "usage": {
+            "input_tokens": 92,
+            "output_tokens": 84
+          },
+          "latency_ms": 85.3
+        }
+      }
+    },
+    {
+      "id": "action-0",
+      "stable": true,
+      "original": {
+        "id": "action-0",
+        "type": "choice",
+        "expected": "report_complete",
+        "predicted": "report_complete",
+        "correct": true,
+        "wall_ms": 111.49300006218255,
+        "response": {
+          "model": "kev-latest",
+          "answers": {
+            "decision": {
+              "type": "choice",
+              "choice": "report_complete",
+              "confidence": 0.9538,
+              "probabilities": {
+                "report_complete": 0.9653,
+                "run_tests": 0.0124,
+                "continue_work": 0.0087,
+                "stop": 0.0135
+              }
+            }
+          },
+          "usage": {
+            "input_tokens": 83,
+            "output_tokens": 78
+          },
+          "latency_ms": 109.8
+        }
+      },
+      "reversed": {
+        "id": "action-0",
+        "type": "choice",
+        "expected": "report_complete",
+        "predicted": "report_complete",
+        "correct": true,
+        "wall_ms": 57.37341707572341,
+        "response": {
+          "model": "kev-latest",
+          "answers": {
+            "decision": {
+              "type": "choice",
+              "choice": "report_complete",
+              "confidence": 0.9232,
+              "probabilities": {
+                "stop": 0.027,
+                "continue_work": 0.0103,
+                "run_tests": 0.0203,
+                "report_complete": 0.9424
+              }
+            }
+          },
+          "usage": {
+            "input_tokens": 83,
+            "output_tokens": 77
+          },
+          "latency_ms": 55.7
+        }
+      }
+    },
+    {
+      "id": "action-1",
+      "stable": true,
+      "original": {
+        "id": "action-1",
+        "type": "choice",
+        "expected": "run_tests",
+        "predicted": "run_tests",
+        "correct": true,
+        "wall_ms": 107.90704202372581,
+        "response": {
+          "model": "kev-latest",
+          "answers": {
+            "decision": {
+              "type": "choice",
+              "choice": "run_tests",
+              "confidence": 0.9308,
+              "probabilities": {
+                "report_complete": 0.0199,
+                "run_tests": 0.9481,
+                "continue_work": 0.0194,
+                "stop": 0.0126
+              }
+            }
+          },
+          "usage": {
+            "input_tokens": 78,
+            "output_tokens": 78
+          },
+          "latency_ms": 106.2
+        }
+      },
+      "reversed": {
+        "id": "action-1",
+        "type": "choice",
+        "expected": "run_tests",
+        "predicted": "run_tests",
+        "correct": true,
+        "wall_ms": 56.840249919332564,
+        "response": {
+          "model": "kev-latest",
+          "answers": {
+            "decision": {
+              "type": "choice",
+              "choice": "run_tests",
+              "confidence": 0.915,
+              "probabilities": {
+                "stop": 0.0136,
+                "continue_work": 0.0361,
+                "run_tests": 0.9363,
+                "report_complete": 0.014
+              }
+            }
+          },
+          "usage": {
+            "input_tokens": 78,
+            "output_tokens": 76
+          },
+          "latency_ms": 55.2
+        }
+      }
+    },
+    {
+      "id": "action-2",
+      "stable": true,
+      "original": {
+        "id": "action-2",
+        "type": "choice",
+        "expected": "continue_work",
+        "predicted": "continue_work",
+        "correct": true,
+        "wall_ms": 106.79079208057374,
+        "response": {
+          "model": "kev-latest",
+          "answers": {
+            "decision": {
+              "type": "choice",
+              "choice": "continue_work",
+              "confidence": 0.9598,
+              "probabilities": {
+                "report_complete": 0.008,
+                "run_tests": 0.0115,
+                "continue_work": 0.9699,
+                "stop": 0.0107
+              }
+            }
+          },
+          "usage": {
+            "input_tokens": 80,
+            "output_tokens": 77
+          },
+          "latency_ms": 105.1
+        }
+      },
+      "reversed": {
+        "id": "action-2",
+        "type": "choice",
+        "expected": "continue_work",
+        "predicted": "continue_work",
+        "correct": true,
+        "wall_ms": 56.57820892520249,
+        "response": {
+          "model": "kev-latest",
+          "answers": {
+            "decision": {
+              "type": "choice",
+              "choice": "continue_work",
+              "confidence": 0.9439,
+              "probabilities": {
+                "stop": 0.0186,
+                "continue_work": 0.9579,
+                "run_tests": 0.015,
+                "report_complete": 0.0085
+              }
+            }
+          },
+          "usage": {
+            "input_tokens": 80,
+            "output_tokens": 77
+          },
+          "latency_ms": 54.9
+        }
+      }
+    },
+    {
+      "id": "action-3",
+      "stable": true,
+      "original": {
+        "id": "action-3",
+        "type": "choice",
+        "expected": "stop",
+        "predicted": "stop",
+        "correct": true,
+        "wall_ms": 106.43783293198794,
+        "response": {
+          "model": "kev-latest",
+          "answers": {
+            "decision": {
+              "type": "choice",
+              "choice": "stop",
+              "confidence": 0.9856,
+              "probabilities": {
+                "report_complete": 0.0012,
+                "run_tests": 0.0028,
+                "continue_work": 0.0068,
+                "stop": 0.9892
+              }
+            }
+          },
+          "usage": {
+            "input_tokens": 78,
+            "output_tokens": 77
+          },
+          "latency_ms": 104.7
+        }
+      },
+      "reversed": {
+        "id": "action-3",
+        "type": "choice",
+        "expected": "stop",
+        "predicted": "stop",
+        "correct": true,
+        "wall_ms": 55.82595895975828,
+        "response": {
+          "model": "kev-latest",
+          "answers": {
+            "decision": {
+              "type": "choice",
+              "choice": "stop",
+              "confidence": 0.9882,
+              "probabilities": {
+                "stop": 0.9911,
+                "continue_work": 0.0065,
+                "run_tests": 0.0011,
+                "report_complete": 0.0013
+              }
+            }
+          },
+          "usage": {
+            "input_tokens": 78,
+            "output_tokens": 77
+          },
+          "latency_ms": 54.1
+        }
+      }
+    }
+  ],
+  "unscored": [
+    {
+      "id": "ambiguous-route",
+      "type": "choice",
+      "expected": null,
+      "predicted": "shipping",
+      "correct": false,
+      "wall_ms": 104.62233296129853,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "choice",
+            "choice": "shipping",
+            "confidence": 0.566,
+            "probabilities": {
+              "billing": 0.217,
+              "shipping": 0.783
+            }
+          }
+        },
+        "usage": {
+          "input_tokens": 47,
+          "output_tokens": 49
+        },
+        "latency_ms": 103.0
+      }
+    },
+    {
+      "id": "missing-evidence",
+      "type": "noul",
+      "expected": null,
+      "predicted": false,
+      "correct": false,
+      "wall_ms": 95.13554105069488,
+      "response": {
+        "model": "kev-latest",
+        "answers": {
+          "decision": {
+            "type": "noul",
+            "noul": 0.0151
+          }
+        },
+        "usage": {
+          "input_tokens": 36,
+          "output_tokens": 22
+        },
+        "latency_ms": 93.6
+      }
+    }
+  ],
+  "validation": [
+    {
+      "request": {
+        "state": "x",
+        "questions": {}
+      },
+      "status": 422,
+      "body": {
+        "detail": [
+          {
+            "type": "too_short",
+            "loc": [
+              "body",
+              "questions"
+            ],
+            "msg": "Dictionary should have at least 1 item after validation, not 0",
+            "input": {},
+            "ctx": {
+              "field_type": "Dictionary",
+              "min_length": 1,
+              "actual_length": 0
+            }
+          }
+        ]
+      }
+    },
+    {
+      "request": {
+        "state": "x",
+        "questions": {
+          "q": {
+            "type": "choice",
+            "criteria": {}
+          }
+        }
+      },
+      "status": 422,
+      "body": {
+        "detail": [
+          {
+            "type": "literal_error",
+            "loc": [
+              "body",
+              "questions",
+              "q",
+              "Noul",
+              "type"
+            ],
+            "msg": "Input should be 'noul'",
+            "input": "choice",
+            "ctx": {
+              "expected": "'noul'"
+            }
+          },
+          {
+            "type": "value_error",
+            "loc": [
+              "body",
+              "questions",
+              "q",
+              "function-after[_check(), Choice]"
+            ],
+            "msg": "Value error, criteria must have 1..255 options",
+            "input": {
+              "type": "choice",
+              "criteria": {}
+            },
+            "ctx": {
+              "error": {}
+            }
+          },
+          {
+            "type": "literal_error",
+            "loc": [
+              "body",
+              "questions",
+              "q",
+              "Score",
+              "type"
+            ],
+            "msg": "Input should be 'score'",
+            "input": "choice",
+            "ctx": {
+              "expected": "'score'"
+            }
+          },
+          {
+            "type": "list_type",
+            "loc": [
+              "body",
+              "questions",
+              "q",
+              "Score",
+              "criteria"
+            ],
+            "msg": "Input should be a valid list",
+            "input": {}
+          }
+        ]
+      }
+    },
+    {
+      "request": {
+        "state": "x",
+        "questions": {
+          "q": {
+            "type": "score",
+            "criteria": []
+          }
+        }
+      },
+      "status": 422,
+      "body": {
+        "detail": [
+          {
+            "type": "literal_error",
+            "loc": [
+              "body",
+              "questions",
+              "q",
+              "Noul",
+              "type"
+            ],
+            "msg": "Input should be 'noul'",
+            "input": "score",
+            "ctx": {
+              "expected": "'noul'"
+            }
+          },
+          {
+            "type": "dict_type",
+            "loc": [
+              "body",
+              "questions",
+              "q",
+              "Noul",
+              "criteria"
+            ],
+            "msg": "Input should be a valid dictionary",
+            "input": []
+          },
+          {
+            "type": "literal_error",
+            "loc": [
+              "body",
+              "questions",
+              "q",
+              "function-after[_check(), Choice]",
+              "type"
+            ],
+            "msg": "Input should be 'choice'",
+            "input": "score",
+            "ctx": {
+              "expected": "'choice'"
+            }
+          },
+          {
+            "type": "dict_type",
+            "loc": [
+              "body",
+              "questions",
+              "q",
+              "function-after[_check(), Choice]",
+              "criteria"
+            ],
+            "msg": "Input should be a valid dictionary",
+            "input": []
+          },
+          {
+            "type": "too_short",
+            "loc": [
+              "body",
+              "questions",
+              "q",
+              "Score",
+              "criteria"
+            ],
+            "msg": "List should have at least 1 item after validation, not 0",
+            "input": [],
+            "ctx": {
+              "field_type": "List",
+              "min_length": 1,
+              "actual_length": 0
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "final_models": {
+    "models": [
+      {
+        "name": "kev-latest",
+        "description": "Kev pointer head on Qwen/Qwen3.5-4B-Base, serving jaredpalmer/kev-4b@v1.0 at temperature 2.41",
+        "release_date": "2026-10-23",
+        "run": "jaredpalmer/kev-4b@v1.0",
+        "base": "Qwen/Qwen3.5-4B-Base",
+        "lora": 16,
+        "device": "mps",
+        "backend": "mlx",
+        "dtype": "bfloat16",
+        "temperature": 2.406050072164233,
+        "max_state_tokens": 65536,
+        "truncate_states": false,
+        "cuda_graphs": null,
+        "prefix_cache": {
+          "size": 4,
+          "min_state_tokens": 0,
+          "max_tokens": 65536,
+          "hits": 31,
+          "misses": 129,
+          "cached_states": 4,
+          "oom_retries": 0
+        },
+        "batches": {
+          "count": 160,
+          "requests": 160,
+          "queued": 0
+        }
+      },
+      {
+        "name": "jev-latest",
+        "description": "Kev pointer head on Qwen/Qwen3.5-4B-Base, serving jaredpalmer/kev-4b@v1.0 at temperature 2.41",
+        "release_date": "2026-10-23",
+        "run": "jaredpalmer/kev-4b@v1.0",
+        "base": "Qwen/Qwen3.5-4B-Base",
+        "lora": 16,
+        "device": "mps",
+        "backend": "mlx",
+        "dtype": "bfloat16",
+        "temperature": 2.406050072164233,
+        "max_state_tokens": 65536,
+        "truncate_states": false,
+        "cuda_graphs": null,
+        "prefix_cache": {
+          "size": 4,
+          "min_state_tokens": 0,
+          "max_tokens": 65536,
+          "hits": 31,
+          "misses": 129,
+          "cached_states": 4,
+          "oom_retries": 0
+        },
+        "batches": {
+          "count": 160,
+          "requests": 160,
+          "queued": 0
+        }
+      }
+    ]
+  },
+  "child_peak_rss_bytes": 16840507392,
+  "child_exit_code": 0,
+  "driver_python": "3.15.0 (main, Oct  9 2026, 11:16:41) [Clang 17.0.0 (clang-1700.6.4.2)]",
+  "runtime_python": "3.13.17 (main, Oct 21 2026, 13:48:20) [Clang 17.0.0 (clang-1700.6.4.2)]",
+  "runtime_packages": {
+    "torch": "2.8.0",
+    "transformers": "5.17.0",
+    "peft": "0.21.0",
+    "mlx": "0.32.2",
+    "mlx-lm": "0.31.3",
+    "huggingface-hub": "1.32.0"
+  }
+}

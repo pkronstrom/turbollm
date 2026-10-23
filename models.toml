@@ -27,6 +27,9 @@ max_concurrent_requests = 8
 # ASR runs on its own port so it can sit alongside an LLM on 8899.
 port = 8900
 
+[defaults.kev]
+port = 8901
+
 # --- Sampler presets ---------------------------------------------------------
 # Reference these from models via `sampling = "<preset-name>"`. The provider
 # resolves the preset to individual --temp / --top-p / --top-k flags at serve
@@ -202,6 +205,8 @@ sampling = "qwen38-thinking"
 kv_quant = "off"
 
 [models.qwen38-27b-oq6e-mtp.server]
+keep_alive = true
+ttl_seconds = 1800
 max_concurrent_requests = 1
 mtp_enabled = true
 turboquant_kv_enabled = false
@@ -348,6 +353,24 @@ mlock = true
 # server picks the model per-request via the API `model=` field. We list them
 # like LLMs so `turbo pull`, `turbo serve`, and `turbo transcribe` resolve
 # aliases uniformly.
+
+[models.kev-4b]
+name = "Kev 4B typed decisions"
+backend = "kev"
+hf_repo = "jaredpalmer/kev-4b"
+revision = "6cfce5c2fa4b4bd64026336ab649c5ca78857d52"
+local_path = "~/.models/jaredpalmer/kev-4b"
+size_gb = 8.2
+min_memory_gb = 20
+tool_use = false
+can_reason = false
+tags = ["decisions", "choice", "noul", "score", "mlx"]
+context_default = 65536
+context_max = 65536
+
+[models.kev-4b.server]
+keep_alive = true
+startup_timeout = 120
 
 [models.parakeet-v3]
 name = "parakeet-v3"

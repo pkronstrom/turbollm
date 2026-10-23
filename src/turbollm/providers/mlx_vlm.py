@@ -5,7 +5,7 @@ from pathlib import Path
 import click
 from rich.console import Console
 
-from turbollm.hf_download import configured_path, quiet_hf, translate_hf_errors
+from turbollm.hf_download import configured_path, local_revision_matches, revision_kwargs, quiet_hf, translate_hf_errors
 from turbollm.registry import _hf_snapshot_path
 
 console = Console()
@@ -94,7 +94,7 @@ class MlxVlmProvider:
 
         repo = model["hf_repo"]
         local_path = configured_path(model, "local_path")
-        kwargs = {"repo_id": repo}
+        kwargs = {"repo_id": repo, **revision_kwargs(model)}
         if local_path is not None:
             local_path.mkdir(parents=True, exist_ok=True)
             kwargs["local_dir"] = str(local_path)
@@ -105,7 +105,7 @@ class MlxVlmProvider:
         draft_repo = model.get("draft_hf_repo")
         if draft_repo:
             draft_path = configured_path(model, "draft_local_path")
-            draft_kwargs = {"repo_id": draft_repo}
+            draft_kwargs = {"repo_id": draft_repo, **revision_kwargs(model, "draft_revision")}
             if draft_path is not None:
                 draft_path.mkdir(parents=True, exist_ok=True)
                 draft_kwargs["local_dir"] = str(draft_path)
@@ -169,24 +169,24 @@ class MlxVlmProvider:
 
     def _model_path(self, model: dict) -> Path | None:
         local = configured_path(model, "local_path")
-        if local is not None and self._has_safetensors(local):
+        if local is not None and self._has_safetensors(local) and local_revision_matches(model, local):
             return local
 
         repo = model["hf_repo"]
-        snap = _hf_snapshot_path(repo)
+        snap = _hf_snapshot_path(repo, **revision_kwargs(model))
         if snap and self._has_safetensors(snap):
             return snap
         return None
 
     def _draft_model_path(self, model: dict) -> Path | None:
         local = configured_path(model, "draft_local_path")
-        if local is not None and self._has_safetensors(local):
+        if local is not None and self._has_safetensors(local) and local_revision_matches(model, local, prefix="draft_"):
             return local
 
         draft_repo = model.get("draft_hf_repo")
         if not draft_repo:
             return None
-        snap = _hf_snapshot_path(draft_repo)
+        snap = _hf_snapshot_path(draft_repo, **revision_kwargs(model, "draft_revision"))
         if snap and self._has_safetensors(snap):
             return snap
         return None

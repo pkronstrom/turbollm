@@ -78,8 +78,7 @@ class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard !defaults.bool(forKey: App.migrationNoticeFlagKey) else { return }
 
         // Check permissions-state asynchronously to avoid blocking launch.
-        DispatchQueue.global(qos: .utility).async {
-            let state = MenuBuilder.permissionsState()
+        MenuBuilder.refreshPermissions { state in
             guard state.microphone == .notDetermined else {
                 // Already granted (or denied) — no migration notice needed.
                 UserDefaults.standard.set(true, forKey: App.migrationNoticeFlagKey)
@@ -107,6 +106,9 @@ class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func refreshMenu() {
+        MenuBuilder.refreshPermissions { [weak self] _ in
+            self?.rebuildMenuFromState()
+        }
         registry.current { [weak self] workflows, error in
             guard let self else { return }
             self.state.workflows = workflows
@@ -140,6 +142,9 @@ class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func menuNeedsUpdate(_ menu: NSMenu) {
         guard menu === statusItem.menu else { return }
         rebuildMenuFromState()
+        MenuBuilder.refreshPermissions { [weak self] _ in
+            self?.rebuildMenuFromState()
+        }
     }
 
     /// T-21: Shell out to `turbo workflows run <name>` unconditionally.

@@ -58,6 +58,10 @@ turbo ls -a
 # Pull a model (alias, owner/repo, or HuggingFace URL)
 turbo pull qwen38-27b-oq6e-mtp
 
+# Refresh downloaded weights, optionally at a specific upstream revision
+turbo pull qwen38-27b-oq6e-mtp --update
+turbo pull qwen38-27b-oq6e-mtp --revision COMMIT
+
 # List downloaded models
 turbo ls
 
@@ -67,6 +71,70 @@ turbo serve qwen38-27b-oq6e-mtp
 # Remove a model
 turbo rm qwen38-27b-oq6e-mtp
 ```
+
+### Keep models warm
+
+The bundled Qwen3.8 and Kev 4B profiles keep auto-started servers running between
+commands. Qwen unloads idle model weights after 30 minutes through oMLX's native
+TTL; its server remains available. Kev remains resident until explicitly stopped.
+Other profiles retain their existing per-command lifecycle unless configured
+with `server.keep_alive = true`.
+
+```bash
+turbo serve qwen38-27b-oq6e-mtp --background
+turbo pi qwen38-27b-oq6e-mtp --thinking low
+turbo omp-lean qwen38-27b-oq6e-mtp
+turbo status --port 8899
+turbo stop --port 8899
+```
+
+Background startup refuses occupied ports. Stop verifies Turbo's process identity
+and only stops its managed server. Foreground `turbo serve` still stops on Ctrl-C.
+Matching attached clients use the server's recorded context; explicit smaller
+client limits remain smaller, and incompatible model/revision selections fail.
+
+Existing user registries are preserved. To enable warm reuse there, add
+`keep_alive = true` under the chosen model's `[server]` table. For oMLX, set
+`ttl_seconds = 1800` in that table if idle model unloading is desired. oMLX
+context selection limits accepted prompt tokens; it does not preallocate a
+context-sized KV buffer.
+
+`pull --update` checks upstream even when files exist. `--revision` selects that
+download only; set `revision = "COMMIT"` in the model registry to pin future
+serving too. Stop a model before refreshing its local files. Local pinned weights
+must have matching Hub download metadata; manually copied files without provenance
+are not reported as a verified pinned download.
+
+### Local typed decisions with Kev 4B
+
+Kev answers finite choices, yes/no questions (`noul`), and ordered scores. It is
+a separate API and is excluded from chat harness pickers. Install the official
+runtime from source; the unrelated PyPI package named `kev` is not supported:
+
+```bash
+git clone https://github.com/jaredpalmer/kev.git ~/.turbollm/runtimes/kev
+cd ~/.turbollm/runtimes/kev
+uv sync --extra serve --no-dev
+turbo pull kev-4b
+turbo decide /path/to/request.json
+turbo status --port 8901
+turbo stop --port 8901
+```
+
+The model and base dependency download only through `pull`; inference runs
+offline on MLX. `decide` accepts a JSON file or `-` for stdin, emits JSON on stdout,
+and sends status/errors to stderr. It auto-starts Kev on loopback port 8901.
+The bundled registry entry is required in existing user registries too.
+
+Example request:
+
+```json
+{"state":"The invoice was paid.","questions":{"paid":{"type":"noul","instructions":"Has payment completed?"}}}
+```
+
+See the [Kev benchmark](docs/benchmarks/2026-10-23-kev-4b.md) and the
+[complete example](tools/benchmarks/kev-example.json). On the local smoke fixture,
+4B improved accuracy over the retained 0.8B checkpoint but took longer per request.
 
 ## Harnesses (agent CLIs)
 

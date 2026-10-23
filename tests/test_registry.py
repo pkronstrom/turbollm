@@ -78,6 +78,20 @@ def test_hf_snapshot_path_returns_none_when_only_stray_files(tmp_path, monkeypat
     assert registry._hf_snapshot_path("org/repo") is None
 
 
+def test_pinned_snapshot_uses_revision_not_newest_directory(tmp_path, monkeypatch):
+    monkeypatch.setattr(registry, "HF_CACHE", tmp_path)
+    cache = tmp_path / "models--org--repo"
+    first = cache / "snapshots" / "abc123"
+    first.mkdir(parents=True)
+    (cache / "snapshots" / "newer").mkdir()
+    (cache / "refs").mkdir()
+    (cache / "refs" / "v1").write_text("abc123")
+    assert registry._hf_snapshot_path("org/repo", revision="v1") == first
+    assert registry._hf_snapshot_path("org/repo", revision="abc123") == first
+    assert registry._hf_snapshot_path("org/repo", revision="missing") is None
+    assert registry._hf_snapshot_path("org/repo", revision="../refs") is None
+
+
 def test_parse_model_input_passes_through_bare_repo():
     assert registry.parse_model_input("org/repo") == "org/repo"
 

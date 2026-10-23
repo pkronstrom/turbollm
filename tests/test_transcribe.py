@@ -81,7 +81,7 @@ def _invoke_transcribe(tmp_path, extra_args=(), response_json=None):
 
     runner = CliRunner()
     with (
-        patch.object(turbo_cli, "_get_running_model", return_value=None),
+        patch.object(turbo_cli, "_get_running_model", return_value=FAKE_MODEL),
         patch.object(turbo_cli, "resolve_model", return_value=FAKE_MODEL),
         patch.object(turbo_cli, "_get_provider_for", return_value=_FakeProvider()),
         patch.object(turbo_cli, "_server_is_running", return_value=True),
@@ -269,7 +269,7 @@ def test_text_format_requests_verbose_json(tmp_path):
 
     runner = CliRunner()
     with (
-        patch.object(turbo_cli, "_get_running_model", return_value=None),
+        patch.object(turbo_cli, "_get_running_model", return_value=FAKE_MODEL),
         patch.object(turbo_cli, "resolve_model", return_value=FAKE_MODEL),
         patch.object(turbo_cli, "_get_provider_for", return_value=_FakeProvider()),
         patch.object(turbo_cli, "_server_is_running", return_value=True),
@@ -308,7 +308,7 @@ def test_subtitle_format_requests_and_emits_raw_payload(
 
     runner = CliRunner()
     with (
-        patch.object(turbo_cli, "_get_running_model", return_value=None),
+        patch.object(turbo_cli, "_get_running_model", return_value=FAKE_MODEL),
         patch.object(turbo_cli, "resolve_model", return_value=FAKE_MODEL),
         patch.object(turbo_cli, "_get_provider_for", return_value=_FakeProvider()),
         patch.object(turbo_cli, "_server_is_running", return_value=True),
@@ -337,7 +337,7 @@ def test_split_mode_refuses_srt_format(tmp_path):
 
     runner = CliRunner()
     with (
-        patch.object(turbo_cli, "_get_running_model", return_value=None),
+        patch.object(turbo_cli, "_get_running_model", return_value=FAKE_MODEL),
         patch.object(turbo_cli, "resolve_model", return_value=FAKE_MODEL),
         patch.object(turbo_cli, "_get_provider_for", return_value=_FakeProvider()),
         patch.object(turbo_cli, "_server_is_running", return_value=True),
@@ -355,7 +355,7 @@ def test_split_mode_refuses_vtt_format(tmp_path):
 
     runner = CliRunner()
     with (
-        patch.object(turbo_cli, "_get_running_model", return_value=None),
+        patch.object(turbo_cli, "_get_running_model", return_value=FAKE_MODEL),
         patch.object(turbo_cli, "resolve_model", return_value=FAKE_MODEL),
         patch.object(turbo_cli, "_get_provider_for", return_value=_FakeProvider()),
         patch.object(turbo_cli, "_server_is_running", return_value=True),
@@ -376,7 +376,7 @@ def test_split_mode_json_format_still_supported(tmp_path):
 
     runner = CliRunner()
     with (
-        patch.object(turbo_cli, "_get_running_model", return_value=None),
+        patch.object(turbo_cli, "_get_running_model", return_value=FAKE_MODEL),
         patch.object(turbo_cli, "resolve_model", return_value=FAKE_MODEL),
         patch.object(turbo_cli, "_get_provider_for", return_value=_FakeProvider()),
         patch.object(turbo_cli, "_server_is_running", return_value=True),
@@ -414,7 +414,7 @@ def test_ffmpeg_convert_failure_cleans_up_temp_file_and_prints_clean_error(tmp_p
 
     runner = CliRunner()
     with (
-        patch.object(turbo_cli, "_get_running_model", return_value=None),
+        patch.object(turbo_cli, "_get_running_model", return_value=FAKE_MODEL),
         patch.object(turbo_cli, "resolve_model", return_value=FAKE_MODEL),
         patch.object(turbo_cli, "_get_provider_for", return_value=_FakeProvider()),
         patch.object(turbo_cli, "_server_is_running", return_value=True),

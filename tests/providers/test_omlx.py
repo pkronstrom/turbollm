@@ -329,3 +329,105 @@ class TestPull:
 
         download.assert_called_once_with(fake_model["hf_repo"], local_dir)
         ensure_symlink.assert_called_once_with(fake_model, snapshot)
+
+
+def test_native_context_sampling_residency_preserve_unrelated(tmp_path, monkeypatch):
+    settings_path = tmp_path / "model_settings.json"
+    settings_path.write_text(json.dumps({"extra": 1, "models": {
+        "test": {"force_sampling": False, "custom": 42, "max_tokens": 500},
+        "other": {"ttl_seconds": 10},
+    }}))
+    monkeypatch.setattr("turbollm.providers.omlx.OMLX_MODEL_SETTINGS_PATH", settings_path)
+    model = {"hf_repo": "org/test", "backend": "omlx", "context_default": 64000,
+             "sampling": "test", "server": {
+                 "max_context_window": 96000, "ttl_seconds": 300, "is_pinned": True,
+                 "enable_thinking": False, "preserve_thinking": True,
+                 "default_chat_template_kwargs": {"custom": "value"},
+             }}
+    with patch("turbollm.providers.omlx.effective_sampling", return_value={
+        "temperature": 0.6, "repeat_penalty": 1.1,
+    }):
+        OmlxProvider().build_serve_cmd(model, 8899)
+    result = json.loads(settings_path.read_text())
+    assert result["extra"] == 1
+    assert result["models"]["other"] == {"ttl_seconds": 10}
+    assert result["models"]["test"] == {
+        "force_sampling": False, "custom": 42, "max_tokens": 500,
+        "max_context_window": 96000, "temperature": 0.6, "repetition_penalty": 1.1,
+        "ttl_seconds": 300, "is_pinned": True, "enable_thinking": False,
+        "preserve_thinking": True, "chat_template_kwargs": {"custom": "value"},
+    }
+
+
+def test_atomic_settings_failure_leaves_original(tmp_path, monkeypatch):
+    settings_path = tmp_path / "model_settings.json"
+    original = '{"models":{"other":{"ttl_seconds":10}}}'
+    settings_path.write_text(original)
+    monkeypatch.setattr("turbollm.providers.omlx.OMLX_MODEL_SETTINGS_PATH", settings_path)
+    with patch("turbollm.providers.omlx.os.replace", side_effect=OSError("disk failure")):
+        with pytest.raises(click.ClickException, match="disk failure"):
+            OmlxProvider().build_serve_cmd({"hf_repo": "org/test", "server": {"mtp_enabled": True}}, 8899)
+    assert settings_path.read_text() == original
+    assert set(tmp_path.iterdir()) == {settings_path, settings_path.with_suffix(".json.lock")}
+
+
+def test_custom_model_dir_controls_symlink_and_serve(tmp_path):
+    model = {"hf_repo": "org/test", "server": {"model_dir": str(tmp_path)}}
+    provider = OmlxProvider()
+    assert provider._symlink_path(model) == tmp_path / "org" / "test"
+    cmd = provider.build_serve_cmd(model, 8899)
+    assert cmd[cmd.index("--model-dir") + 1] == str(tmp_path)
+
+
+def test_output_limit_does_not_reset_native_prompt_limit(tmp_path, monkeypatch):
+    settings_path = tmp_path / "model_settings.json"
+    settings_path.write_text(json.dumps({"models": {"test": {"max_context_window": 96000}}}))
+    monkeypatch.setattr("turbollm.providers.omlx.OMLX_MODEL_SETTINGS_PATH", settings_path)
+    OmlxProvider().build_serve_cmd({"hf_repo": "org/test", "server": {"max_tokens": 4096}}, 8899)
+    assert json.loads(settings_path.read_text())["models"]["test"] == {
+        "max_context_window": 96000, "max_tokens": 4096,
+    }
+
+
+def test_concurrent_native_settings_writers_preserve_each_model(tmp_path, monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+
+    settings_path = tmp_path / "model_settings.json"
+    settings_path.write_text('{"models": {"original": {"ttl_seconds": 60}}}')
+    monkeypatch.setattr("turbollm.providers.omlx.OMLX_MODEL_SETTINGS_PATH", settings_path)
+    barrier = Barrier(8)
+
+    def write(index):
+        barrier.wait(timeout=5)
+        OmlxProvider().build_serve_cmd({
+            "hf_repo": f"org/model{index}", "server": {"ttl_seconds": index + 100},
+        }, 8899)
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        list(pool.map(write, range(8)))
+    result = json.loads(settings_path.read_text())["models"]
+    assert result == {"original": {"ttl_seconds": 60}, **{
+        f"model{index}": {"ttl_seconds": index + 100} for index in range(8)
+    }}
+
+
+def test_unconfigured_model_does_not_write_settings(tmp_path, monkeypatch):
+    settings_path = tmp_path / "model_settings.json"
+    monkeypatch.setattr("turbollm.providers.omlx.OMLX_MODEL_SETTINGS_PATH", settings_path)
+    OmlxProvider().build_serve_cmd({"hf_repo": "org/test", "server": {}}, 8899)
+    assert not settings_path.exists()
+
+
+def test_template_defaults_deep_merge_preserves_unmanaged_keys(tmp_path, monkeypatch):
+    settings = tmp_path / "settings.json"
+    settings.write_text(json.dumps({"models": {"test": {"chat_template_kwargs": {
+        "enable_thinking": True, "custom": 42, "nested": {"keep": 1, "change": 2},
+    }}}}))
+    monkeypatch.setattr("turbollm.providers.omlx.OMLX_MODEL_SETTINGS_PATH", settings)
+    OmlxProvider().build_serve_cmd({"hf_repo": "org/test", "server": {
+        "default_chat_template_kwargs": {"enable_thinking": False, "nested": {"change": 3}},
+    }}, 8899)
+    assert json.loads(settings.read_text())["models"]["test"]["chat_template_kwargs"] == {
+        "enable_thinking": False, "custom": 42, "nested": {"keep": 1, "change": 3},
+    }

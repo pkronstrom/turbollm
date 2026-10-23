@@ -1,4 +1,6 @@
+import copy
 import tomllib
+from functools import lru_cache
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -22,9 +24,21 @@ def _load_toml(path: Path) -> dict:
         raise click.UsageError(f"Invalid TOML in {path}: {e}")
 
 
+@lru_cache(maxsize=8)
+def _cached_toml(path: Path, signature: tuple) -> dict:
+    return _load_toml(path)
+
+
+def _read_registry(path: Path) -> dict:
+    stat = path.stat()
+    signature = (stat.st_ino, stat.st_mtime_ns, stat.st_ctime_ns, stat.st_size)
+    # Callers customize nested model dictionaries; never share mutable cache data.
+    return copy.deepcopy(_cached_toml(path, signature))
+
+
 def _bootstrap_user_registry() -> dict | None:
     if USER_TOML.exists():
-        return _load_toml(USER_TOML)
+        return _read_registry(USER_TOML)
     if not BUNDLED_TOML.exists():
         return None
 
@@ -166,10 +180,29 @@ def effective_context(model: dict) -> int:
     the wrong size / server rejects mid-session".
     """
     srv = model.get("server", {})
+    if model.get("backend") == "omlx":
+        return int(srv.get("max_context_window") or model.get("context_default") or 32768)
     v = srv.get("max_tokens") or srv.get("context")
     if v:
         return int(v)
     return context_default_tokens(model)
+
+
+def with_context_window(model: dict, tokens: int) -> dict:
+    """Apply a context policy to the provider and every harness, without mutation."""
+    if tokens <= 0:
+        raise click.BadParameter("context window must be positive")
+    result = copy.deepcopy(model)
+    result["context_default"] = tokens
+    server = result.setdefault("server", {})
+    backend = model.get("backend") or get_defaults().get("backend", "vllm-mlx")
+    key = "context" if backend == "gguf" else "max_context_window" if backend == "omlx" else "max_tokens"
+    server[key] = tokens
+    if backend != "omlx" and "max_request_tokens" in server:
+        server["max_request_tokens"] = tokens
+    for harness, field in (("pi", "context_window"), ("omp", "context_window"), ("opencode", "context_length")):
+        result.setdefault(harness, {})[field] = tokens
+    return result
 
 
 def context_default_tokens(model: dict) -> int:
@@ -197,11 +230,26 @@ def _hf_cache_path(hf_repo: str) -> Path:
     return HF_CACHE / f"models--{hf_repo.replace('/', '--')}"
 
 
-def _hf_snapshot_path(hf_repo: str) -> Path | None:
+def _hf_snapshot_path(hf_repo: str, revision: str | None = None) -> Path | None:
     cache_dir = _hf_cache_path(hf_repo)
     snapshots = cache_dir / "snapshots"
     if not snapshots.exists():
         return None
+    if revision:
+        relative = Path(revision)
+        if relative.is_absolute() or ".." in relative.parts:
+            return None
+        direct = snapshots / revision
+        if direct.is_dir():
+            return direct
+        try:
+            commit = (cache_dir / "refs" / revision).read_text().strip()
+        except OSError:
+            return None
+        if not commit or Path(commit).name != commit or commit in (".", ".."):
+            return None
+        resolved = snapshots / commit
+        return resolved if resolved.is_dir() else None
     dirs = sorted(
         (d for d in snapshots.iterdir() if d.is_dir()),
         key=lambda d: d.stat().st_mtime,
