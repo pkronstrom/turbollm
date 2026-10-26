@@ -121,6 +121,9 @@ turbo status --port 8901
 turbo stop --port 8901
 ```
 
+`kev-0.8b` is the smaller, less accurate Kev 1.0 checkpoint (about 2 GB resident);
+pull it the same way and select it with `--model kev-0.8b` or `turbo serve kev-0.8b`.
+
 The model and base dependency download only through `pull`; inference runs
 offline on MLX. `decide` accepts a JSON file or `-` for stdin, emits JSON on stdout,
 and sends status/errors to stderr. It auto-starts Kev on loopback port 8901.

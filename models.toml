@@ -372,6 +372,24 @@ context_max = 65536
 keep_alive = true
 startup_timeout = 120
 
+[models."kev-0.8b"]
+name = "Kev 0.8B typed decisions"
+backend = "kev"
+hf_repo = "jaredpalmer/kev-0.8b"
+revision = "bf75a6a8848ea6960ff2ed108d9ed44c2941174f"
+local_path = "~/.models/jaredpalmer/kev-0.8b"
+size_gb = 1.8
+min_memory_gb = 6
+tool_use = false
+can_reason = false
+tags = ["decisions", "choice", "noul", "score", "mlx"]
+context_default = 65536
+context_max = 65536
+
+[models."kev-0.8b".server]
+keep_alive = true
+startup_timeout = 120
+
 [models.parakeet-v3]
 name = "parakeet-v3"
 backend = "mlx-audio"
