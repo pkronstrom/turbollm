@@ -20,7 +20,7 @@ def write_checkpoint(path, base="Qwen/base", revision="base-sha"):
         (metadata / (name + ".metadata")).write_text(ADAPTER_SHA + "\netag\n0\n")
     head = (path / "head.pt").stat()
     (path / ".turbollm-kev-head.json").write_text(json.dumps({
-        "head_signature": [head.st_dev, head.st_ino, head.st_size, head.st_mtime_ns, head.st_ctime_ns],
+        "head_signature": [head.st_ino, head.st_size, head.st_mtime_ns, head.st_ctime_ns],
         "base": base, "base_revision": revision,
     }))
 
@@ -148,6 +148,29 @@ def test_replaced_head_invalidates_verified_metadata(tmp_path):
     write_base(tmp_path / "hf/hub/models--Qwen--base/snapshots/base-sha")
     (adapter / "head.pt").write_bytes(b"changed head")
     assert not KevProvider().is_downloaded(m)
+
+
+def test_volume_renumbered_at_boot_keeps_verified_head(tmp_path, monkeypatch):
+    m = model(tmp_path)
+    write_checkpoint(Path(m["local_path"]))
+    write_base(tmp_path / "hf/hub/models--Qwen--base/snapshots/base-sha")
+    real_stat = Path.stat
+
+    class Renumbered:
+        # macOS assigns st_dev at mount time, so it changes across reboots.
+        def __init__(self, result):
+            self._result = result
+
+        def __getattr__(self, name):
+            value = getattr(self._result, name)
+            return value + 2 if name == "st_dev" else value
+
+    def stat(self, *args, **kwargs):
+        result = real_stat(self, *args, **kwargs)
+        return Renumbered(result) if self.name == "head.pt" else result
+
+    monkeypatch.setattr(Path, "stat", stat)
+    assert KevProvider().is_downloaded(m)
 
 
 def test_unverified_head_requires_explicit_pull(tmp_path):

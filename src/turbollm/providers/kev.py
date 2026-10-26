@@ -23,7 +23,8 @@ def _adapter_complete(path: Path) -> bool:
 
 def _head_signature(adapter: Path) -> list[int]:
     stat = (adapter / "head.pt").stat()
-    return [stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns]
+    # No st_dev: macOS renumbers volumes at boot, which would hide pulled models.
+    return [stat.st_ino, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns]
 
 
 def _base_complete(path: Path) -> bool:
